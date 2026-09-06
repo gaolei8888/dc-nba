@@ -17,7 +17,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { nbaGet, statsUrl, toRows, DATA_DIR } from '../server/nbaClient.mjs';
 import {
-  buildGames, computeElo, carryOver, ELO_BASE, ELO_HOME_ADV, ELO_PER_POINT,
+  buildGames, computeElo, carryOver, rotationImpact, fitRosterImpact,
+  ELO_BASE, ELO_HOME_ADV, ELO_PER_POINT,
 } from '../server/ratings.mjs';
 
 const HIST_DIR = path.join(DATA_DIR, 'history');
@@ -57,6 +58,79 @@ const seasonTeamAdv = (season) => cached(`teamadv_${season}`, async () => {
   }));
   return toRows(j);
 });
+
+const PLAYER_EXTRA = {
+  College: '', Country: '', DraftPick: '', DraftYear: '', ISTRound: '', Weight: '',
+};
+
+const seasonPlayers = (season) => cached(`players_${season}`, async () => {
+  const base = toRows(await nbaGet(statsUrl('leaguedashplayerstats', {
+    ...DASH_BASE, ...PLAYER_EXTRA, MeasureType: 'Base', PerMode: 'PerGame', Season: season,
+  })));
+  const adv = toRows(await nbaGet(statsUrl('leaguedashplayerstats', {
+    ...DASH_BASE, ...PLAYER_EXTRA, MeasureType: 'Advanced', PerMode: 'PerGame', Season: season,
+  })));
+  const pieById = new Map(adv.map((r) => [r.PLAYER_ID, Number(r.PIE) || 0]));
+  return base.map((b) => ({
+    playerId: b.PLAYER_ID,
+    teamId: b.TEAM_ID,
+    min: Number(b.MIN) || 0,
+    gp: Number(b.GP) || 0,
+    totalMin: (Number(b.MIN) || 0) * (Number(b.GP) || 0),
+    pie: pieById.get(b.PLAYER_ID) ?? 0,
+  }));
+});
+
+/** 某赛季 30 队的名单（球员 id 集合）。30 次请求，缓存后不再抓。 */
+const seasonRosters = (season, teamIds) => cached(`rosters_${season}`, async () => {
+  const out = {};
+  for (const id of teamIds) {
+    const rows = toRows(await nbaGet(statsUrl('commonteamroster', {
+      LeagueID: '00', Season: season, TeamID: id,
+    })), 'CommonTeamRoster');
+    out[id] = rows.map((r) => r.PLAYER_ID);
+  }
+  return out;
+});
+
+/**
+ * 算出某赛季各队的阵容更迭修正（每场分）。
+ *
+ * 注意：历史赛季的名单接口返回的是该赛季全程名单，含交易截止日加盟的球员，
+ * 用来预测赛季初的比赛存在轻微信息泄漏。因此这里测出的收益是乐观上界。
+ */
+async function turnoverForSeason(season, priorSeason) {
+  const priorPlayers = await seasonPlayers(priorSeason);
+  const priorAdv = await seasonTeamAdv(priorSeason);
+  const teamIds = priorAdv.map((r) => r.TEAM_ID);
+  const rosters = await seasonRosters(season, teamIds);
+
+  // 上赛季各队实际阵容 -> 上赛季净效率，拟合换算系数
+  const priorByTeam = new Map(teamIds.map((id) => [id, []]));
+  for (const p of priorPlayers) {
+    if (p.gp > 0) priorByTeam.get(p.teamId)?.push(p);
+  }
+  const fit = fitRosterImpact(priorAdv.map((r) => ({
+    raw: rotationImpact(priorByTeam.get(r.TEAM_ID) ?? []),
+    net: Number(r.NET_RATING) || 0,
+  })));
+
+  // 新赛季名单（用上赛季的产出数据衡量）
+  const statById = new Map(priorPlayers.map((p) => [p.playerId, p]));
+  const deltas = new Map();
+  for (const id of teamIds) {
+    const now = (rosters[id] ?? []).map((pid) => statById.get(pid)).filter(Boolean);
+    deltas.set(id, rotationImpact(now) - rotationImpact(priorByTeam.get(id) ?? []));
+  }
+  const mean = [...deltas.values()].reduce((a, b) => a + b, 0) / deltas.size;
+
+  const paceById = new Map(priorAdv.map((r) => [r.TEAM_ID, Number(r.PACE) || 100]));
+  const pts = new Map();
+  for (const [id, d] of deltas) {
+    pts.set(id, fit.b * (d - mean) * (paceById.get(id) / 100));
+  }
+  return { pts, r2: fit.r2 };
+}
 
 // ---------------------------------------------------------------- 指标
 
@@ -123,6 +197,7 @@ async function replaySeason(season, priorSeason, opts) {
   const {
     inSeasonElo = false, k = 20, wElo = 0.55, wNet = 0.45,
     spreadSd = 12, homeAdv = 2.4, restWeight = 1, priorDecay = 0,
+    turnoverWeight = 0,
   } = opts;
 
   const priorGames = buildGames(await seasonGames(priorSeason));
@@ -138,6 +213,12 @@ async function replaySeason(season, priorSeason, opts) {
   for (const r of priorAdv) {
     netPts.set(r.TEAM_ID, Number(r.NET_RATING) * (Number(r.PACE) / 100));
   }
+
+  // 阵容更迭修正（turnoverWeight = 0 时完全不参与）
+  const turnover = turnoverWeight
+    ? (await turnoverForSeason(season, priorSeason)).pts
+    : new Map();
+  const getTurnover = (id) => (turnover.get(id) ?? 0) * turnoverWeight;
 
   const elo = new Map(Object.entries(eloStart).map(([id, v]) => [Number(id), v]));
   const getElo = (id) => elo.get(id) ?? ELO_BASE;
@@ -168,7 +249,8 @@ async function replaySeason(season, priorSeason, opts) {
       const n = gp(id);
       const wn = priorDecay > 0 ? wNet * (priorDecay / (priorDecay + n)) : wNet;
       const ws = wElo + wn || 1;
-      return (wElo * ((getElo(id) - ELO_BASE) / ELO_PER_POINT) + wn * getNet(id)) / ws;
+      return (wElo * ((getElo(id) - ELO_BASE) / ELO_PER_POINT) + wn * getNet(id)) / ws
+        + getTurnover(id);
     };
     const hca = g.neutral ? 0 : homeAdv;
     const margin = strength(g.home.teamId) - strength(g.away.teamId) + hca + restPts;
@@ -220,14 +302,12 @@ async function main() {
 
   const variants = [
     { name: '当前模型（评级冻结）', opts: { inSeasonElo: false } },
-    { name: '滚动Elo＋固定混合', opts: { inSeasonElo: true } },
-    { name: '滚动Elo＋纯Elo', opts: { inSeasonElo: true, wElo: 1, wNet: 0 } },
-    { name: '滚动Elo＋先验衰减 d=10', opts: { inSeasonElo: true, priorDecay: 10 } },
-    { name: '滚动Elo＋先验衰减 d=20', opts: { inSeasonElo: true, priorDecay: 20 } },
-    { name: '滚动Elo＋先验衰减 d=30, K=28', opts: { inSeasonElo: true, priorDecay: 30, k: 28 } },
-    // 隔离变量：冻结评级下，净效率项到底有没有用？
-    { name: '冻结＋纯Elo（隔离对照）', opts: { inSeasonElo: false, wElo: 1, wNet: 0 } },
-    { name: '冻结＋纯净效率（隔离对照）', opts: { inSeasonElo: false, wElo: 0, wNet: 1 } },
+    { name: '滚动Elo＋纯Elo（基线）', opts: { inSeasonElo: true, wElo: 1, wNet: 0 } },
+    // 阵容更迭修正到底有没有用？基线是当前默认配置（滚动Elo＋纯Elo）
+    { name: '＋阵容更迭 w=0.15', opts: { inSeasonElo: true, wElo: 1, wNet: 0, turnoverWeight: 0.15 } },
+    { name: '＋阵容更迭 w=0.27（理论最优）', opts: { inSeasonElo: true, wElo: 1, wNet: 0, turnoverWeight: 0.27 } },
+    { name: '＋阵容更迭 w=0.4', opts: { inSeasonElo: true, wElo: 1, wNet: 0, turnoverWeight: 0.4 } },
+    { name: '＋阵容更迭 w=0.8（旧默认）', opts: { inSeasonElo: true, wElo: 1, wNet: 0, turnoverWeight: 0.8 } },
   ];
 
   // 按赛季阶段分段：双方都还没打满 N 场时算"赛季初"
