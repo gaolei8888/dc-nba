@@ -9,6 +9,7 @@
 npm install
 npm run ingest      # 从 stats.nba.com 抓取数据，约 45 秒
 npm run backtest    # 在历史赛季上回测模型准确率（首次会抓 5 个赛季）
+npm run check       # 检查 JSX 里的组件引用（build 会自动跑）
 npm start           # 构建前端并启动服务 → http://localhost:5174
 ```
 
@@ -288,6 +289,8 @@ K=20，分差放大项 `((mov+3)^0.8) / (7.5 + 0.006 × 胜方Elo差)`，主场�
 ```
 scripts/ingest.mjs      抓取并归一化数据 → data/*.json
 scripts/backtest.mjs    在历史赛季上回测模型准确率
+scripts/backup-db.mjs   备份排行榜数据库（VACUUM INTO，不能用 cp）
+scripts/check-jsx.mjs   检查 JSX 组件引用，接在 build 前面
 server/
   nbaClient.mjs         stats.nba.com 客户端（浏览器请求头 + 串行限速 + 重试）
   espnClient.mjs        ESPN 伤病接口客户端（含姓名归一化匹配）

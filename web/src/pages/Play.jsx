@@ -6,12 +6,14 @@ import { num, pct, fmtDate, restLabel, probColor } from '../lib/format.js';
 import {
   loadPlay, savePlay, resetPlay, scorePick, summarize,
 } from '../lib/store.js';
+import { pushPicks } from '../lib/cloud.js';
 
 /** 信心档位。50% 是"不确定"，押满 95% 猜错要扣 90 分 */
 const CONF_STEPS = [0.55, 0.65, 0.75, 0.85, 0.95];
 
 export default function Play() {
-  const { teamById, setAccent, profileId } = useApp();
+  const { teamById, setAccent, profileId, cloud, leaderboardOn } = useApp();
+  const [syncState, setSyncState] = useState(null);
   const [index, setIndex] = useState(null);
   const [day, setDay] = useState(null);
   const [error, setError] = useState(null);
@@ -79,6 +81,7 @@ export default function Play() {
 
   /** 提交当天所有选择，立即结算 */
   const settleDay = () => {
+    let next = null;
     update((p) => {
       const settled = { ...p.settled };
       const picks = { ...p.picks };
@@ -94,9 +97,18 @@ export default function Play() {
           ...scorePick(choice, g),
         };
       }
-      return { ...p, picks, settled };
+      next = { ...p, picks, settled };
+      return next;
     });
     setPending({});
+
+    // 同步到排行榜。失败不打断游戏——本地存档才是权威，云端只是榜单。
+    if (leaderboardOn && cloud?.token && next) {
+      setSyncState('syncing');
+      pushPicks(cloud.token, next.settled)
+        .then((r) => setSyncState(r ? 'ok' : 'fail'))
+        .catch(() => setSyncState('fail'));
+    }
   };
 
   const move = (delta) => {
@@ -192,6 +204,15 @@ export default function Play() {
               )}
               <span className="note">
                 翻牌前看不到模型的选择和真实比分。可以只预测其中几场。
+                {leaderboardOn && cloud?.token && (
+                  <>
+                    {' · '}
+                    {syncState === 'syncing' ? '正在同步排行榜…'
+                      : syncState === 'ok' ? '已同步到排行榜'
+                        : syncState === 'fail' ? '排行榜同步失败（不影响本地进度）'
+                          : '结算后会自动同步到排行榜'}
+                  </>
+                )}
               </span>
             </div>
           </>

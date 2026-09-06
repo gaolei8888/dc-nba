@@ -1,15 +1,26 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../App.jsx';
-import { StatTile, DataTable, ErrorBox } from '../components/common.jsx';
+import { StatTile, DataTable, ErrorBox, Loading } from '../components/common.jsx';
 import { pct } from '../lib/format.js';
 import { exportProfile } from '../lib/profiles.js';
 import { loadPlay, summarize } from '../lib/store.js';
+import { fetchLeaderboard, pushPicks } from '../lib/cloud.js';
 
 export default function Profiles() {
   const {
     profiles, profileId, createProfile, renameProfile,
     switchProfile, deleteProfile, importProfile,
+    leaderboardOn, leaderboardReason, cloud, connectCloud, disconnectCloud,
   } = useApp();
+
+  const [board, setBoard] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const reloadBoard = () => {
+    if (!leaderboardOn) return;
+    fetchLeaderboard({ min: 1 }).then(setBoard);
+  };
+  useEffect(reloadBoard, [leaderboardOn, cloud?.playerId]);
 
   const [newName, setNewName] = useState('');
   const [code, setCode] = useState('');
@@ -207,6 +218,114 @@ export default function Profiles() {
           </p>
         </div>
       </div>
+
+      {leaderboardOn ? (
+        <div className="card">
+          <h2>
+            排行榜
+            <span className="sub">
+              {board ? `${board.counts?.players ?? 0} 名玩家 · ${board.counts?.picks ?? 0} 条预测` : '加载中…'}
+            </span>
+            <span style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+              {cloud?.token ? (
+                <>
+                  <button
+                    className="btn"
+                    disabled={busy}
+                    onClick={async () => {
+                      setBusy(true);
+                      await pushPicks(cloud.token, loadPlay(profileId).settled);
+                      reloadBoard();
+                      setBusy(false);
+                    }}
+                  >
+                    {busy ? '同步中…' : '立即同步本档案'}
+                  </button>
+                  <button className="btn" onClick={() => { disconnectCloud(); setBoard(null); }}>
+                    断开
+                  </button>
+                </>
+              ) : (
+                <button
+                  className="btn primary"
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusy(true);
+                    try {
+                      await connectCloud();
+                      reloadBoard();
+                    } catch (e) { setError(e); }
+                    setBusy(false);
+                  }}
+                >
+                  用当前档案加入排行榜
+                </button>
+              )}
+            </span>
+          </h2>
+
+          {!board ? <Loading /> : (
+            <DataTable
+              rows={board.rows ?? []}
+              rowKey={(r) => r.id}
+              initialSort={{ key: 'points', dir: 'desc' }}
+              columns={[
+                {
+                  key: 'rank', label: '#', width: 40,
+                  value: () => 0,
+                  render: (r, i) => <span className="dim">{i + 1}</span>,
+                },
+                {
+                  key: 'name', label: '玩家', align: 'left', width: 180,
+                  render: (r) => (
+                    <span>
+                      {r.name}
+                      {r.id === cloud?.playerId && <span className="chip accent" style={{ marginLeft: 6 }}>你</span>}
+                    </span>
+                  ),
+                },
+                { key: 'n', label: '预测场次', width: 80 },
+                {
+                  key: 'accuracy', label: '命中率', width: 76,
+                  value: (r) => (r.n ? r.correct / r.n : 0),
+                  render: (r) => (r.n ? pct(r.correct / r.n, 1) : '—'),
+                },
+                {
+                  key: 'points', label: '积分', width: 74,
+                  render: (r) => <b className={r.points > 0 ? 'pos' : r.points < 0 ? 'neg' : ''}>{r.points}</b>,
+                },
+                {
+                  key: 'lead', label: '对模型领先', width: 96,
+                  value: (r) => r.points - r.model_points,
+                  render: (r) => {
+                    const d = r.points - r.model_points;
+                    return <span className={d > 0 ? 'pos' : d < 0 ? 'neg' : ''}>{d > 0 ? `+${d}` : d}</span>;
+                  },
+                },
+                { key: 'brier', label: 'Brier', width: 76, render: (r) => r.brier?.toFixed(4) ?? '—' },
+              ]}
+            />
+          )}
+
+          <p className="note" style={{ marginTop: 10 }}>
+            <b>练习榜，不是竞技榜。</b>目前用的是已结束赛季的比赛，结果网上都能查到，
+            所以这个榜单无法防止作弊。等 {'2026-27'} 赛季开打后会有单独的实时榜单，那个才有意义。<br />
+            身份是一个随机令牌，存在本档案里，没有密码也没有找回流程——
+            令牌丢了就是一个新玩家。<b>导出存档码时不会带上令牌</b>，
+            因为存档码可能被随手贴到聊天里。<br />
+            <b>数据可能被重置。</b>这是一个展示作品，服务端存储没有备份承诺，
+            请不要把它当成长期记录。
+          </p>
+        </div>
+      ) : (
+        <div className="card plain">
+          <h2>排行榜未启用</h2>
+          <p className="note">
+            {leaderboardReason ?? '本部署未开启服务端排行榜。'}<br />
+            所有进度仍然完整保存在这台浏览器本地，游戏功能不受影响。
+          </p>
+        </div>
+      )}
 
       <div className="card plain">
         <h2>为什么没有账号密码</h2>

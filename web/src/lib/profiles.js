@@ -88,6 +88,25 @@ export function createProfile(state, name) {
   return saveProfiles({ ...state, activeId: p.id, profiles: [...state.profiles, p] });
 }
 
+/** 把服务端下发的身份绑到某个本地档案上 */
+export function linkCloud(state, id, cloud) {
+  return saveProfiles({
+    ...state,
+    profiles: state.profiles.map((p) => (p.id === id ? { ...p, cloud } : p)),
+  });
+}
+
+export function unlinkCloud(state, id) {
+  return saveProfiles({
+    ...state,
+    profiles: state.profiles.map((p) => {
+      if (p.id !== id) return p;
+      const { cloud, ...rest } = p;
+      return rest;
+    }),
+  });
+}
+
 export function renameProfile(state, id, name) {
   return saveProfiles({
     ...state,
@@ -129,6 +148,8 @@ export function exportProfile(profileId, profiles) {
   const payload = {
     v: 1,
     name: meta?.name ?? '玩家',
+    // 刻意不导出 cloud 令牌：存档码可能被随手贴到聊天里，
+    // 带着令牌等于把身份也交出去了
     games: Object.fromEntries(GAMES.map((g) => [g, read(gameKey(g, profileId), null)])),
   };
   const json = JSON.stringify(payload);

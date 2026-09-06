@@ -5,7 +5,9 @@ import { teamPalette } from './lib/color.js';
 import {
   loadProfiles, ensureProfile, createProfile as createP, renameProfile as renameP,
   switchProfile as switchP, deleteProfile as deleteP, importProfile as importP,
+  linkCloud as linkC, unlinkCloud as unlinkC,
 } from './lib/profiles.js';
+import { createCloudPlayer, renameCloud } from './lib/cloud.js';
 import Dashboard from './pages/Dashboard.jsx';
 import Teams from './pages/Teams.jsx';
 import TeamDetail from './pages/TeamDetail.jsx';
@@ -147,6 +149,25 @@ export default function App() {
       switchProfile: (id) => setProf((s2) => switchP(s2, id)),
       deleteProfile: (id) => setProf((s2) => deleteP(s2, id)),
       importProfile: (code) => setProf((s2) => importP(s2, code)),
+
+      // ---- 排行榜（服务端可能未启用，这里全部容错）
+      leaderboardOn: !!state.meta?.features?.leaderboard,
+      leaderboardReason: state.meta?.features?.leaderboardReason ?? null,
+      cloud: prof.profiles.find((p) => p.id === prof.activeId)?.cloud ?? null,
+      /** 用当前档案名在服务端建一个玩家，把令牌绑回本地档案 */
+      connectCloud: async () => {
+        const me = prof.profiles.find((p) => p.id === prof.activeId);
+        const created = await createCloudPlayer(me?.name ?? '玩家');
+        setProf((s2) => linkC(s2, prof.activeId, {
+          playerId: created.id, token: created.token, name: created.name,
+        }));
+        return created;
+      },
+      disconnectCloud: () => setProf((s2) => unlinkC(s2, prof.activeId)),
+      syncCloudName: async (name) => {
+        const c = prof.profiles.find((p) => p.id === prof.activeId)?.cloud;
+        if (c?.token) await renameCloud(c.token, name);
+      },
     };
   }, [state, out, params, theme, prof]);
 

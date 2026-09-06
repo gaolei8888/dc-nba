@@ -19,7 +19,8 @@ const qs = (params) => {
 // BASE_URL 由 vite 注入，根路径部署时就是 "/"，等价于原来的写法。
 const API = `${import.meta.env.BASE_URL}api`.replace(/\/{2,}/g, '/');
 
-const get = (path, params) => fetch(`${API}${path}${qs(params)}`).then(json);
+const get = (path, params, headers) =>
+  fetch(`${API}${path}${qs(params)}`, headers ? { headers } : undefined).then(json);
 const post = (path, body) => fetch(`${API}${path}`, {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
@@ -45,4 +46,19 @@ export const api = {
   predict: (body) => post('/predict', body),
   simulate: (body) => post('/simulate', body),
   refresh: () => post('/refresh', {}),
+
+  // ---- 排行榜（服务端可能未启用，调用方需容错）
+  createPlayer: (name) => post('/players', { name }),
+  me: (token) => get('/me', null, { Authorization: `Bearer ${token}` }),
+  renameMe: (token, name) => fetch(`${API}/me/name`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ name }),
+  }).then(json),
+  pushPicks: (token, picks) => fetch(`${API}/picks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ picks }),
+  }).then(json),
+  leaderboard: (params) => get('/leaderboard', params),
 };
