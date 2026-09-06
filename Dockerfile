@@ -33,6 +33,11 @@ RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --chown=app:nodejs server ./server
 COPY --chown=app:nodejs data ./data
+# 只拷备份脚本，不拷 scripts/ 整个目录 —— ingest.mjs 是抓取脚本，
+# 运行镜像里不该有它（/api/refresh 已经关了，抓取只在构建数据快照时做）。
+# backup-db.mjs 只依赖 node 内置模块，单独拷进来即可 docker exec 调用：
+#   docker exec dc-nba node scripts/backup-db.mjs
+COPY --chown=app:nodejs scripts/backup-db.mjs ./scripts/backup-db.mjs
 COPY --from=builder --chown=app:nodejs /app/web/dist ./web/dist
 
 USER app
