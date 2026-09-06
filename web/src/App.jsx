@@ -208,7 +208,7 @@ export default function App() {
         <nav className="sidebar">
           <div className="brand">
             <span className="dot">N</span>
-            <span>NBA 预测中心</span>
+            <span>NBA超级幻想</span>
           </div>
           {NAV.map((n) => (
             <button
