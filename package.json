@@ -6,6 +6,7 @@
   "description": "NBA 球队/球员数据与 2026-27 赛季比赛预测应用",
   "scripts": {
     "ingest": "node scripts/ingest.mjs",
+    "backtest": "node scripts/backtest.mjs",
     "server": "node server/index.mjs",
     "dev": "concurrently -n server,web -c cyan,magenta \"node --watch server/index.mjs\" \"vite --config web/vite.config.js\"",
     "build": "vite build --config web/vite.config.js",

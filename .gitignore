@@ -1,6 +1,7 @@
 node_modules/
 web/dist/
 data/*.json
+data/history/
 data/raw/
 .env
 *.log

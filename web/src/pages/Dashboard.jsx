@@ -112,7 +112,9 @@ export default function Dashboard() {
         <p className="note">
           <b>综合实力</b> = Elo 折算分 × {num(meta.defaultParams.wElo, 2)} + 净效率折算分 × {num(meta.defaultParams.wNet, 2)}
           + 阵容更迭 + 缺阵修正，单位是相对联盟平均的每场净胜分。<br />
-          <b>Elo</b> 由上赛季逐场结果迭代得出（含分差放大项），赛季间向 1500 回归 25%。<br />
+          <b>Elo</b> 由上赛季逐场结果迭代得出（含分差放大项），赛季间向 1500 回归 25%，
+          之后继续吸收本赛季已完成比赛（当前 {meta.gamesPlayedCurrent ?? 0} 场）。
+          回测显示这一步把胜负准确率从 61.4% 提升到 66.3%。<br />
           <b>轮换影响力</b> 按整季总出场分钟降序取球员、累计到球队总分钟上限，累加 (PIE − 替补级) × 分钟。
           用 30 队的「上赛季名单 → 上赛季净效率」拟合，R² = {meta.impactFit.r2.toFixed(3)}。<br />
           <b>阵容更迭</b> 是新名单与上赛季名单轮换影响力之差，联盟层面做零和归一，

@@ -46,10 +46,11 @@ export function buildGames(logRows) {
 
 /**
  * 538 风格 Elo：K=20，胜负分差放大系数抑制"垃圾时间"虚高。
+ * 传入 initial 可以从已有评级继续迭代——赛季中吸收新结果就靠这个。
  * 返回 { 赛季末 Elo, 逐场轨迹 }。
  */
-export function computeElo(games, { k = 20 } = {}) {
-  const elo = new Map();
+export function computeElo(games, { k = 20, initial = null } = {}) {
+  const elo = new Map(initial ? Object.entries(initial).map(([id, v]) => [Number(id), v]) : []);
   const history = [];
   const get = (id) => elo.get(id) ?? ELO_BASE;
 

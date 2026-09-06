@@ -187,6 +187,11 @@ export default function App() {
             <div>{state.meta.targetSeason} 赛季</div>
             <div>基准数据 {state.meta.priorSeason}</div>
             <div>{state.meta.counts.teams} 队 · {state.meta.counts.players} 人</div>
+            <div title="模型已吸收的本赛季真实比赛结果。赛季进行中每次重新抓取都会更新评级。">
+              {state.meta.gamesPlayedCurrent > 0
+                ? `已吸收本季 ${state.meta.gamesPlayedCurrent} 场结果`
+                : '赛季未开打 · 赛季前评级'}
+            </div>
             {outCount > 0 && (
               <div style={{ marginTop: 6 }}>
                 <span className="chip accent">{outCount} 人缺阵</span>{' '}
