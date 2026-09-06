@@ -458,9 +458,28 @@ app.post('/api/refresh', (req, res) => {
 
 const dist = path.join(ROOT, 'web', 'dist');
 if (fs.existsSync(dist)) {
-  app.use(express.static(dist));
+  /*
+   * 两级缓存策略。搞错这个的后果很隐蔽：
+   * index.html 里引用的是带内容哈希的资源名，一旦浏览器缓存住旧的 index.html，
+   * 它就会一直去加载旧的 JS——发了新版也看不到，而且用户没有任何提示。
+   *
+   *  - assets/ 下的文件名本身带哈希，内容变了文件名就变，可以永久缓存
+   *  - index.html 绝不能缓存，必须每次回源校验
+   */
+  app.use('/assets', express.static(path.join(dist, 'assets'), {
+    immutable: true,
+    maxAge: '1y',
+  }));
+  app.use(express.static(dist, {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith('.html')) {
+        res.setHeader('Cache-Control', 'no-cache');
+      }
+    },
+  }));
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api/')) return next();
+    res.setHeader('Cache-Control', 'no-cache');
     res.sendFile(path.join(dist, 'index.html'));
   });
 } else {
