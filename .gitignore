@@ -2,6 +2,7 @@ node_modules/
 web/dist/
 data/*.json
 data/*.db
+data/backups/
 data/*.db-*
 data/history/
 data/raw/

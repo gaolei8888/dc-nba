@@ -78,6 +78,13 @@ function pickParams(src = {}) {
 
 // ---------------------------------------------------------------- 路由
 
+// 常驻采样 RSS 峰值：容器 mem_limit 是硬限制，超了是被 kill 不是变慢
+let peakRssMB = 0;
+setInterval(() => {
+  const mb = Math.round(process.memoryUsage().rss / 1048576);
+  if (mb > peakRssMB) peakRssMB = mb;
+}, 5000).unref();
+
 const app = express();
 
 // JSON 压缩率极高（赛程 528KB → 约 60KB）。1000 在线用户下带宽是比 CPU
@@ -144,8 +151,10 @@ app.get('/api/meta', wrap((req, res) => {
       games: store.schedule.games.length,
     },
     features: {
-      leaderboard: db.isEnabled(),
-      leaderboardReason: db.getDisabledReason(),
+      leaderboard: LEADERBOARD_ON && db.isEnabled(),
+      leaderboardReason: LEADERBOARD_ON
+        ? db.getDisabledReason()
+        : '本部署已关闭排行榜（ENABLE_LEADERBOARD=0），进度仅保存在浏览器本地',
       lottery: process.env.ENABLE_LOTTERY === '1',
     },
     injuries: {
@@ -403,8 +412,16 @@ app.get('/api/health', wrap((req, res) => {
     ok: true,
     pool: { available: poolAvailable(), pending: pendingCount() },
     caches: cacheStats(),
-    db: { enabled: db.isEnabled(), reason: db.getDisabledReason() },
+    db: {
+      enabled: LEADERBOARD_ON && db.isEnabled(),
+      writable: LEADERBOARD_ON && db.isEnabled(),
+      reason: LEADERBOARD_ON ? db.getDisabledReason() : 'ENABLE_LEADERBOARD=0',
+      path: process.env.DB_PATH ?? '(默认 data/app.db)',
+    },
+    // mem_limit 是硬限制，超了容器直接被 OOM kill 而不是变慢，
+    // 所以峰值比当前值更值得盯
     memoryMB: Math.round(process.memoryUsage().rss / 1048576),
+    memoryPeakMB: peakRssMB,
     uptimeSec: Math.round(process.uptime()),
   });
 }));
@@ -452,7 +469,11 @@ if (fs.existsSync(dist)) {
   });
 }
 
-db.initDb();
+// 排行榜会在公网收集并存储用户数据，做成显式开关，
+// 让"要不要上线"变成一条 compose 配置而不是一次代码改动
+const LEADERBOARD_ON = process.env.ENABLE_LEADERBOARD !== '0';
+if (LEADERBOARD_ON) db.initDb();
+else console.log('排行榜已通过 ENABLE_LEADERBOARD=0 关闭，服务端不写任何用户数据');
 initPool();
 
 try {

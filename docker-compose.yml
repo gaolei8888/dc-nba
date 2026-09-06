@@ -21,6 +21,17 @@ services:
       PORT: 3000
       # 关掉无鉴权的 POST /api/refresh —— 它会 spawn 抓取进程、对外打 stats.nba.com
       ALLOW_REFRESH: "0"
+      # 排行榜要在公网收集并存储用户数据（伪匿名令牌，无密码无手机号）。
+      # 默认关闭，改成 "1" 即开启——是否上线由高磊决定，不需要改代码。
+      ENABLE_LEADERBOARD: "0"
+      # 模拟投注模块，同样默认关闭
+      ENABLE_LOTTERY: "0"
+      DB_PATH: /app/data-db/app.db
+    # SQLite 排行榜的可写卷。数据快照（data/*.json）仍然烤在镜像里保持只读，
+    # 这个卷只放 app.db。gpu 上 dev 自己就是 uid 1001，与容器内 app 同号，
+    # mkdir 出来天然属主正确，不需要 chown。
+    volumes:
+      - ./data-db:/app/data-db
     # 不映射宿主机端口：网关在同一个 docker 网络里按容器名访问，
     # 这样作品容器完全不占宿主机端口，加多少个都不会撞
     networks:
