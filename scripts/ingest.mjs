@@ -7,6 +7,7 @@
  */
 import { nbaGet, statsUrl, toRows, writeJson } from '../server/nbaClient.mjs';
 import { TEAM_META, POS_CN } from '../server/teamMeta.mjs';
+import { fetchInjuries } from '../server/espnClient.mjs';
 import {
   buildGames, computeElo, carryOver, rotationImpact, fitRosterImpact, totalMinutes,
 } from '../server/ratings.mjs';
@@ -386,6 +387,16 @@ async function main() {
     },
   };
 
+  // 伤病名单：NBA 官方只发 PDF，改用 ESPN 的结构化接口
+  let injuries = { source: 'ESPN', fetchedAt: null, counts: {}, matched: 0, unmatched: [], players: [] };
+  try {
+    log('伤病名单 (ESPN)');
+    injuries = await fetchInjuries(players);
+  } catch (e) {
+    console.warn(`  伤病抓取失败，跳过：${String(e.message).slice(0, 90)}`);
+  }
+
+  writeJson('injuries.json', injuries);
   writeJson('teams.json', teams);
   writeJson('players.json', players);
   writeJson('schedule.json', schedule);
@@ -395,6 +406,10 @@ async function main() {
   console.log(`\n完成，用时 ${((Date.now() - t0) / 1000).toFixed(1)}s`);
   console.log(`  球队 ${teams.length} · 球员 ${players.length} · ${TARGET_SEASON} 赛程 ${schedule.games.length} 场`);
   console.log(`  轮换影响力回归 R²=${impactFit.r2.toFixed(3)}  b=${impactFit.b.toFixed(4)}`);
+  if (injuries.matched) {
+    console.log(`  伤病 ${injuries.matched} 条（确定缺阵 ${injuries.counts.out ?? 0}，每日观察 ${injuries.counts.dayToDay ?? 0}）`
+      + (injuries.unmatched.length ? `，${injuries.unmatched.length} 条未匹配` : ''));
+  }
   console.log(currentGames.length
     ? `  已吸收 ${TARGET_SEASON} 赛季 ${currentGames.length} 场真实结果（截至 ${currentGames[currentGames.length - 1].date}）`
     : `  ${TARGET_SEASON} 赛季尚未开打，评级为赛季前预估`);

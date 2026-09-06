@@ -15,8 +15,12 @@ const qs = (params) => {
   return s ? `?${s}` : '';
 };
 
-const get = (path, params) => fetch(`/api${path}${qs(params)}`).then(json);
-const post = (path, body) => fetch(`/api${path}`, {
+// 部署在子路径下时，API 也要带上同一个前缀（Traefik 那边再 stripPrefix 掉）。
+// BASE_URL 由 vite 注入，根路径部署时就是 "/"，等价于原来的写法。
+const API = `${import.meta.env.BASE_URL}api`.replace(/\/{2,}/g, '/');
+
+const get = (path, params) => fetch(`${API}${path}${qs(params)}`).then(json);
+const post = (path, body) => fetch(`${API}${path}`, {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(body),
@@ -31,6 +35,7 @@ export const withOut = (params, out) => ({
 export const api = {
   meta: () => get('/meta'),
   teams: () => get('/teams'),
+  injuries: () => get('/injuries'),
   team: (id, params) => get(`/teams/${id}`, params),
   players: (params) => get('/players', params),
   schedule: (params) => get('/schedule', params),

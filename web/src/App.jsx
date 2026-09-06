@@ -61,8 +61,8 @@ export default function App() {
   const [accent, setAccent] = useState(null);
 
   useEffect(() => {
-    Promise.all([api.meta(), api.teams()])
-      .then(([meta, teams]) => setState({ loading: false, meta, teams }))
+    Promise.all([api.meta(), api.teams(), api.injuries().catch(() => ({ players: [] }))])
+      .then(([meta, teams, injuries]) => setState({ loading: false, meta, teams, injuries }))
       .catch((error) => setState({ loading: false, error }));
   }, []);
 
@@ -89,7 +89,20 @@ export default function App() {
 
   const ctx = useMemo(() => {
     const teams = state.teams ?? [];
+    const injuryList = state.injuries?.players ?? [];
+    const injuryByPlayer = new Map(injuryList.map((i) => [i.playerId, i]));
     return {
+      injuries: state.injuries ?? { players: [] },
+      injuryByPlayer,
+      /** 把 ESPN 标记为「确定缺阵」的球员一次性填进缺阵名单 */
+      applyInjuries: (status = 'out') => setOut(() => {
+        const next = {};
+        for (const i of injuryList) {
+          if (status === 'out' && i.status !== 'out') continue;
+          (next[i.teamId] ??= []).push(i.playerId);
+        }
+        return next;
+      }),
       meta: state.meta,
       teams,
       teamById: new Map(teams.map((t) => [t.teamId, t])),
@@ -177,6 +190,25 @@ export default function App() {
             </label>
             <p>不勾选则沿用上赛季实际出勤</p>
           </div>
+
+          {(ctx.injuries.players?.length ?? 0) > 0 && (
+            <div className="side-box">
+              <div style={{ fontSize: 12, fontWeight: 650, marginBottom: 6 }}>
+                伤病名单 · ESPN
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-faint)', lineHeight: 1.6 }}>
+                确定缺阵 {ctx.injuries.counts?.out ?? 0} 人 ·
+                观察 {ctx.injuries.counts?.dayToDay ?? 0} 人
+              </div>
+              <button
+                className="btn"
+                style={{ width: '100%', marginTop: 7, padding: '6px 8px', fontSize: 12 }}
+                onClick={() => ctx.applyInjuries('out')}
+              >
+                套用「确定缺阵」
+              </button>
+            </div>
+          )}
 
           <div className="theme-switch">
             <button className={theme === 'dark' ? 'on' : ''} onClick={() => setTheme('dark')}>深色</button>

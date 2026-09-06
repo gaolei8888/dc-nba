@@ -100,6 +100,25 @@ export function PlayerCell({ player, size = 28, children }) {
   );
 }
 
+const INJURY_LABEL = { out: '缺阵', doubtful: '存疑', dayToDay: '每日观察', unknown: '伤病' };
+
+/** 伤病徽标：鼠标悬停显示伤处与预计复出 */
+export function InjuryBadge({ injury }) {
+  if (!injury) return null;
+  const parts = [injury.statusRaw, injury.side, injury.type, injury.detail]
+    .filter(Boolean).join(' · ');
+  const back = injury.returnDate ? `　预计复出 ${injury.returnDate}` : '';
+  return (
+    <span
+      className={`chip ${injury.status === 'out' ? 'injury-out' : 'injury-dtd'}`}
+      style={{ marginLeft: 6 }}
+      title={parts + back}
+    >
+      {INJURY_LABEL[injury.status] ?? '伤病'}
+    </span>
+  );
+}
+
 export function StatTile({ label, value, unit, hint }) {
   return (
     <div className="tile" title={hint}>

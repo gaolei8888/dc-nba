@@ -1,0 +1,39 @@
+# 部署到 gpu.tzspace.cn 的 /opt/works/dc-nba/
+#
+#   docker compose build && docker compose up -d
+#   docker exec works-gateway nginx -s reload      # 仅首次上线需要
+#
+# 公网地址：https://ai.tzspace.cn/works/dc-nba/
+# 链路：ai:Traefik --PathPrefix(/works/)+stripPrefix--> 10.139.170.151:3300
+#       works-gateway(nginx) --/dc-nba/--> 本容器:3000
+
+services:
+  dc-nba:
+    build:
+      context: .
+      args:
+        # 构建产物里的资源路径要带这个前缀，否则页面会去请求 /assets/xxx.js 白屏
+        APP_BASE: /works/dc-nba/
+    container_name: dc-nba
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # 关掉无鉴权的 POST /api/refresh —— 它会 spawn 抓取进程、对外打 stats.nba.com
+      ALLOW_REFRESH: "0"
+    # 不映射宿主机端口：网关在同一个 docker 网络里按容器名访问，
+    # 这样作品容器完全不占宿主机端口，加多少个都不会撞
+    networks:
+      - works-net
+    # 学员作品跑在和 dc-llm / ollama 同一台机器上，给上限：
+    # 单个作品跑飞了不至于拖垮整台
+    mem_limit: 512m
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+networks:
+  works-net:
+    external: true

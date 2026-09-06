@@ -25,10 +25,11 @@ function loadStore() {
   const players = readJson('players.json');
   const schedule = readJson('schedule.json');
   const meta = readJson('meta.json');
+  const injuries = readJson('injuries.json') ?? { players: [], counts: {}, fetchedAt: null };
   if (!teams || !players || !schedule || !meta) {
     throw new Error('数据缺失，请先运行  npm run ingest');
   }
-  store = { teams, players, schedule, meta };
+  store = { teams, players, schedule, meta, injuries };
   modelCache = new Map();
   console.log(`数据已加载: ${teams.length} 队 / ${players.length} 人 / ${schedule.games.length} 场 (${meta.priorSeason} → ${meta.targetSeason})`);
 }
@@ -90,16 +91,28 @@ app.get('/api/meta', wrap((req, res) => {
       players: store.players.length,
       games: store.schedule.games.length,
     },
+    injuries: {
+      fetchedAt: store.injuries?.fetchedAt ?? null,
+      counts: store.injuries?.counts ?? {},
+      matched: store.injuries?.matched ?? 0,
+    },
   });
 }));
 
 app.get('/api/teams', wrap((req, res) => res.json(store.teams)));
 
+/** 伤病名单（来自 ESPN，随 ingest 一起刷新） */
+app.get('/api/injuries', wrap((req, res) => res.json(store.injuries)));
+
 /** 给球员补上模型算出的缺阵边际价值（每场净胜分，负数）。 */
-const withCost = (model, list) => list.map((p) => ({
-  ...p,
-  outCostPts: model.marginalCost.get(p.playerId) ?? null,
-}));
+const withCost = (model, list) => {
+  const injById = new Map((store.injuries?.players ?? []).map((i) => [i.playerId, i]));
+  return list.map((p) => ({
+    ...p,
+    outCostPts: model.marginalCost.get(p.playerId) ?? null,
+    injury: injById.get(p.playerId) ?? null,
+  }));
+};
 
 app.get('/api/teams/:id', wrap((req, res) => {
   const id = Number(req.params.id);
@@ -197,6 +210,13 @@ app.post('/api/simulate', wrap((req, res) => {
 /** 触发重新抓取（会阻塞约 1 分钟）。 */
 let refreshing = false;
 app.post('/api/refresh', (req, res) => {
+  // 这个接口无鉴权，且每次会 spawn 一个抓取进程跑约 40 秒、对外请求 stats.nba.com。
+  // 本地跑无所谓，公网暴露就是三件坏事：白送的 DoS 放大器、服务器 IP 会被 NBA 限流，
+  // 以及把「个人学习」变成「持续抓取并公开分发」。所以生产镜像里默认关掉
+  // （ALLOW_REFRESH=0），本地不设这个变量则照常可用。
+  if (process.env.ALLOW_REFRESH === '0') {
+    return res.status(403).json({ error: '该部署为只读数据快照，不支持在线抓取' });
+  }
   if (refreshing) return res.status(409).json({ error: '正在抓取中' });
   refreshing = true;
   const child = spawn(process.execPath, [path.join(ROOT, 'scripts', 'ingest.mjs')], {

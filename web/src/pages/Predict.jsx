@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useApp, go } from '../App.jsx';
 import { api } from '../lib/api.js';
 import {
-  TeamLogo, PlayerHeadshot, StatTile, Loading, ErrorBox, DataTable,
+  TeamLogo, PlayerHeadshot, StatTile, Loading, ErrorBox, DataTable, InjuryBadge,
 } from '../components/common.jsx';
 import { num, signed, signClass, rate, fmtDate, restLabel } from '../lib/format.js';
 import { inkOn } from '../lib/color.js';
@@ -393,6 +393,7 @@ function RosterPicker({ team, roster, out, onToggle }) {
               }}
               >
                 {p.name}
+                <InjuryBadge injury={p.injury} />
               </span>
               <span className="dim mono" style={{ fontSize: 10.5 }}>{num(p.min, 0)}分</span>
               <span

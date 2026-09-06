@@ -448,6 +448,8 @@ input[type='checkbox'] { accent-color: var(--team-raw); }
 }
 .chip.accent { background: var(--team-soft); color: var(--team); }
 .chip.blue { background: rgba(99, 176, 255, .16); color: var(--accent-2); }
+.chip.injury-out { background: rgba(255, 107, 99, .18); color: var(--bad); }
+.chip.injury-dtd { background: rgba(232, 177, 60, .18); color: var(--warn); }
 
 .pos { color: var(--good); }
 .neg { color: var(--bad); }

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useApp, go } from '../App.jsx';
 import { api, withOut } from '../lib/api.js';
 import {
-  TeamLogo, TeamCell, PlayerHeadshot, StatTile, DataTable,
+  TeamLogo, TeamCell, PlayerHeadshot, StatTile, DataTable, InjuryBadge,
   Loading, ErrorBox, Segmented, ProbBar,
 } from '../components/common.jsx';
 import PlayerTable from '../components/PlayerTable.jsx';
@@ -152,6 +152,7 @@ export default function TeamDetail({ teamId }) {
                 <PlayerHeadshot player={p} size={28} />
                 <span style={{ opacity: outIds.includes(p.playerId) ? 0.42 : 1 }}>
                   {p.name}
+                  <InjuryBadge injury={p.injury} />
                   {p.noPriorData && <span className="chip" style={{ marginLeft: 6 }}>无上季数据</span>}
                 </span>
               </span>

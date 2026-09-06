@@ -50,6 +50,12 @@ npm run dev         # 前端 http://localhost:5173，API 5174
 **缺阵模拟**：在球队页或预测页勾选球员即可标记缺阵，该设置全站共享，会同步影响实力榜、
 赛程胜率、单场预测和赛季模拟。
 
+**伤病名单**来自 ESPN 公开接口（NBA 官方只发 PDF 伤病报告，没有结构化接口），
+随每次 `npm run ingest` 刷新，带伤处、部位与预计复出日期。
+名单里会显示「缺阵 / 每日观察」徽标，侧栏有一键套用「确定缺阵」的按钮。
+ESPN 用自己的球员 id，靠归一化姓名匹配到 NBA 的 PLAYER_ID（去重音、去 Jr./III 后缀），
+当前 75 条全部命中。
+
 ## 预测模型
 
 球队实力统一折算成「相对联盟平均的每场净胜分」：
@@ -174,16 +180,21 @@ K=20，分差放大项 `((mov+3)^0.8) / (7.5 + 0.006 × 胜方Elo差)`，主场�
 - 赛季中被交易的球员，其整季分钟全部计入最后效力的球队。
 - 赛季模拟的分区排名用随机数打破平局，未实现 NBA 官方的相互战绩等平局规则。
 - 阵容更迭修正已纳入回测并被否掉（见上），默认强度降到 0.15。
-- **缺阵修正仍未被验证**：它需要逐日的历史伤病名单，NBA 官方接口不提供回溯查询，
-  因此这一项的增益目前无法量化，使用时请自行判断。
+- **缺阵修正仍未被验证**：回测需要逐日的历史伤病名单，ESPN 接口只给当前状态、
+  不提供回溯查询，因此这一项的增益无法量化。它的量级不小（约基奇缺阵 −11.9 分），
+  是模型里最大的未知数，使用时请自行判断。
+- 伤病数据是抓取时的快照，不是实时的。赛季中要保持准确需要重新跑 `npm run ingest`。
+- 休赛期抓到的多是赛季前手术记录（带较远的预计复出日期），赛季开打后才会反映真实出勤。
 - NBA 杯淘汰赛（6 场）为待定对阵，不参与模拟；因此每队排定场次为 80 场而非 82 场。
 
 ## 项目结构
 
 ```
 scripts/ingest.mjs      抓取并归一化数据 → data/*.json
+scripts/backtest.mjs    在历史赛季上回测模型准确率
 server/
   nbaClient.mjs         stats.nba.com 客户端（浏览器请求头 + 串行限速 + 重试）
+  espnClient.mjs        ESPN 伤病接口客户端（含姓名归一化匹配）
   ratings.mjs           Elo 计算、轮换影响力与回归拟合
   predict.mjs           预测引擎（单场预测、赛程批量、赛季模拟、实力榜）
   teamMeta.mjs          30 队中文名与队色
@@ -198,7 +209,8 @@ data/                   抓取产物（已 gitignore）
 | --- | --- |
 | `GET /api/meta` | 赛季信息、默认参数、数据量 |
 | `GET /api/teams` · `GET /api/teams/:id` | 球队列表 / 球队详情（含阵容、转入转出、带预测的赛程） |
-| `GET /api/players?teamId=&onRoster=1` | 球员数据，附 `outCostPts`（缺阵时球队每场净胜分变化） |
+| `GET /api/players?teamId=&onRoster=1` | 球员数据，附 `outCostPts`（缺阵影响）与 `injury`（伤病状态） |
+| `GET /api/injuries` | ESPN 伤病名单快照 |
 | `GET /api/schedule?type=&teamId=&from=&to=&limit=` | 赛程（默认带预测，`predict=0` 关闭） |
 | `GET /api/rankings` | 实力榜 |
 | `POST /api/predict` | 单场预测 `{homeId, awayId, gameId?, neutral?, out?, params?}` |
