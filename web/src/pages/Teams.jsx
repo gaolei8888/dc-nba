@@ -2,14 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { useApp, go } from '../App.jsx';
 import { api, withOut } from '../lib/api.js';
 import { TeamLogo, Loading, ErrorBox, Segmented } from '../components/common.jsx';
-import { num, signed, signClass } from '../lib/format.js';
+import { num, signed, signClass, CONF_CN, DIV_CN, DIV_ORDER } from '../lib/format.js';
 import { teamPalette } from '../lib/color.js';
-
-const CONF_CN = { East: '东部', West: '西部' };
-const DIV_CN = {
-  Atlantic: '大西洋', Central: '中部', Southeast: '东南',
-  Northwest: '西北', Pacific: '太平洋', Southwest: '西南',
-};
 
 export default function Teams() {
   const { teams, meta, out, params, dark, setAccent } = useApp();
@@ -37,9 +31,7 @@ export default function Teams() {
     const key = groupBy === 'conference' ? CONF_CN[t.conference] : DIV_CN[t.division] ?? t.division;
     (groups[key] ??= []).push(t);
   }
-  const order = groupBy === 'conference'
-    ? ['东部', '西部']
-    : ['大西洋', '中部', '东南', '西北', '太平洋', '西南'];
+  const order = groupBy === 'conference' ? ['东部', '西部'] : DIV_ORDER;
 
   return (
     <>

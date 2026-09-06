@@ -19,6 +19,17 @@ export const rate = (v, digits = 1) =>
 
 export const signClass = (v) => (v > 0 ? 'pos' : v < 0 ? 'neg' : '');
 
+/** 分区与赛区的中文名。球队页和总览页共用，避免各写一份走样。 */
+export const CONF_CN = { East: '东部', West: '西部' };
+
+export const DIV_CN = {
+  Atlantic: '大西洋', Central: '中部', Southeast: '东南',
+  Northwest: '西北', Pacific: '太平洋', Southwest: '西南',
+};
+
+/** 展示顺序：先东部三个赛区，再西部三个 */
+export const DIV_ORDER = ['大西洋', '中部', '东南', '西北', '太平洋', '西南'];
+
 const WEEKDAY = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
 /** "2026-10-20" -> "10月20日 周二" */

@@ -2,13 +2,17 @@ import React, { useEffect, useState } from 'react';
 import { useApp, go } from '../App.jsx';
 import { api, withOut } from '../lib/api.js';
 import {
-  DataTable, TeamCell, TeamLogo, Loading, ErrorBox, ProbBar,
+  DataTable, TeamCell, TeamLogo, Loading, ErrorBox, ProbBar, Segmented,
 } from '../components/common.jsx';
-import { num, signed, signClass, fmtDate, probColor } from '../lib/format.js';
+import {
+  num, signed, signClass, fmtDate, probColor, CONF_CN, DIV_CN, DIV_ORDER,
+} from '../lib/format.js';
 
 export default function Dashboard() {
   const { meta, teamById, out, params, setAccent } = useApp();
   const [data, setData] = useState({ loading: true });
+  // 实力榜的分组方式：全联盟 / 东西部 / 六赛区
+  const [groupBy, setGroupBy] = useState('conference');
 
   useEffect(() => { setAccent(null); }, [setAccent]);
 
@@ -33,13 +37,29 @@ export default function Dashboard() {
   const west = rankings.filter((t) => t.conference === 'West');
   const mostImproved = [...rankings].sort((a, b) => b.turnoverAdj - a.turnoverAdj)[0];
 
+  const grouped = groupBy !== 'league';
+
   const cols = [
-    { key: 'rank', label: '#', width: 38, render: (r) => <span className="dim">{r.rank}</span> },
+    {
+      key: 'rank', label: '#', width: 38,
+      // 分组时这一列是组内名次，联盟名次单独一列，方便跨组比较
+      render: (r) => <span className="dim">{grouped ? r.groupRank : r.rank}</span>,
+      value: (r) => (grouped ? r.groupRank : r.rank),
+    },
     {
       key: 'cn', label: '球队', align: 'left', width: 196,
       render: (r) => <TeamCell team={teamById.get(r.teamId)} onClick={() => go(`team/${r.teamId}`)} />,
     },
-    { key: 'conference', label: '分区', width: 52, render: (r) => (r.conference === 'East' ? '东部' : '西部') },
+    ...(grouped
+      ? [{
+        key: 'leagueRank', label: '联盟', title: '联盟总排名', width: 48,
+        value: (r) => r.rank,
+        render: (r) => <span className="dim">{r.rank}</span>,
+      }]
+      : [
+        { key: 'conference', label: '分区', width: 52, render: (r) => CONF_CN[r.conference] },
+        { key: 'division', label: '赛区', width: 62, render: (r) => <span className="dim">{DIV_CN[r.division] ?? r.division}</span> },
+      ]),
     {
       key: 'total', label: '综合实力', title: '相对联盟平均的每场净胜分预期', width: 84,
       render: (r) => <b className={signClass(r.total)}>{signed(r.total, 2)}</b>,
@@ -87,14 +107,47 @@ export default function Dashboard() {
       </div>
 
       <div className="card">
-        <h2>球队实力榜 <span className="sub">综合 Elo、净效率、阵容更迭与当前缺阵</span></h2>
-        <DataTable
-          columns={cols}
-          rows={rankings}
-          initialSort={{ key: 'total', dir: 'desc' }}
-          rowKey={(r) => r.teamId}
-          onRowClick={(r) => go(`team/${r.teamId}`)}
-        />
+        <h2>
+          球队实力榜
+          <span className="sub">综合 Elo、净效率、阵容更迭与当前缺阵</span>
+          <span style={{ marginLeft: 'auto' }}>
+            <Segmented
+              value={groupBy}
+              onChange={setGroupBy}
+              options={[
+                { value: 'conference', label: '东西部' },
+                { value: 'division', label: '六赛区' },
+                { value: 'league', label: '全联盟' },
+              ]}
+            />
+          </span>
+        </h2>
+
+        {groupBy === 'league' ? (
+          <DataTable
+            columns={cols}
+            rows={rankings}
+            initialSort={{ key: 'total', dir: 'desc' }}
+            rowKey={(r) => r.teamId}
+            onRowClick={(r) => go(`team/${r.teamId}`)}
+          />
+        ) : (
+          groupsOf(rankings, groupBy).map(([label, rows]) => (
+            <div key={label} style={{ marginBottom: 16 }}>
+              <div className="group-head">
+                {label}
+                <span>{rows.length} 队 · 最强 {rows[0].cn} {signed(rows[0].total, 1)}</span>
+              </div>
+              <DataTable
+                columns={cols}
+                rows={rows}
+                initialSort={{ key: 'total', dir: 'desc' }}
+                rowKey={(r) => r.teamId}
+                onRowClick={(r) => go(`team/${r.teamId}`)}
+              />
+            </div>
+          ))
+        )}
       </div>
 
       <div className="card">
@@ -127,6 +180,33 @@ export default function Dashboard() {
       </div>
     </>
   );
+}
+
+/**
+ * 按分区或赛区分组，组内按实力排序并标上组内名次。
+ * 东部三个赛区排在西部前面，和联盟官方的呈现顺序一致。
+ */
+function groupsOf(rankings, mode) {
+  const keyOf = (t) => (mode === 'conference'
+    ? CONF_CN[t.conference]
+    : DIV_CN[t.division] ?? t.division);
+  const order = mode === 'conference' ? ['东部', '西部'] : DIV_ORDER;
+
+  const map = new Map();
+  for (const t of rankings) {
+    const k = keyOf(t);
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push(t);
+  }
+  return order
+    .filter((k) => map.has(k))
+    .map((k) => [
+      k,
+      map.get(k)
+        .slice()
+        .sort((a, b) => b.total - a.total)
+        .map((t, i) => ({ ...t, groupRank: i + 1 })),
+    ]);
 }
 
 /** 带队标的领先者数据块 */

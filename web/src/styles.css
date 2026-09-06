@@ -582,3 +582,14 @@ input[type='checkbox'] { accent-color: var(--team-raw); }
 
 .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--text-faint); }
 .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; }
+
+/* 实力榜分组小标题 */
+.group-head {
+  display: flex; align-items: baseline; gap: 10px;
+  margin: 4px 0 6px;
+  font-size: 12.5px; font-weight: 700; letter-spacing: .3px;
+  padding-left: 9px; border-left: 3px solid var(--team-raw);
+}
+.group-head span {
+  font-weight: 400; font-size: 11px; color: var(--text-faint); letter-spacing: 0;
+}
