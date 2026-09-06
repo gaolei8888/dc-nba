@@ -26,10 +26,11 @@ function loadStore() {
   const schedule = readJson('schedule.json');
   const meta = readJson('meta.json');
   const injuries = readJson('injuries.json') ?? { players: [], counts: {}, fetchedAt: null };
+  const gameday = readJson('gameday.json') ?? { season: null, games: [] };
   if (!teams || !players || !schedule || !meta) {
     throw new Error('数据缺失，请先运行  npm run ingest');
   }
-  store = { teams, players, schedule, meta, injuries };
+  store = { teams, players, schedule, meta, injuries, gameday };
   modelCache = new Map();
   console.log(`数据已加载: ${teams.length} 队 / ${players.length} 人 / ${schedule.games.length} 场 (${meta.priorSeason} → ${meta.targetSeason})`);
 }
@@ -103,6 +104,32 @@ app.get('/api/teams', wrap((req, res) => res.json(store.teams)));
 
 /** 伤病名单（来自 ESPN，随 ingest 一起刷新） */
 app.get('/api/injuries', wrap((req, res) => res.json(store.injuries)));
+
+/**
+ * 人机对赌题库。
+ * 上赛季逐日重放的结果：每场带模型赛前判断与真实比分，可立即结算。
+ * ?date=YYYY-MM-DD 取某一天；不带则返回全部比赛日索引。
+ */
+app.get('/api/gameday', wrap((req, res) => {
+  const { date } = req.query;
+  const all = store.gameday.games ?? [];
+  if (date) {
+    return res.json({
+      season: store.gameday.season,
+      date,
+      games: all.filter((g) => g.date === date),
+    });
+  }
+  // 只返回日期索引，避免一次吐 1230 场
+  const byDate = new Map();
+  for (const g of all) byDate.set(g.date, (byDate.get(g.date) ?? 0) + 1);
+  res.json({
+    season: store.gameday.season,
+    total: all.length,
+    days: [...byDate.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([d, n]) => ({ date: d, games: n })),
+  });
+}));
 
 /** 给球员补上模型算出的缺阵边际价值（每场净胜分，负数）。 */
 const withCost = (model, list) => {

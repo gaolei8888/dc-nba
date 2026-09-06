@@ -8,6 +8,7 @@
 import { nbaGet, statsUrl, toRows, writeJson } from '../server/nbaClient.mjs';
 import { TEAM_META, POS_CN } from '../server/teamMeta.mjs';
 import { fetchInjuries } from '../server/espnClient.mjs';
+import { replaySeasonPicks } from '../server/replay.mjs';
 import {
   buildGames, computeElo, carryOver, rotationImpact, fitRosterImpact, totalMinutes,
 } from '../server/ratings.mjs';
@@ -337,9 +338,15 @@ async function main() {
   }
   const players = buildPlayers(playerStats, rosters, teams);
 
+  // 再往前一个赛季，只用来给 PRIOR_SEASON 定开赛日 Elo（人机对赌题库要用）
+  const priorPriorSeason = (() => {
+    const y = Number(PRIOR_SEASON.slice(0, 4));
+    return `${y - 1}-${String(y % 100).padStart(2, '0')}`;
+  })();
   const logRows = await fetchGameLog(PRIOR_SEASON);
   // 目标赛季已打完的比赛：赛季前为空，开赛后逐步累积
   const currentLogRows = await fetchGameLog(TARGET_SEASON, { optional: true });
+  const priorPriorRows = await fetchGameLog(priorPriorSeason, { optional: true });
 
   // ---- 评级
   const games = buildGames(logRows);
@@ -395,6 +402,18 @@ async function main() {
   } catch (e) {
     console.warn(`  伤病抓取失败，跳过：${String(e.message).slice(0, 90)}`);
   }
+
+  // 人机对赌题库：逐日重放上赛季，生成"模型当时的判断"+真实结果。
+  // 新赛季开打前这是唯一能立即结算的对战素材。
+  let gameday = { season: PRIOR_SEASON, days: [], games: [] };
+  if (priorPriorRows.length) {
+    const picks = replaySeasonPicks(games, buildGames(priorPriorRows));
+    gameday = { season: PRIOR_SEASON, generatedAt: new Date().toISOString(), games: picks };
+    log(`对赌题库：${PRIOR_SEASON} 共 ${picks.length} 场`);
+  } else {
+    console.warn(`  缺少 ${priorPriorSeason} 数据，跳过对赌题库生成`);
+  }
+  writeJson('gameday.json', gameday);
 
   writeJson('injuries.json', injuries);
   writeJson('teams.json', teams);

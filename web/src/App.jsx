@@ -9,6 +9,7 @@ import Players from './pages/Players.jsx';
 import Schedule from './pages/Schedule.jsx';
 import Predict from './pages/Predict.jsx';
 import Simulate from './pages/Simulate.jsx';
+import Play from './pages/Play.jsx';
 
 // ------------------------------------------------------------ 全局数据
 
@@ -22,6 +23,7 @@ const NAV = [
   { path: 'schedule', label: '赛程', ico: '▤' },
   { path: 'predict', label: '比赛预测', ico: '◎' },
   { path: 'simulate', label: '赛季模拟', ico: '∿' },
+  { path: 'play', label: '人机对赌', ico: '⚔' },
 ];
 
 /** 没有选中球队时的默认配色，用应用自身的强调色 */
@@ -43,7 +45,7 @@ export const go = (path) => { window.location.hash = `#/${path}`; };
 
 const readTheme = () => {
   try {
-    return localStorage.getItem('nba.theme') || 'dark';
+    return localStorage.getItem('dc-nba:theme') || 'dark';
   } catch {
     return 'dark';
   }
@@ -69,7 +71,7 @@ export default function App() {
   // 主题写到 <html> 上，CSS 变量随之切换
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    try { localStorage.setItem('nba.theme', theme); } catch { /* 隐私模式下忽略 */ }
+    try { localStorage.setItem('dc-nba:theme', theme); } catch { /* 隐私模式下忽略 */ }
   }, [theme]);
 
   // 队色写成 CSS 变量，整站的辉光、按钮、滑块都跟着变
@@ -153,6 +155,7 @@ export default function App() {
   else if (head === 'schedule') page = <Schedule />;
   else if (head === 'predict') page = <Predict initial={rest} />;
   else if (head === 'simulate') page = <Simulate />;
+  else if (head === 'play') page = <Play />;
   else page = <Dashboard />;
 
   const activeKey = head === 'team' ? 'teams' : head;
