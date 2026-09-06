@@ -4,6 +4,9 @@
  * 用 Node 22 内置的 node:sqlite，不引 better-sqlite3——后者要原生编译，
  * 在 alpine 容器和 Windows 上都是麻烦。
  *
+ * 版本注意：早期 22.x 需要 --experimental-sqlite 标志，22.23 起不需要。
+ * 如果以后有人把基础镜像往回钉到更早的 22.x，这里会以「找不到模块」失败。
+ *
  * 三条设计约束：
  *  1. **写不进去要优雅降级，不能崩。** 容器以非 root 用户(uid 1001)运行，
  *     卷若归 root 就会 SQLITE_READONLY。这时服务端继续提供只读功能，

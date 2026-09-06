@@ -111,6 +111,20 @@ localStorage 按源隔离而不是按路径，不加前缀会和别的作品互�
 脚本用 SQLite 自己的 `VACUUM INTO`，在一致性快照上产出可直接使用的单文件，
 不需要停服，也不需要容器里装 `sqlite3` 命令行。默认保留最近 7 份。
 
+容器内的 cron 示例：
+
+```
+20 3 * * * docker exec dc-nba node scripts/backup-db.mjs >> /home/dev/work/works/dc-nba/backup.log 2>&1
+```
+
+两个会让备份**静默失效**的坑：
+
+- **日志不要写 `/var/log/`**。那是 root 的目录，部署用的普通用户写不进去；
+  而 cron 的 `>>` 重定向在命令执行之前就要打开文件，打不开则整条任务直接不跑，
+  且不留任何错误。判断备份是否真的在跑，**看 `backups/` 里的文件日期，别看 crontab**。
+- **镜像里只有 `scripts/backup-db.mjs`，没有整个 `scripts/`**。`ingest.mjs` 是抓取脚本，
+  运行镜像里不该有它（`/api/refresh` 已关闭，抓取只在构建快照时做）。
+
 线程池挂掉会自动退回主线程计算，功能不因优化而失效。
 `GET /api/health` 返回线程池状态、缓存条目数、内存占用，方便压测与线上排查。
 

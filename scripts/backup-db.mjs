@@ -11,7 +11,13 @@
  *   KEEP=14 node scripts/backup-db.mjs                # 只保留最近 14 份
  *
  * 容器内跑（cron 示例，每天 3:20）：
- *   20 3 * * * docker exec dc-nba node scripts/backup-db.mjs >> /var/log/dc-nba-backup.log 2>&1
+ *   20 3 * * * docker exec dc-nba node scripts/backup-db.mjs >> /home/dev/work/works/dc-nba/backup.log 2>&1
+ *
+ * 日志路径不要写 /var/log/ —— 那是 root 的目录，普通用户写不进去。
+ * cron 的 >> 重定向在命令执行**之前**就要打开文件，打不开则整条任务直接不跑，
+ * 而且不会留下任何错误。这类失败是静默的：crontab 里那行看着好好的，
+ * 但 backups/ 一直是空的。判断备份是否真的在跑，看 backups/ 里的文件日期，
+ * 不要看 crontab 有没有配。
  */
 import fs from 'node:fs';
 import path from 'node:path';
