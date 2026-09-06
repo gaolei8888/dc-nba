@@ -13,6 +13,7 @@
     "start": "npm run build && node server/index.mjs"
   },
   "dependencies": {
+    "compression": "^1.8.1",
     "express": "^4.21.2"
   },
   "devDependencies": {

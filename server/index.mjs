@@ -3,11 +3,17 @@
  *   node server/index.mjs        (默认 http://localhost:5174)
  */
 import express from 'express';
+import compression from 'compression';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readJson, DATA_DIR } from './nbaClient.mjs';
+import * as db from './db.mjs';
+import {
+  initPool, run as runInPool, poolAvailable, cached, clearCaches,
+  cacheStats, pendingCount, sendCached,
+} from './pool.mjs';
 import {
   buildModel, predictGame, predictSchedule, simulateSeason, powerRankings, DEFAULT_PARAMS,
 } from './predict.mjs';
@@ -31,6 +37,7 @@ function loadStore() {
     throw new Error('数据缺失，请先运行  npm run ingest');
   }
   store = { teams, players, schedule, meta, injuries, gameday };
+  clearCaches();
   modelCache = new Map();
   console.log(`数据已加载: ${teams.length} 队 / ${players.length} 人 / ${schedule.games.length} 场 (${meta.priorSeason} → ${meta.targetSeason})`);
 }
@@ -72,14 +79,58 @@ function pickParams(src = {}) {
 // ---------------------------------------------------------------- 路由
 
 const app = express();
-app.use(express.json({ limit: '2mb' }));
 
-const wrap = (fn) => (req, res) => {
+// JSON 压缩率极高（赛程 528KB → 约 60KB）。1000 在线用户下带宽是比 CPU
+// 更早触顶的资源，这一行比任何计算优化都值钱。
+app.use(compression({
+  threshold: 1024,
+  // 大响应走 sendCached 的预压缩缓存，这里不要再压一遍
+  filter: (req, res) => !res.getHeader('Content-Encoding') && compression.filter(req, res),
+}));
+
+app.use(express.json({ limit: '256kb' }));
+
+// ---------------------------------------------------------------- 限流
+//
+// 公网可写接口必须限流。用固定窗口计数，简单够用；
+// 目标是挡住脚本刷分，不是抗 DDoS（那是网关的事）。
+const buckets = new Map();
+const rateLimit = ({ windowMs = 60_000, max = 60, key = 'ip' } = {}) => (req, res, next) => {
+  const id = `${key}:${req.ip}`;
+  const now = Date.now();
+  let b = buckets.get(id);
+  if (!b || now > b.reset) { b = { count: 0, reset: now + windowMs }; buckets.set(id, b); }
+  b.count += 1;
+  if (b.count > max) {
+    return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
+  }
+  next();
+};
+// 定期清理过期桶，避免 Map 无限增长
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of buckets) if (now > v.reset) buckets.delete(k);
+}, 120_000).unref();
+
+/** 需要令牌的接口 */
+function requireAuth(req, res, next) {
+  if (!db.isEnabled()) {
+    return res.status(503).json({ error: '服务端存储不可用', reason: db.getDisabledReason() });
+  }
+  const auth = req.get('authorization') ?? '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+  const player = token && db.authenticate(token);
+  if (!player) return res.status(401).json({ error: '令牌无效，请重新创建玩家' });
+  req.player = player;
+  next();
+}
+
+const wrap = (fn) => async (req, res) => {
   try {
-    fn(req, res);
+    await fn(req, res);
   } catch (e) {
     console.error(e);
-    res.status(400).json({ error: e.message });
+    if (!res.headersSent) res.status(400).json({ error: e.message });
   }
 };
 
@@ -91,6 +142,11 @@ app.get('/api/meta', wrap((req, res) => {
       teams: store.teams.length,
       players: store.players.length,
       games: store.schedule.games.length,
+    },
+    features: {
+      leaderboard: db.isEnabled(),
+      leaderboardReason: db.getDisabledReason(),
+      lottery: process.env.ENABLE_LOTTERY === '1',
     },
     injuries: {
       fetchedAt: store.injuries?.fetchedAt ?? null,
@@ -174,15 +230,18 @@ app.get('/api/teams/:id', wrap((req, res) => {
   });
 }));
 
-app.get('/api/players', wrap((req, res) => {
+app.get('/api/players', wrap(async (req, res) => {
   const { teamId, onRoster } = req.query;
-  let list = store.players;
-  if (teamId) list = list.filter((p) => p.teamId === Number(teamId));
-  if (onRoster === '1') list = list.filter((p) => p.onRoster);
-  res.json(withCost(getModel(pickParams(req.query)), list));
+  const key = `players|${teamId ?? ''}|${onRoster ?? ''}|${JSON.stringify(pickParams(req.query))}`;
+  await sendCached(res, req, key, () => {
+    let list = store.players;
+    if (teamId) list = list.filter((p) => p.teamId === Number(teamId));
+    if (onRoster === '1') list = list.filter((p) => p.onRoster);
+    return withCost(getModel(pickParams(req.query)), list);
+  });
 }));
 
-app.get('/api/schedule', wrap((req, res) => {
+app.get('/api/schedule', wrap(async (req, res) => {
   const { teamId, type = 'regular', from, to, predict, limit } = req.query;
   let games = store.schedule.games;
   if (type && type !== 'all') games = games.filter((g) => g.type === type);
@@ -196,14 +255,104 @@ app.get('/api/schedule', wrap((req, res) => {
 
   if (predict === '0') return res.json({ seasonYear: store.schedule.seasonYear, games });
   const model = getModel(pickParams(req.query));
-  res.json({
+  const out = outFromQuery(req);
+  // 同样的筛选 + 参数 + 缺阵名单必然产出同样的结果，缓存掉
+  const key = JSON.stringify([type, teamId ?? '', from ?? '', to ?? '', limit ?? '',
+    pickParams(req.query), out]);
+  await sendCached(res, req, `schedule|${key}`, () => ({
     seasonYear: store.schedule.seasonYear,
-    games: predictSchedule(model, games, outFromQuery(req)),
-  });
+    games: predictSchedule(model, games, out),
+  }));
 }));
 
-app.get('/api/rankings', wrap((req, res) => {
-  res.json(powerRankings(getModel(pickParams(req.query)), outFromQuery(req)));
+// ---------------------------------------------------------------- 排行榜
+
+/** 排行榜结果缓存：1000 在线用户下不能每次请求都跑一次全表聚合 */
+let lbCache = { at: 0, key: '', data: null };
+const LB_TTL = 10_000;
+
+app.get('/api/leaderboard', wrap((req, res) => {
+  if (!db.isEnabled()) {
+    return res.status(503).json({ error: '服务端存储不可用', reason: db.getDisabledReason() });
+  }
+  const mode = req.query.mode === 'live' ? 'live' : 'practice';
+  const min = Math.max(1, Math.min(200, Number(req.query.min) || 10));
+  const key = `${mode}:${min}`;
+  const now = Date.now();
+  if (lbCache.data && lbCache.key === key && now - lbCache.at < LB_TTL) {
+    return res.json({ ...lbCache.data, cached: true });
+  }
+  const data = {
+    mode,
+    min,
+    counts: db.counts(),
+    rows: db.leaderboard({ mode, min }),
+    generatedAt: new Date().toISOString(),
+  };
+  lbCache = { at: now, key, data };
+  res.json(data);
+}));
+
+/** 创建玩家，返回一次性令牌 */
+app.post('/api/players', rateLimit({ max: 5, windowMs: 600_000 }), wrap((req, res) => {
+  if (!db.isEnabled()) {
+    return res.status(503).json({ error: '服务端存储不可用', reason: db.getDisabledReason() });
+  }
+  res.json(db.createPlayer(req.body?.name));
+}));
+
+/** 用令牌确认身份 */
+app.get('/api/me', requireAuth, wrap((req, res) => {
+  res.json({ ...req.player, stats: db.playerStats(req.player.id) });
+}));
+
+app.post('/api/me/name', requireAuth, rateLimit({ max: 10 }), wrap((req, res) => {
+  const ok = db.renamePlayer(req.player.id, req.body?.name);
+  res.json({ ok });
+}));
+
+/**
+ * 同步预测。
+ * 客户端只报"押哪边、多少信心"，**得分一律由服务端查真实结果自己算**——
+ * 否则谁都能 POST 一个 999999 分。
+ */
+app.post('/api/picks', requireAuth, rateLimit({ max: 30 }), wrap((req, res) => {
+  const list = Array.isArray(req.body?.picks) ? req.body.picks.slice(0, 400) : [];
+  const byId = new Map((store.gameday.games ?? []).map((g) => [g.gameId, g]));
+
+  const rows = [];
+  for (const p of list) {
+    const g = byId.get(String(p.gameId));
+    if (!g) continue;
+    const side = p.side === 'home' ? 'home' : 'away';
+    const conf = Math.min(0.95, Math.max(0.5, Number(p.conf) || 0.5));
+    const correct = (side === 'home') === g.homeWin;
+    const pHome = side === 'home' ? conf : 1 - conf;
+    const y = g.homeWin ? 1 : 0;
+    rows.push({
+      gameId: g.gameId,
+      mode: 'practice',
+      side,
+      conf,
+      correct,
+      points: Math.round((conf - 0.5) * 200) * (correct ? 1 : -1),
+      brier: (pHome - y) ** 2,
+      modelCorrect: (g.modelProb >= 0.5) === g.homeWin,
+      modelPoints: Math.round((Math.max(g.modelProb, 1 - g.modelProb) - 0.5) * 200)
+        * (((g.modelProb >= 0.5) === g.homeWin) ? 1 : -1),
+      modelBrier: (g.modelProb - y) ** 2,
+    });
+  }
+  const inserted = rows.length ? db.savePicks(req.player.id, rows) : 0;
+  lbCache = { at: 0, key: '', data: null };
+  res.json({ received: list.length, inserted, stats: db.playerStats(req.player.id) });
+}));
+
+app.get('/api/rankings', wrap(async (req, res) => {
+  const params = pickParams(req.query);
+  const out = outFromQuery(req);
+  const key = JSON.stringify([params, out]);
+  res.json(await cached('rankings', key, () => powerRankings(getModel(params), out), { max: 40 }));
 }));
 
 app.post('/api/predict', wrap((req, res) => {
@@ -222,16 +371,42 @@ app.post('/api/predict', wrap((req, res) => {
   }));
 }));
 
-app.post('/api/simulate', wrap((req, res) => {
+app.post('/api/simulate', wrap(async (req, res) => {
   const { sims = 2000, out, params, seed } = req.body ?? {};
-  const model = getModel(pickParams(params));
-  const t0 = Date.now();
-  const result = simulateSeason(model, {
-    sims: Math.min(Math.max(Number(sims) || 2000, 100), 20000),
+  const payload = {
+    params: pickParams(params),
     out: normalizeOut(out),
+    sims: Math.min(Math.max(Number(sims) || 2000, 100), 20000),
     seed: Number(seed) || 20262027,
+  };
+  // 模拟用固定种子，同参数必然同结果——先查缓存，消除工作优于挪走工作
+  const key = JSON.stringify(payload);
+  const result = await cached('simulate', key, async () => {
+    if (poolAvailable()) {
+      try {
+        return await runInPool('simulate', payload);
+      } catch (e) {
+        // 线程池出问题就退回主线程，功能不能因为优化而挂掉
+        console.warn('线程池计算失败，退回主线程:', e.message);
+      }
+    }
+    const t0 = Date.now();
+    const r = simulateSeason(getModel(payload.params), payload);
+    return { ...r, ms: Date.now() - t0, inline: true };
+  }, { max: 40 });
+  res.json(result);
+}));
+
+/** 运行状态，方便压测和线上排查 */
+app.get('/api/health', wrap((req, res) => {
+  res.json({
+    ok: true,
+    pool: { available: poolAvailable(), pending: pendingCount() },
+    caches: cacheStats(),
+    db: { enabled: db.isEnabled(), reason: db.getDisabledReason() },
+    memoryMB: Math.round(process.memoryUsage().rss / 1048576),
+    uptimeSec: Math.round(process.uptime()),
   });
-  res.json({ ...result, ms: Date.now() - t0 });
 }));
 
 /** 触发重新抓取（会阻塞约 1 分钟）。 */
@@ -276,6 +451,9 @@ if (fs.existsSync(dist)) {
     res.type('html').send('<p>前端尚未构建。开发模式请运行 <code>npm run dev</code>，或先执行 <code>npm run build</code>。</p>');
   });
 }
+
+db.initDb();
+initPool();
 
 try {
   loadStore();

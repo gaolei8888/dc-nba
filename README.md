@@ -68,6 +68,43 @@ localStorage 按源隔离而不是按路径，不加前缀会和别的作品互�
 
 新赛季开打后，同一套机制会切到实时结算（ingest 会把已完成比赛带进来）。
 
+## 服务端存储与性能
+
+排行榜需要跨用户状态，这是整个应用唯一有状态的部分。
+
+**SQLite（`server/db.mjs`）** — 用 Node 22 内置的 `node:sqlite`，不引 `better-sqlite3`，
+省掉在 alpine 容器和 Windows 上的原生编译。三条设计约束：
+
+- **写不进去要优雅降级，不能崩。** 容器以非 root 用户（uid 1001）运行，卷若归 root
+  会 `SQLITE_READONLY`。启动时会真正写一次做探测，失败则记下可诊断的原因，
+  服务端继续提供只读功能，前端退回纯本地存档。
+- **绝不相信客户端报上来的分数。** 客户端只提交「押哪边、多少信心」，
+  得分由服务端查真实结果自己算。实测提交 `points: 999999` 会被忽略，
+  服务端按 conf 0.95 算出 90 分。
+- **不存密码。** 身份用随机令牌（`Authorization: Bearer`），服务端只存 SHA-256 哈希。
+  部署环境的网关双向剥离 Cookie，传统会话本来也用不了。
+
+**性能（针对约 1000 在线用户）** — 实测数据：
+
+| 问题 | 优化前 | 优化后 |
+| --- | --- | --- |
+| 20000 次模拟进行时，`/api/meta` 延迟 | 469 ms | **2 ms** |
+| 赛程接口出口带宽（1000 用户，10 秒/请求） | 51.6 MB/s | **4.0 MB/s** |
+| 混合请求吞吐 | 392 req/s | **516 req/s** |
+
+三层处理，顺序有讲究：
+
+1. **先消除工作**：模拟用固定种子，同参数必然同结果，直接缓存。
+   大响应连压缩后的字节一起缓存，命中时零 CPU。
+2. **再挪走工作**：缓存打不中的丢给 `worker_threads`（`server/pool.mjs`）。
+   注意——**把同步计算包进 Promise 并不会让它非阻塞**，事件循环照样卡住，
+   只有真正的工作线程才行。
+3. **最后压带宽**：brotli/gzip，赛程压缩率 92.2%。1000 用户规模下
+   带宽比 CPU 更早触顶，这一行比任何计算优化都值钱。
+
+线程池挂掉会自动退回主线程计算，功能不因优化而失效。
+`GET /api/health` 返回线程池状态、缓存条目数、内存占用，方便压测与线上排查。
+
 ## 界面
 
 「玻璃数据终端」风格：深色底铺当前球队主色的渐变光斑，内容层是半透明玻璃卡片，
@@ -231,6 +268,10 @@ scripts/backtest.mjs    在历史赛季上回测模型准确率
 server/
   nbaClient.mjs         stats.nba.com 客户端（浏览器请求头 + 串行限速 + 重试）
   espnClient.mjs        ESPN 伤病接口客户端（含姓名归一化匹配）
+  db.mjs                SQLite 存储（玩家、预测、排行榜）
+  pool.mjs              工作线程池 + 结果缓存 + 预压缩缓存
+  worker.mjs            计算工作线程
+  replay.mjs            逐日重放，生成对赌题库
   ratings.mjs           Elo 计算、轮换影响力与回归拟合
   predict.mjs           预测引擎（单场预测、赛程批量、赛季模拟、实力榜）
   teamMeta.mjs          30 队中文名与队色
@@ -251,7 +292,12 @@ data/                   抓取产物（已 gitignore）
 | `GET /api/rankings` | 实力榜 |
 | `POST /api/predict` | 单场预测 `{homeId, awayId, gameId?, neutral?, out?, params?}` |
 | `POST /api/simulate` | 赛季模拟 `{sims?, out?, params?, seed?}` |
-| `POST /api/refresh` | 重新抓取数据并热加载（约 40 秒） |
+| `POST /api/refresh` | 重新抓取数据并热加载（生产环境用 `ALLOW_REFRESH=0` 关闭） |
+| `GET /api/health` | 线程池 / 缓存 / 内存 / 数据库状态 |
+| `POST /api/players` | 创建玩家，返回一次性令牌 |
+| `GET /api/me` · `POST /api/me/name` | 用令牌确认身份 / 改名 |
+| `POST /api/picks` | 同步预测，得分由服务端计算 |
+| `GET /api/leaderboard?mode=&min=` | 排行榜（10 秒缓存） |
 
 GET 接口可用 `?out={"teamId":[playerId]}`（JSON 字符串）传入缺阵名单，
 以及 `?homeAdv=3&wElo=0.6&turnoverWeight=0&assumeHealthy=1` 等参数覆盖。

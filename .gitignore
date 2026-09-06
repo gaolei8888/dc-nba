@@ -1,6 +1,8 @@
 node_modules/
 web/dist/
 data/*.json
+data/*.db
+data/*.db-*
 data/history/
 data/raw/
 .env
