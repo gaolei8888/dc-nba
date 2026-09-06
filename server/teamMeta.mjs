@@ -1,0 +1,40 @@
+/** 30 支球队的静态元信息（中文队名 + 主色），用于界面展示。 */
+export const TEAM_META = {
+  ATL: { cn: '亚特兰大老鹰', color: '#E03A3E', alt: '#26282A' },
+  BOS: { cn: '波士顿凯尔特人', color: '#007A33', alt: '#BA9653' },
+  BKN: { cn: '布鲁克林篮网', color: '#1D1D1B', alt: '#777777' },
+  CHA: { cn: '夏洛特黄蜂', color: '#1D1160', alt: '#00788C' },
+  CHI: { cn: '芝加哥公牛', color: '#CE1141', alt: '#000000' },
+  CLE: { cn: '克利夫兰骑士', color: '#860038', alt: '#FDBB30' },
+  DAL: { cn: '达拉斯独行侠', color: '#00538C', alt: '#B8C4CA' },
+  DEN: { cn: '丹佛掘金', color: '#0E2240', alt: '#FEC524' },
+  DET: { cn: '底特律活塞', color: '#C8102E', alt: '#1D42BA' },
+  GSW: { cn: '金州勇士', color: '#1D428A', alt: '#FFC72C' },
+  HOU: { cn: '休斯顿火箭', color: '#CE1141', alt: '#C4CED4' },
+  IND: { cn: '印第安纳步行者', color: '#002D62', alt: '#FDBB30' },
+  LAC: { cn: '洛杉矶快船', color: '#C8102E', alt: '#1D428A' },
+  LAL: { cn: '洛杉矶湖人', color: '#552583', alt: '#FDB927' },
+  MEM: { cn: '孟菲斯灰熊', color: '#5D76A9', alt: '#12173F' },
+  MIA: { cn: '迈阿密热火', color: '#98002E', alt: '#F9A01B' },
+  MIL: { cn: '密尔沃基雄鹿', color: '#00471B', alt: '#EEE1C6' },
+  MIN: { cn: '明尼苏达森林狼', color: '#0C2340', alt: '#78BE20' },
+  NOP: { cn: '新奥尔良鹈鹕', color: '#0C2340', alt: '#C8102E' },
+  NYK: { cn: '纽约尼克斯', color: '#006BB6', alt: '#F58426' },
+  OKC: { cn: '俄克拉荷马城雷霆', color: '#007AC1', alt: '#EF3B24' },
+  ORL: { cn: '奥兰多魔术', color: '#0077C0', alt: '#C4CED4' },
+  PHI: { cn: '费城76人', color: '#006BB6', alt: '#ED174C' },
+  PHX: { cn: '菲尼克斯太阳', color: '#1D1160', alt: '#E56020' },
+  POR: { cn: '波特兰开拓者', color: '#E03A3E', alt: '#000000' },
+  SAC: { cn: '萨克拉门托国王', color: '#5A2D81', alt: '#63727A' },
+  SAS: { cn: '圣安东尼奥马刺', color: '#C4CED4', alt: '#000000' },
+  TOR: { cn: '多伦多猛龙', color: '#CE1141', alt: '#000000' },
+  UTA: { cn: '犹他爵士', color: '#002B5C', alt: '#F9A01B' },
+  WAS: { cn: '华盛顿奇才', color: '#002B5C', alt: '#E31837' },
+};
+
+/** 位置英文 -> 中文 */
+export const POS_CN = {
+  G: '后卫', F: '前锋', C: '中锋',
+  'G-F': '锋卫摇摆', 'F-G': '锋卫摇摆',
+  'F-C': '大前/中锋', 'C-F': '中锋/大前',
+};
