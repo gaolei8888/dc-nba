@@ -19,6 +19,31 @@ export const rate = (v, digits = 1) =>
 
 export const signClass = (v) => (v > 0 ? 'pos' : v < 0 ? 'neg' : '');
 
+/**
+ * 数据项的英文缩写。NBA 的这套缩写是通用语言，看数据的人基本都认，
+ * 所以界面上以缩写为主、中文为辅。集中放一份，避免各页各写一套。
+ */
+export const ABBR = {
+  // 基础
+  gp: 'GP', min: 'MIN', pts: 'PTS', reb: 'REB', ast: 'AST',
+  stl: 'STL', blk: 'BLK', tov: 'TOV', pf: 'PF',
+  fgPct: 'FG%', fgm: 'FGM', fga: 'FGA',
+  fg3m: '3PM', fg3a: '3PA', fg3Pct: '3P%',
+  ftm: 'FTM', fta: 'FTA', ftPct: 'FT%',
+  oreb: 'OREB', dreb: 'DREB', plusMinus: '+/-',
+  dd2: 'DD', td3: 'TD',
+  // 高阶
+  pie: 'PIE', usgPct: 'USG%', tsPct: 'TS%', efgPct: 'eFG%',
+  offRtg: 'ORtg', defRtg: 'DRtg', netRtg: 'NetRtg',
+  astPct: 'AST%', astTo: 'AST/TO', astRatio: 'AST Ratio',
+  orebPct: 'OREB%', drebPct: 'DREB%', rebPct: 'REB%',
+  tovPct: 'TOV%', pace: 'PACE', poss: 'POSS',
+  // 四要素与得分构成
+  ftaRate: 'FTr', pct3pt: '3PT%pts', pctPaint: 'PITP%', pctFastBreak: 'FB%',
+  // 本项目自有
+  elo: 'ELO', total: 'RTG', turnoverAdj: 'ΔROS', outCostPts: 'OUT',
+};
+
 /** 分区与赛区的中文名。球队页和总览页共用，避免各写一份走样。 */
 export const CONF_CN = { East: '东部', West: '西部' };
 

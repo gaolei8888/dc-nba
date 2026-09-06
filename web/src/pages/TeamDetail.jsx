@@ -3,7 +3,7 @@ import { useApp, go } from '../App.jsx';
 import { api, withOut } from '../lib/api.js';
 import {
   TeamLogo, TeamCell, PlayerHeadshot, StatTile, DataTable, InjuryBadge,
-  Loading, ErrorBox, Segmented, ProbBar,
+  Loading, ErrorBox, Segmented, ProbBar, Th,
 } from '../components/common.jsx';
 import PlayerTable from '../components/PlayerTable.jsx';
 import {
@@ -78,10 +78,10 @@ export default function TeamDetail({ teamId }) {
       </div>
 
       <div className="grid cols-5" style={{ marginBottom: 14 }}>
-        <StatTile label="进攻效率" value={num(t.adv.offRtg)} hint="每百回合得分" />
-        <StatTile label="防守效率" value={num(t.adv.defRtg)} hint="每百回合失分" />
-        <StatTile label="净效率" value={signed(t.adv.netRtg)} />
-        <StatTile label="节奏" value={num(t.adv.pace)} hint="每 48 分钟回合数" />
+        <StatTile abbr="ORtg" label="进攻效率" value={num(t.adv.offRtg)} hint="每百回合得分" />
+        <StatTile abbr="DRtg" label="防守效率" value={num(t.adv.defRtg)} hint="每百回合失分" />
+        <StatTile abbr="NetRtg" label="净效率" value={signed(t.adv.netRtg)} />
+        <StatTile abbr="PACE" label="节奏" value={num(t.adv.pace)} hint="每 48 分钟回合数" />
         <StatTile
           label={`${meta.targetSeason} 预计胜场`}
           value={projWins.toFixed(1)}
@@ -93,15 +93,15 @@ export default function TeamDetail({ teamId }) {
         <div className="card">
           <h2>球队数据 <span className="sub">{meta.priorSeason} 场均</span></h2>
           <div className="grid cols-3">
-            <StatTile label="得分" value={num(t.base.pts)} />
-            <StatTile label="篮板" value={num(t.base.reb)} />
-            <StatTile label="助攻" value={num(t.base.ast)} />
-            <StatTile label="投篮%" value={rate(t.base.fgPct)} />
-            <StatTile label="三分%" value={rate(t.base.fg3Pct)} />
-            <StatTile label="罚球%" value={rate(t.base.ftPct)} />
-            <StatTile label="真实命中%" value={rate(t.adv.tsPct)} />
-            <StatTile label="助攻率%" value={rate(t.adv.astPct)} />
-            <StatTile label="三分占比%" value={rate(t.scoring.pct3pt)} />
+            <StatTile abbr="PTS" label="得分" value={num(t.base.pts)} />
+            <StatTile abbr="REB" label="篮板" value={num(t.base.reb)} />
+            <StatTile abbr="AST" label="助攻" value={num(t.base.ast)} />
+            <StatTile abbr="FG%" label="投篮" value={rate(t.base.fgPct)} />
+            <StatTile abbr="3P%" label="三分" value={rate(t.base.fg3Pct)} />
+            <StatTile abbr="FT%" label="罚球" value={rate(t.base.ftPct)} />
+            <StatTile abbr="TS%" label="真实命中" value={rate(t.adv.tsPct)} />
+            <StatTile abbr="AST%" label="助攻率" value={rate(t.adv.astPct)} />
+            <StatTile abbr="3PA%" label="三分占比" value={rate(t.scoring.pct3pt)} />
           </div>
         </div>
 
@@ -112,8 +112,8 @@ export default function TeamDetail({ teamId }) {
           <h2>赛程特征</h2>
           <div className="grid cols-3">
             <StatTile label="主场场次" value={homeGames} />
-            <StatTile label="背靠背" value={b2b} />
-            <StatTile label="阵容更迭" value={signed(ranking.turnoverAdj, 2)} hint="夏窗转会带来的实力变化" />
+            <StatTile abbr="B2B" label="背靠背" value={b2b} />
+            <StatTile abbr="ΔROS" label="阵容更迭" value={signed(ranking.turnoverAdj, 2)} hint="夏窗转会带来的实力变化" />
           </div>
         </div>
       </div>
@@ -206,18 +206,21 @@ export default function TeamDetail({ teamId }) {
 
 function FourFactors({ ff }) {
   const rows = [
-    { i: 1, label: '有效命中率', own: ff.efgPct, opp: ff.oppEfgPct, better: 'high' },
-    { i: 2, label: '失误率', own: ff.tovPct, opp: ff.oppTovPct, better: 'low' },
-    { i: 3, label: '前场篮板率', own: ff.orebPct, opp: ff.oppOrebPct, better: 'high' },
-    { i: 4, label: '罚球造犯规率', own: ff.ftaRate, opp: ff.oppFtaRate, better: 'high' },
+    { i: 1, abbr: "eFG%", label: "有效命中率", own: ff.efgPct, opp: ff.oppEfgPct, better: 'high' },
+    { i: 2, abbr: "TOV%", label: "失误率", own: ff.tovPct, opp: ff.oppTovPct, better: 'low' },
+    { i: 3, abbr: "OREB%", label: "前场篮板率", own: ff.orebPct, opp: ff.oppOrebPct, better: 'high' },
+    { i: 4, abbr: "FTr", label: "罚球造犯规率", own: ff.ftaRate, opp: ff.oppFtaRate, better: 'high' },
   ];
   return (
     <DataTable
       columns={[
         // 按四要素的公认权重顺序固定排列，而不是按中文名排序
-        { key: 'label', label: '要素', align: 'left', width: 106, value: (r) => r.i, render: (r) => r.label },
-        { key: 'own', label: '己方', width: 66, render: (r) => `${rate(r.own)}%` },
-        { key: 'opp', label: '对手', width: 66, render: (r) => `${rate(r.opp)}%` },
+        {
+          key: "label", label: "要素", align: "left", width: 138, value: (r) => r.i,
+          render: (r) => <span className="row-label"><b>{r.abbr}</b><i>{r.label}</i></span>,
+        },
+        { key: "own", label: <Th abbr="TM" cn="己方" />, title: "己方", width: 66, render: (r) => `${rate(r.own)}%` },
+        { key: "opp", label: <Th abbr="OPP" cn="对手" />, title: "对手", width: 66, render: (r) => `${rate(r.opp)}%` },
         {
           key: 'diff', label: '优势', width: 66,
           value: (r) => (r.better === 'high' ? r.own - r.opp : r.opp - r.own),

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useApp, go } from '../App.jsx';
 import { api, withOut } from '../lib/api.js';
 import {
-  DataTable, TeamCell, TeamLogo, Loading, ErrorBox, ProbBar, Segmented,
+  DataTable, TeamCell, TeamLogo, Loading, ErrorBox, ProbBar, Segmented, Th,
 } from '../components/common.jsx';
 import {
   num, signed, signClass, fmtDate, probColor, CONF_CN, DIV_CN, DIV_ORDER,
@@ -61,28 +61,28 @@ export default function Dashboard() {
         { key: 'division', label: '赛区', width: 62, render: (r) => <span className="dim">{DIV_CN[r.division] ?? r.division}</span> },
       ]),
     {
-      key: 'total', label: '综合实力', title: '相对联盟平均的每场净胜分预期', width: 84,
+      key: "total", label: <Th abbr="RTG" cn="综合实力" />, title: "综合实力 RTG — 相对联盟平均的每场净胜分预期", width: 92,
       render: (r) => <b className={signClass(r.total)}>{signed(r.total, 2)}</b>,
     },
-    { key: 'elo', label: 'Elo', width: 62, render: (r) => <span className="mono">{num(r.elo, 0)}</span> },
+    { key: "elo", label: <Th abbr="ELO" cn="评级" />, title: "Elo 评级", width: 66, render: (r) => <span className="mono">{num(r.elo, 0)}</span> },
     {
-      key: 'netPts', label: '净效率分', title: '上赛季百回合净效率折算到每场', width: 78,
+      key: "netPts", label: <Th abbr="NET" cn="净效率分" />, title: "净效率分 NET — 上赛季百回合净效率折算到每场", width: 82,
       render: (r) => <span className={signClass(r.netPts)}>{signed(r.netPts)}</span>,
     },
     {
-      key: 'turnoverAdj', label: '阵容更迭', width: 78,
-      title: '转会、签约、离队带来的实力变化',
+      key: "turnoverAdj", label: <Th abbr="ROS" cn="阵容更迭" />, width: 82,
+      title: "阵容更迭 ROS — 转会、签约、离队带来的实力变化",
       render: (r) => <span className={signClass(r.turnoverAdj)}>{signed(r.turnoverAdj, 2)}</span>,
     },
     {
-      key: 'rosterAdj', label: '缺阵修正', width: 78,
+      key: "rosterAdj", label: <Th abbr="OUT" cn="缺阵修正" />, title: "缺阵修正 OUT — 勾掉的球员对实力的影响", width: 82,
       render: (r) => (r.rosterAdj
         ? <span className="neg">{signed(r.rosterAdj, 2)}</span>
         : <span className="dim">—</span>),
     },
-    { key: 'offRtg', label: '进攻', width: 60, render: (r) => num(r.offRtg) },
-    { key: 'defRtg', label: '防守', width: 60, render: (r) => num(r.defRtg) },
-    { key: 'pace', label: '节奏', width: 60, render: (r) => num(r.pace) },
+    { key: "offRtg", label: <Th abbr="ORtg" cn="进攻" />, title: "进攻效率 ORtg", width: 64, render: (r) => num(r.offRtg) },
+    { key: "defRtg", label: <Th abbr="DRtg" cn="防守" />, title: "防守效率 DRtg", width: 64, render: (r) => num(r.defRtg) },
+    { key: "pace", label: <Th abbr="PACE" cn="节奏" />, title: "节奏 PACE", width: 64, render: (r) => num(r.pace) },
     {
       key: 'priorRecord', label: `${meta.priorSeason} 战绩`, width: 90,
       render: (r) => <span className="mono dim">{r.priorRecord}</span>,

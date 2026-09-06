@@ -119,10 +119,27 @@ export function InjuryBadge({ injury }) {
   );
 }
 
-export function StatTile({ label, value, unit, hint }) {
+/**
+ * 表头标签：英文缩写在上、中文在下。
+ * NBA 的缩写是通用语言，但中文用户仍需要一眼看懂，所以两个都留。
+ */
+export function Th({ abbr, cn }) {
+  if (!abbr) return cn;
+  return (
+    <span className="th-label">
+      <b>{abbr}</b>
+      <i>{cn}</i>
+    </span>
+  );
+}
+
+export function StatTile({ label, abbr, value, unit, hint }) {
   return (
     <div className="tile" title={hint}>
-      <div className="k">{label}</div>
+      <div className="k">
+        {abbr && <em>{abbr}</em>}
+        {label}
+      </div>
       <div className="v">
         {value}
         {unit && <small>{unit}</small>}

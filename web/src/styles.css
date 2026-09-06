@@ -606,3 +606,23 @@ input[type='checkbox'] { accent-color: var(--team-raw); }
   line-height: 1.7;
 }
 .warn-box b { color: var(--text); }
+
+/* 表头：英文缩写在上、中文在下 */
+.th-label { display: inline-flex; flex-direction: column; align-items: flex-end; line-height: 1.25; }
+table.data th.left .th-label { align-items: flex-start; }
+.th-label b { font-size: 10.5px; font-weight: 750; letter-spacing: .5px; color: inherit; text-transform: none; }
+.th-label i {
+  font-style: normal; font-size: 9.5px; font-weight: 400;
+  opacity: .62; letter-spacing: 0; white-space: nowrap;
+}
+
+/* 数据块标签里的缩写前缀 */
+.tile .k em {
+  font-style: normal; font-weight: 750; letter-spacing: .5px; text-transform: none;
+  color: var(--team); margin-right: 6px;
+}
+
+/* 表格单元格里的「缩写 + 中文」，用于四要素这类以指标名做行标签的表 */
+.row-label { display: flex; flex-direction: column; line-height: 1.15; }
+.row-label b { font-size: 11px; font-weight: 700; letter-spacing: .02em; text-transform: none; }
+.row-label i { font-style: normal; font-size: 10px; opacity: .62; }
