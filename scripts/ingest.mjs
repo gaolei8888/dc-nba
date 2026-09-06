@@ -9,6 +9,8 @@ import { nbaGet, statsUrl, toRows, writeJson } from '../server/nbaClient.mjs';
 import { TEAM_META, POS_CN } from '../server/teamMeta.mjs';
 import { fetchInjuries } from '../server/espnClient.mjs';
 import { replaySeasonPicks } from '../server/replay.mjs';
+import fsNode from 'node:fs';
+import pathNode from 'node:path';
 import {
   buildGames, computeElo, carryOver, rotationImpact, fitRosterImpact, totalMinutes,
 } from '../server/ratings.mjs';
@@ -312,6 +314,43 @@ async function fetchGameLog(season, { optional = false } = {}) {
 
 // ---------------------------------------------------------------- 主流程
 
+/**
+ * 把 data/history/ 里的回测缓存压成一个紧凑数据集。
+ * 只保留重放需要的字段：比赛 id、日期、两队 id 与得分、谁是主场。
+ * 缓存不存在就跳过——它由 npm run backtest 首次运行时生成。
+ */
+function buildBacktestDataset() {
+  const dir = pathNode.join(process.cwd(), 'data', 'history');
+  if (!fsNode.existsSync(dir)) {
+    console.warn('  未找到 data/history/，跳过实验室数据集（先跑一次 npm run backtest）');
+    return;
+  }
+  const out = { seasons: {}, teamAdv: {}, builtAt: new Date().toISOString() };
+  let games = 0;
+  for (const f of fsNode.readdirSync(dir)) {
+    let m = f.match(/^gamelog_(\d{4}-\d{2})\.json$/);
+    if (m) {
+      const rows = JSON.parse(fsNode.readFileSync(pathNode.join(dir, f), 'utf8'));
+      const byGame = new Map();
+      for (const r of rows) {
+        const g = byGame.get(r.GAME_ID) ?? { d: r.GAME_DATE, s: [] };
+        g.s.push([r.TEAM_ID, r.PTS, r.MATCHUP.includes('vs.') ? 1 : 0]);
+        byGame.set(r.GAME_ID, g);
+      }
+      out.seasons[m[1]] = [...byGame.entries()].map(([i, g]) => ({ i, d: g.d, s: g.s }));
+      games += out.seasons[m[1]].length;
+      continue;
+    }
+    m = f.match(/^teamadv_(\d{4}-\d{2})\.json$/);
+    if (m) {
+      out.teamAdv[m[1]] = JSON.parse(fsNode.readFileSync(pathNode.join(dir, f), 'utf8'))
+        .map((r) => ({ t: r.TEAM_ID, n: r.NET_RATING, p: r.PACE }));
+    }
+  }
+  writeJson('backtest.json', out);
+  log(`实验室数据集：${Object.keys(out.seasons).length} 个赛季 / ${games} 场`);
+}
+
 async function main() {
   console.log(`\n抓取 NBA 数据   基准赛季=${PRIOR_SEASON}   预测赛季=${TARGET_SEASON}\n`);
   const t0 = Date.now();
@@ -414,6 +453,10 @@ async function main() {
     console.warn(`  缺少 ${priorPriorSeason} 数据，跳过对赌题库生成`);
   }
   writeJson('gameday.json', gameday);
+
+  // 模型实验室的数据集：把历史逐场结果压成紧凑格式随镜像走。
+  // 6150 场约 480KB（brotli 后 46KB），换来服务端可以随时按需回测。
+  buildBacktestDataset();
 
   writeJson('injuries.json', injuries);
   writeJson('teams.json', teams);
