@@ -124,6 +124,11 @@ export function buildModel(store, overrides = {}) {
   return {
     params, teams, players, schedule, meta, leagueAvg, impactB,
     byId, marginalCost, priorMarginalCost, restByGame,
+    // 总经理模式要能对任意阵容重算，所以需要一个全联盟球员索引，
+    // 以及联盟平均更迭量（阵容更迭是零和归一的，换人后要用同一个基准）
+    playerById: new Map(players.map((p) => [p.playerId, p])),
+    meanTurnoverDelta: meanDelta,
+    minutesOf,
   };
 }
 
@@ -157,19 +162,24 @@ function buildRestTable(games) {
  * 缺阵修正：把缺阵球员移出轮换后重算影响力。
  * 空出的时间由名单里排在后面的球员顶上，因此损失会小于球员本身的全部价值。
  */
-function rosterAdjustment(model, teamId, outIds) {
+function rosterAdjustment(model, teamId, outIds, overrideRoster = null) {
   const info = model.byId.get(teamId);
-  if (!info || !outIds?.length) return { deltaPts: 0, missing: [] };
+  if (!info) return { deltaPts: 0, missing: [] };
+  const roster = overrideRoster ?? info.roster;
+  if (!outIds?.length) return { deltaPts: 0, missing: [] };
 
   const exclude = new Set(outIds);
-  const without = rotationImpact(info.roster, { exclude, minutesOf: info.minutesOf });
-  const raw = model.impactB * (without - info.baseRotation) * (info.pace / 100);
+  const base = overrideRoster
+    ? rotationImpact(roster, { minutesOf: info.minutesOf })
+    : info.baseRotation;
+  const without = rotationImpact(roster, { exclude, minutesOf: info.minutesOf });
+  const raw = model.impactB * (without - base) * (info.pace / 100);
   // 顶替者最差也是替补级：缺人不会让球队变强
   const deltaPts = Math.min(0, raw) * model.params.rosterWeight;
 
   return {
     deltaPts,
-    missing: info.roster
+    missing: roster
       .filter((p) => exclude.has(p.playerId))
       .map((p) => ({
         playerId: p.playerId,
@@ -183,17 +193,34 @@ function rosterAdjustment(model, teamId, outIds) {
   };
 }
 
-/** 球队综合实力（每场净胜分，正数=强于联盟平均）。 */
-export function teamStrength(model, teamId, outIds = []) {
+/**
+ * 球队综合实力（每场净胜分，正数=强于联盟平均）。
+ *
+ * @param {Array} outIds  缺阵球员
+ * @param {Array} rosterIds 可选：用这份阵容代替真实名单（总经理模式用）。
+ *   给了它就连阵容更迭项一起重算——换了人，"相对上赛季变化了多少"当然也变了。
+ */
+export function teamStrength(model, teamId, outIds = [], rosterIds = null) {
   const info = model.byId.get(teamId);
   if (!info) throw new Error(`未知球队: ${teamId}`);
   const { wElo, wNet, turnoverWeight } = model.params;
   const wSum = wElo + wNet || 1;
 
   const core = (wElo * info.eloPts + wNet * info.netPts) / wSum;
-  const turnoverAdj = info.turnoverPts * turnoverWeight;
-  const roster = rosterAdjustment(model, teamId, outIds);
 
+  let turnoverPts = info.turnoverPts;
+  let roster;
+  if (rosterIds) {
+    const list = rosterIds.map((id) => model.playerById.get(id)).filter(Boolean);
+    const rot = rotationImpact(list, { minutesOf: model.minutesOf });
+    const delta = rot - (info.team.rotationPrior ?? 0) - model.meanTurnoverDelta;
+    turnoverPts = model.impactB * delta * (info.pace / 100);
+    roster = rosterAdjustment(model, teamId, outIds, list);
+  } else {
+    roster = rosterAdjustment(model, teamId, outIds);
+  }
+
+  const turnoverAdj = turnoverPts * turnoverWeight;
   return {
     teamId,
     core: round(core, 2),
