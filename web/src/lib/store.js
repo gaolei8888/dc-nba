@@ -8,10 +8,7 @@
  * 所有读写都包在 try/catch 里：隐私模式下 localStorage 会直接抛异常。
  */
 
-// 作品挂在 ai.tzspace.cn/works/dc-nba/，与主站同源。
-// localStorage 按「源」隔离而不是按路径，所有 /works/* 下的作品共享同一命名空间，
-// 所以键名必须带作品前缀，否则会和别的作品互相冲掉存档。
-const KEY = 'dc-nba:play.v1';
+import { loadGame, saveGame } from './profiles.js';
 
 const EMPTY = {
   version: 1,
@@ -23,32 +20,19 @@ const EMPTY = {
   cursor: null,
 };
 
-export function loadPlay() {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return { ...EMPTY };
-    const parsed = JSON.parse(raw);
-    if (parsed?.version !== 1) return { ...EMPTY };
-    return { ...EMPTY, ...parsed };
-  } catch {
-    return { ...EMPTY };
-  }
+export function loadPlay(profileId) {
+  const parsed = loadGame('play', profileId, null);
+  if (!parsed || parsed.version !== 1) return { ...EMPTY };
+  return { ...EMPTY, ...parsed };
 }
 
-export function savePlay(state) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(state));
-  } catch {
-    // 隐私模式 / 存储已满：游戏仍可玩，只是这一局不落盘
-  }
+export function savePlay(profileId, state) {
+  saveGame('play', profileId, state);
   return state;
 }
 
-export function resetPlay() {
-  try {
-    localStorage.removeItem(KEY);
-  } catch { /* 忽略 */ }
-  return { ...EMPTY };
+export function resetPlay(profileId) {
+  return savePlay(profileId, { ...EMPTY });
 }
 
 // ---------------------------------------------------------------- 计分

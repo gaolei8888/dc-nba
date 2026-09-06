@@ -11,14 +11,17 @@ import {
 const CONF_STEPS = [0.55, 0.65, 0.75, 0.85, 0.95];
 
 export default function Play() {
-  const { teamById, setAccent } = useApp();
+  const { teamById, setAccent, profileId } = useApp();
   const [index, setIndex] = useState(null);
   const [day, setDay] = useState(null);
   const [error, setError] = useState(null);
-  const [play, setPlay] = useState(loadPlay);
+  const [play, setPlay] = useState(() => loadPlay(profileId));
   const [pending, setPending] = useState({}); // gameId -> { side, conf } 尚未提交
 
   useEffect(() => { setAccent(null); }, [setAccent]);
+
+  // 切换玩家档案时重新载入该档案的进度
+  useEffect(() => { setPlay(loadPlay(profileId)); setPending({}); }, [profileId]);
 
   // 比赛日索引
   useEffect(() => {
@@ -27,7 +30,7 @@ export default function Play() {
         setIndex(d);
         setPlay((p) => {
           if (p.cursor && d.days.some((x) => x.date === p.cursor)) return p;
-          return savePlay({ ...p, cursor: d.days[0]?.date ?? null });
+          return savePlay(profileId, { ...p, cursor: d.days[0]?.date ?? null });
         });
       })
       .catch(setError);
@@ -46,7 +49,7 @@ export default function Play() {
     return () => { alive = false; };
   }, [cursor]);
 
-  const update = (fn) => setPlay((p) => savePlay(fn(p)));
+  const update = (fn) => setPlay((p) => savePlay(profileId, fn(p)));
 
   /** 已结算的全部记录，用来算总战绩 */
   const settledRows = useMemo(() => Object.values(play.settled ?? {}), [play.settled]);
@@ -208,7 +211,7 @@ export default function Play() {
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
             <button
               className="btn"
-              onClick={() => { setPlay(resetPlay()); setPending({}); }}
+              onClick={() => { setPlay(resetPlay(profileId)); setPending({}); }}
             >
               清空存档
             </button>

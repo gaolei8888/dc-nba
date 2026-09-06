@@ -2,6 +2,10 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 import { api } from './lib/api.js';
 import { Loading, ErrorBox } from './components/common.jsx';
 import { teamPalette } from './lib/color.js';
+import {
+  loadProfiles, ensureProfile, createProfile as createP, renameProfile as renameP,
+  switchProfile as switchP, deleteProfile as deleteP, importProfile as importP,
+} from './lib/profiles.js';
 import Dashboard from './pages/Dashboard.jsx';
 import Teams from './pages/Teams.jsx';
 import TeamDetail from './pages/TeamDetail.jsx';
@@ -10,6 +14,7 @@ import Schedule from './pages/Schedule.jsx';
 import Predict from './pages/Predict.jsx';
 import Simulate from './pages/Simulate.jsx';
 import Play from './pages/Play.jsx';
+import Profiles from './pages/Profiles.jsx';
 
 // ------------------------------------------------------------ 全局数据
 
@@ -24,6 +29,7 @@ const NAV = [
   { path: 'predict', label: '比赛预测', ico: '◎' },
   { path: 'simulate', label: '赛季模拟', ico: '∿' },
   { path: 'play', label: '人机对赌', ico: '⚔' },
+  { path: 'profiles', label: '玩家档案', ico: '⚉' },
 ];
 
 /** 没有选中球队时的默认配色，用应用自身的强调色 */
@@ -61,6 +67,8 @@ export default function App() {
   const [theme, setTheme] = useState(readTheme);
   // 当前主导配色的球队，决定背景光斑与卡片辉光
   const [accent, setAccent] = useState(null);
+  // 玩家档案：身份只是"这台浏览器上的一个本地档案"，没有服务端账号
+  const [prof, setProf] = useState(() => ensureProfile(loadProfiles()));
 
   useEffect(() => {
     Promise.all([api.meta(), api.teams(), api.injuries().catch(() => ({ players: [] }))])
@@ -129,8 +137,18 @@ export default function App() {
       setTheme,
       /** 页面用它把整站配色切到某支球队 */
       setAccent,
+
+      // ---- 玩家档案
+      profiles: prof.profiles,
+      profileId: prof.activeId,
+      profileName: prof.profiles.find((p) => p.id === prof.activeId)?.name ?? '',
+      createProfile: (name) => setProf((s2) => createP(s2, name)),
+      renameProfile: (id, name) => setProf((s2) => renameP(s2, id, name)),
+      switchProfile: (id) => setProf((s2) => switchP(s2, id)),
+      deleteProfile: (id) => setProf((s2) => deleteP(s2, id)),
+      importProfile: (code) => setProf((s2) => importP(s2, code)),
     };
-  }, [state, out, params, theme]);
+  }, [state, out, params, theme, prof]);
 
   if (state.loading) {
     return <div className="loading" style={{ paddingTop: 120 }}>正在加载数据…</div>;
@@ -156,6 +174,7 @@ export default function App() {
   else if (head === 'predict') page = <Predict initial={rest} />;
   else if (head === 'simulate') page = <Simulate />;
   else if (head === 'play') page = <Play />;
+  else if (head === 'profiles') page = <Profiles />;
   else page = <Dashboard />;
 
   const activeKey = head === 'team' ? 'teams' : head;
@@ -181,7 +200,7 @@ export default function App() {
             </button>
           ))}
 
-          <div className="side-bottom">
+          <div className="side-bottom" style={{ marginTop: 0 }}>
           <div className="side-box">
             <label title="上赛季因伤缺阵的球星会被埋没。开启后按场均分钟 × 典型出勤(70 场)估算新赛季轮换，只对上赛季出场满 10 场的球员生效。">
               <input
@@ -192,6 +211,28 @@ export default function App() {
               <span>假设全员健康</span>
             </label>
             <p>不勾选则沿用上赛季实际出勤</p>
+          </div>
+
+          <div className="side-box" style={{ marginTop: 'auto' }}>
+            <div style={{ fontSize: 10.5, color: 'var(--text-faint)', letterSpacing: '.6px', marginBottom: 5 }}>
+              当前玩家
+            </div>
+            <select
+              value={prof.activeId ?? ''}
+              onChange={(e) => ctx.switchProfile(e.target.value)}
+              style={{ width: '100%', minWidth: 0, fontSize: 12.5, padding: '5px 7px' }}
+            >
+              {prof.profiles.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+            <button
+              className="btn"
+              style={{ width: '100%', marginTop: 6, padding: '5px 8px', fontSize: 11.5 }}
+              onClick={() => go('profiles')}
+            >
+              管理档案
+            </button>
           </div>
 
           {(ctx.injuries.players?.length ?? 0) > 0 && (
