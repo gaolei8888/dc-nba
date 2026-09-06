@@ -61,4 +61,10 @@ export const api = {
     body: JSON.stringify({ picks }),
   }).then(json),
   leaderboard: (params) => get('/leaderboard', params),
+
+  // ---- 模型实验室
+  labMeta: () => get('/lab/meta'),
+  labBacktest: (body) => post('/lab/backtest', body),
+  labMeasure: (body) => post('/lab/measure', body),
+  labCounterfactual: (body) => post('/lab/counterfactual', body),
 };

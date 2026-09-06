@@ -10,6 +10,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readJson, DATA_DIR } from './nbaClient.mjs';
 import * as db from './db.mjs';
+import * as lab from './lab.mjs';
 import {
   initPool, run as runInPool, poolAvailable, cached, clearCaches,
   cacheStats, pendingCount, sendCached,
@@ -404,6 +405,96 @@ app.post('/api/simulate', wrap(async (req, res) => {
     return { ...r, ms: Date.now() - t0, inline: true };
   }, { max: 40 });
   res.json(result);
+}));
+
+// ---------------------------------------------------------------- 模型实验室
+//
+// 一次重放 4920 场是 CPU 密集的（约 300ms），必须走工作线程，
+// 否则并发几个请求就把事件循环卡死。结果按参数缓存。
+
+const LAB_SEASONS = ['2022-23', '2023-24', '2024-25', '2025-26'];
+
+/** 只接受白名单参数，避免用户塞进奇怪的东西 */
+const LAB_KEYS = ['wElo', 'wNet', 'k', 'homeAdv', 'spreadSd', 'restWeight', 'carryKeep', 'inSeasonElo'];
+const pickLabParams = (src = {}) => {
+  const p = {};
+  for (const k of LAB_KEYS) {
+    const v = Number(src[k]);
+    if (Number.isFinite(v)) p[k] = v;
+  }
+  return p;
+};
+
+const runLab = async (type, payload) => {
+  if (poolAvailable()) {
+    try {
+      return await runInPool(type, payload, { timeoutMs: 60_000 });
+    } catch (e) {
+      console.warn('实验室计算走线程池失败，退回主线程:', e.message);
+    }
+  }
+  // 兜底：主线程直接算。会卡事件循环，但功能不能因优化失效
+  const labData = readJson('backtest.json');
+  if (!labData) throw new Error('缺少 data/backtest.json，请先运行 npm run ingest');
+  const { seasons, params } = payload;
+  if (type === 'labBacktest') {
+    const rows = lab.replay(labData, seasons, params);
+    return {
+      seasons,
+      summary: lab.score(rows),
+      calibration: lab.calibration(rows),
+      slices: lab.slices(rows),
+      bySeason: seasons.map((s) => ({ season: s, ...lab.score(rows.filter((r) => r.season === s)) })),
+    };
+  }
+  if (type === 'labMeasure') {
+    return {
+      homeAdvantage: lab.homeAdvantageBySeason(labData, seasons, params),
+      rest: lab.restEffect(labData, seasons, params),
+    };
+  }
+  return lab.counterfactual(labData, seasons, payload.teamId, payload.deltaPts, params);
+};
+
+app.get('/api/lab/meta', wrap((req, res) => {
+  const ds = readJson('backtest.json');
+  res.json({
+    available: !!ds,
+    seasons: LAB_SEASONS,
+    allSeasons: ds ? Object.keys(ds.seasons).sort() : [],
+    games: ds ? LAB_SEASONS.reduce((n, s) => n + (ds.seasons[s]?.length ?? 0), 0) : 0,
+    defaults: lab.DEFAULTS,
+    keys: LAB_KEYS,
+  });
+}));
+
+app.post('/api/lab/backtest', rateLimit({ max: 60 }), wrap(async (req, res) => {
+  const seasons = (Array.isArray(req.body?.seasons) ? req.body.seasons : LAB_SEASONS)
+    .filter((s) => LAB_SEASONS.includes(s));
+  const params = pickLabParams(req.body?.params);
+  const key = JSON.stringify([seasons, params]);
+  res.json(await cached('labBacktest', key, () => runLab('labBacktest', { seasons, params }), { max: 60 }));
+}));
+
+app.post('/api/lab/measure', rateLimit({ max: 30 }), wrap(async (req, res) => {
+  const seasons = (Array.isArray(req.body?.seasons) ? req.body.seasons : LAB_SEASONS)
+    .filter((s) => LAB_SEASONS.includes(s));
+  const params = pickLabParams(req.body?.params);
+  const key = JSON.stringify([seasons, params]);
+  res.json(await cached('labMeasure', key, () => runLab('labMeasure', { seasons, params }), { max: 20 }));
+}));
+
+app.post('/api/lab/counterfactual', rateLimit({ max: 60 }), wrap(async (req, res) => {
+  const seasons = (Array.isArray(req.body?.seasons) ? req.body.seasons : ['2025-26'])
+    .filter((s) => LAB_SEASONS.includes(s));
+  const teamId = Number(req.body?.teamId);
+  const deltaPts = Math.max(-10, Math.min(10, Number(req.body?.deltaPts) || 0));
+  if (!store.teams.some((t) => t.teamId === teamId)) {
+    return res.status(400).json({ error: '未知球队' });
+  }
+  const params = pickLabParams(req.body?.params);
+  const key = JSON.stringify([seasons, teamId, deltaPts, params]);
+  res.json(await cached('labCf', key, () => runLab('labCounterfactual', { seasons, teamId, deltaPts, params }), { max: 80 }));
 }));
 
 /** 运行状态，方便压测和线上排查 */

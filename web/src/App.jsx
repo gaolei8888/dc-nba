@@ -17,6 +17,7 @@ import Predict from './pages/Predict.jsx';
 import Simulate from './pages/Simulate.jsx';
 import Play from './pages/Play.jsx';
 import Profiles from './pages/Profiles.jsx';
+import Lab from './pages/Lab.jsx';
 
 // ------------------------------------------------------------ 全局数据
 
@@ -31,6 +32,7 @@ const NAV = [
   { path: 'predict', label: '比赛预测', ico: '◎' },
   { path: 'simulate', label: '赛季模拟', ico: '∿' },
   { path: 'play', label: '人机对赌', ico: '⚔' },
+  { path: 'lab', label: '模型实验室', ico: '⚗' },
   { path: 'profiles', label: '玩家档案', ico: '⚉' },
 ];
 
@@ -196,6 +198,7 @@ export default function App() {
   else if (head === 'simulate') page = <Simulate />;
   else if (head === 'play') page = <Play />;
   else if (head === 'profiles') page = <Profiles />;
+  else if (head === 'lab') page = <Lab />;
   else page = <Dashboard />;
 
   const activeKey = head === 'team' ? 'teams' : head;
