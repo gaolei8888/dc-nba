@@ -1,25 +1,27 @@
 /**
  * 预测引擎。
  *
- * 思路：把每支球队折算成一个"相对联盟平均的每场净胜分"实力值，来源有三块——
+ * 思路：把每支球队折算成一个"相对联盟平均的每场净胜分"实力值，来源有四块——
  *   1. Elo：上赛季逐场结果推出的球队强度，赛季间向均值回归 25%
  *   2. 净效率：上赛季百回合净效率，按节奏折算成每场分差
- *   3. 阵容修正：因伤停/转会导致的阵容影响力变化（PIE×出场时间 回归到净效率）
+ *   3. 阵容更迭：新赛季名单与上赛季名单的轮换影响力之差（转会、签约、离队）
+ *   4. 缺阵修正：把指定球员移出轮换后重算影响力
  * 再叠加主场优势与背靠背/休息天数修正，得到预期分差；
  * 用正态分布（NBA 单场分差对盘口的标准差约 12 分）转成胜率。
  * 比分则由双方进攻/防守效率与节奏推出总分后按分差拆分。
  */
-import { ELO_BASE, ELO_PER_POINT } from './ratings.mjs';
+import { ELO_BASE, ELO_PER_POINT, rotationImpact } from './ratings.mjs';
 
 /** 默认可调参数，前端可覆盖。 */
 export const DEFAULT_PARAMS = {
-  wElo: 0.55,          // Elo 权重
-  wNet: 0.45,          // 净效率权重
-  homeAdv: 2.4,        // 主场优势（分）
-  restWeight: 1.0,     // 休息/背靠背修正强度
-  rosterWeight: 1.0,   // 阵容变动修正强度
-  spreadSd: 12.0,      // 单场分差标准差，用于胜率换算
-  seasonNoiseSd: 2.0,  // 赛季模拟中每队的实力不确定性（分）
+  wElo: 0.55,           // Elo 权重
+  wNet: 0.45,           // 净效率权重
+  homeAdv: 2.4,         // 主场优势（分）
+  restWeight: 1.0,      // 休息/背靠背修正强度
+  rosterWeight: 1.0,    // 缺阵影响强度
+  turnoverWeight: 0.8,  // 阵容更迭修正强度
+  spreadSd: 12.0,       // 单场分差标准差，用于胜率换算
+  seasonNoiseSd: 2.0,   // 赛季模拟中每队的实力不确定性（分）
 };
 
 // 休息天数 -> 分数修正
@@ -40,7 +42,7 @@ const normalCdf = (x, sd) => 0.5 * (1 + erf(x / (sd * Math.SQRT2)));
 const round = (v, n = 1) => Math.round(v * 10 ** n) / 10 ** n;
 
 /**
- * 预计算模型：球队实力、每支球队的休息天数表、阵容基准。
+ * 预计算模型：球队实力、轮换基准、每位球员的边际价值、休息天数表。
  * @param {object} store { teams, players, schedule, meta }
  */
 export function buildModel(store, overrides = {}) {
@@ -50,27 +52,56 @@ export function buildModel(store, overrides = {}) {
   const impactB = meta.impactFit.b;
 
   const rosterByTeam = new Map(teams.map((t) => [t.teamId, []]));
+  const priorRosterByTeam = new Map(teams.map((t) => [t.teamId, []]));
   for (const p of players) {
     if (p.onRoster) rosterByTeam.get(p.teamId)?.push(p);
+    if (p.gp > 0 && p.priorTeamId) priorRosterByTeam.get(p.priorTeamId)?.push(p);
   }
 
   const byId = new Map();
+  /** playerId -> 该球员缺阵时现属球队每场净胜分的变化（负数） */
+  const marginalCost = new Map();
+  /** playerId -> 该球员上赛季对原属球队的边际贡献，用于展示转出损失 */
+  const priorMarginalCost = new Map();
+
   for (const t of teams) {
     const roster = rosterByTeam.get(t.teamId) ?? [];
     const pace = t.adv.pace ?? leagueAvg.pace;
+    const toPts = (raw) => impactB * raw * (pace / 100);
+    const baseRotation = rotationImpact(roster);
+
+    // 逐个球员算边际价值：把他移出轮换，空出的时间由排在后面的人顶上
+    for (const p of roster) {
+      const without = rotationImpact(roster, { exclude: new Set([p.playerId]) });
+      marginalCost.set(p.playerId, round(Math.min(0, toPts(without - baseRotation)), 2));
+    }
+
+    // 同样的算法用在上赛季名单上，得到"这名球员当时值多少"
+    const priorRoster = priorRosterByTeam.get(t.teamId) ?? [];
+    const priorBase = rotationImpact(priorRoster);
+    for (const p of priorRoster) {
+      const without = rotationImpact(priorRoster, { exclude: new Set([p.playerId]) });
+      priorMarginalCost.set(p.playerId, round(Math.min(0, toPts(without - priorBase)), 2));
+    }
+
     byId.set(t.teamId, {
       team: t,
       roster,
       pace,
+      baseRotation,
       eloPts: (t.elo - ELO_BASE) / ELO_PER_POINT,
       netPts: (t.adv.netRtg ?? 0) * (pace / 100),
+      turnoverPts: t.turnoverPts ?? 0,
     });
   }
 
   // 每支球队在目标赛季的"上一场比赛日期"，用于算休息天数
   const restByGame = buildRestTable(schedule.games);
 
-  return { params, teams, players, schedule, meta, leagueAvg, impactB, byId, restByGame };
+  return {
+    params, teams, players, schedule, meta, leagueAvg, impactB,
+    byId, marginalCost, priorMarginalCost, restByGame,
+  };
 }
 
 /** 为赛程中每场比赛算出主客队各自的休息天数。 */
@@ -78,7 +109,9 @@ function buildRestTable(games) {
   const playable = games
     .filter((g) => g.homeId && g.awayId && g.type !== 'preseason')
     .slice()
-    .sort((a, b) => (a.date === b.date ? a.gameId.localeCompare(b.gameId) : a.date.localeCompare(b.date)));
+    .sort((a, b) => (a.date === b.date
+      ? a.gameId.localeCompare(b.gameId)
+      : a.date.localeCompare(b.date)));
 
   const lastPlayed = new Map();
   const table = new Map();
@@ -98,29 +131,32 @@ function buildRestTable(games) {
 }
 
 /**
- * 计算一支球队因伤停/缺阵产生的实力修正（每场分）。
- * @param {number[]} outIds 缺阵球员 id
+ * 缺阵修正：把缺阵球员移出轮换后重算影响力。
+ * 空出的时间由名单里排在后面的球员顶上，因此损失会小于球员本身的全部价值。
  */
 function rosterAdjustment(model, teamId, outIds) {
   const info = model.byId.get(teamId);
   if (!info || !outIds?.length) return { deltaPts: 0, missing: [] };
-  const outSet = new Set(outIds);
-  const missing = info.roster.filter((p) => outSet.has(p.playerId));
-  // 顶上来的替补以"替补级"为下限：缺阵不会让球队变强，最差也就是不变
-  const lost = (p) => Math.max(p.impactRaw ?? 0, 0);
-  const lostRaw = missing.reduce((s, p) => s + lost(p), 0);
-  // 缺阵者的出场时间由替补顶上，替补按替补级水平计算（影响力 0）
-  const deltaNet = model.impactB * -lostRaw;          // 每百回合净效率变化
-  const deltaPts = deltaNet * (info.pace / 100);      // 折算到每场
+
+  const exclude = new Set(outIds);
+  const without = rotationImpact(info.roster, { exclude });
+  const raw = model.impactB * (without - info.baseRotation) * (info.pace / 100);
+  // 顶替者最差也是替补级：缺人不会让球队变强
+  const deltaPts = Math.min(0, raw) * model.params.rosterWeight;
+
   return {
-    deltaPts: deltaPts * model.params.rosterWeight,
-    missing: missing.map((p) => ({
-      playerId: p.playerId,
-      name: p.name,
-      min: p.min,
-      pie: p.adv?.pie ?? null,
-      costPts: round(model.impactB * -lost(p) * (info.pace / 100), 2),
-    })),
+    deltaPts,
+    missing: info.roster
+      .filter((p) => exclude.has(p.playerId))
+      .map((p) => ({
+        playerId: p.playerId,
+        name: p.name,
+        min: p.min,
+        gp: p.gp,
+        pie: p.pie ?? p.adv?.pie ?? null,
+        costPts: model.marginalCost.get(p.playerId) ?? 0,
+      }))
+      .sort((a, b) => a.costPts - b.costPts),
   };
 }
 
@@ -128,17 +164,21 @@ function rosterAdjustment(model, teamId, outIds) {
 export function teamStrength(model, teamId, outIds = []) {
   const info = model.byId.get(teamId);
   if (!info) throw new Error(`未知球队: ${teamId}`);
-  const { wElo, wNet } = model.params;
+  const { wElo, wNet, turnoverWeight } = model.params;
   const wSum = wElo + wNet || 1;
+
   const core = (wElo * info.eloPts + wNet * info.netPts) / wSum;
+  const turnoverAdj = info.turnoverPts * turnoverWeight;
   const roster = rosterAdjustment(model, teamId, outIds);
+
   return {
     teamId,
     core: round(core, 2),
     eloPts: round(info.eloPts, 2),
     netPts: round(info.netPts, 2),
+    turnoverAdj: round(turnoverAdj, 2),
     rosterAdj: round(roster.deltaPts, 2),
-    total: round(core + roster.deltaPts, 2),
+    total: round(core + turnoverAdj + roster.deltaPts, 2),
     missing: roster.missing,
   };
 }
@@ -170,8 +210,10 @@ export function predictGame(model, opts) {
   const homeRtg = (hi.team.adv.offRtg ?? avgOff) + (ai.team.adv.defRtg ?? avgOff) - avgOff;
   const awayRtg = (ai.team.adv.offRtg ?? avgOff) + (hi.team.adv.defRtg ?? avgOff) - avgOff;
   let total = ((homeRtg + awayRtg) * pace) / 100;
-  // 阵容缺阵会同时压低总分
+  // 缺阵主要压低进攻端，因此也会压低总分
   total += (sHome.rosterAdj + sAway.rosterAdj) * 0.5;
+
+  const wNorm = model.params.wElo / (model.params.wElo + model.params.wNet);
 
   return {
     homeId,
@@ -189,8 +231,9 @@ export function predictGame(model, opts) {
     restAway,
     strength: { home: sHome, away: sAway },
     factors: [
-      { key: 'elo', label: 'Elo 实力差', value: round((sHome.eloPts - sAway.eloPts) * (model.params.wElo / (model.params.wElo + model.params.wNet)), 2) },
-      { key: 'net', label: '净效率差', value: round((sHome.netPts - sAway.netPts) * (model.params.wNet / (model.params.wElo + model.params.wNet)), 2) },
+      { key: 'elo', label: 'Elo 实力差', value: round((sHome.eloPts - sAway.eloPts) * wNorm, 2) },
+      { key: 'net', label: '净效率差', value: round((sHome.netPts - sAway.netPts) * (1 - wNorm), 2) },
+      { key: 'turnover', label: '阵容更迭', value: round(sHome.turnoverAdj - sAway.turnoverAdj, 2) },
       { key: 'hca', label: '主场优势', value: round(hca, 2) },
       { key: 'rest', label: '休息/背靠背', value: round(restPts, 2) },
       { key: 'roster', label: '阵容缺阵', value: round(sHome.rosterAdj - sAway.rosterAdj, 2) },
@@ -251,7 +294,7 @@ function mulberry32(seed) {
  */
 export function simulateSeason(model, { sims = 2000, out = {}, seed = 20262027 } = {}) {
   const rand = mulberry32(seed);
-  const teams = model.teams;
+  const { teams } = model;
   const idx = new Map(teams.map((t, i) => [t.teamId, i]));
   const n = teams.length;
 
@@ -321,10 +364,12 @@ export function simulateSeason(model, { sims = 2000, out = {}, seed = 20262027 }
     sims,
     teams: teams.map((t, i) => {
       const dist = winTotals[i];
+      const gp = scheduled[i];
       const pct = (v) => round((v / sims) * 100, 1);
       // 5% / 95% 分位数
-      const gp = scheduled[i];
-      let acc = 0; let p5 = 0; let p95 = gp;
+      let acc = 0;
+      let p5 = 0;
+      let p95 = gp;
       for (let w = 0; w <= gp; w++) {
         acc += dist[w];
         if (acc >= sims * 0.05 && p5 === 0) p5 = w;

@@ -8,7 +8,7 @@
 import { nbaGet, statsUrl, toRows, writeJson } from '../server/nbaClient.mjs';
 import { TEAM_META, POS_CN } from '../server/teamMeta.mjs';
 import {
-  buildGames, computeElo, carryOver, playerRawImpact, fitRosterImpact,
+  buildGames, computeElo, carryOver, rotationImpact, fitRosterImpact, totalMinutes,
 } from '../server/ratings.mjs';
 
 /** 依据当前日期推断“最近一个已结束赛季”和“即将开始的赛季”。 */
@@ -180,6 +180,7 @@ function buildPlayers(playerStats, rosters, teams) {
       teamAbbr: team?.abbr ?? b.TEAM_ABBREVIATION,
       teamCn: team?.cn ?? b.TEAM_ABBREVIATION,
       priorTeamAbbr: b.TEAM_ABBREVIATION,
+      priorTeamId: b.TEAM_ID,
       age: num(b.AGE),
       pos,
       posCn: POS_CN[pos] ?? pos,
@@ -205,7 +206,9 @@ function buildPlayers(playerStats, rosters, teams) {
         orebPct: num(a.OREB_PCT), drebPct: num(a.DREB_PCT), rebPct: num(a.REB_PCT),
         tovPct: num(a.TM_TOV_PCT), pace: num(a.PACE), pie: num(a.PIE), poss: num(a.POSS),
       },
-      impactRaw: playerRawImpact({ MIN: b.MIN, PIE: a.PIE, GP: b.GP }),
+      // 轮换影响力的两个输入，扁平存放便于 ratings.mjs 直接使用
+      pie: num(a.PIE) ?? 0,
+      totalMin: (num(b.MIN) ?? 0) * (num(b.GP) ?? 0),
       onRoster: !!ros,
     };
   });
@@ -222,6 +225,7 @@ function buildPlayers(playerStats, rosters, teams) {
       teamAbbr: team?.abbr ?? '',
       teamCn: team?.cn ?? '',
       priorTeamAbbr: '',
+      priorTeamId: null,
       age: num(ros.AGE),
       pos: ros.POSITION ?? '',
       posCn: POS_CN[ros.POSITION] ?? ros.POSITION ?? '',
@@ -229,7 +233,7 @@ function buildPlayers(playerStats, rosters, teams) {
       exp: ros.EXP ?? '', school: ros.SCHOOL ?? '',
       gp: 0, w: 0, l: 0, min: 0,
       base: {}, adv: {},
-      impactRaw: 0, onRoster: true, noPriorData: true,
+      pie: 0, totalMin: 0, onRoster: true, noPriorData: true,
     });
   }
   return players;
@@ -330,23 +334,36 @@ async function main() {
   const { final: eloFinal } = computeElo(games);
   const eloStart = carryOver(eloFinal);
 
-  // 阵容影响力回归：只用仍在名单中、且上赛季有出场的球员
-  const byTeam = new Map(teams.map((t) => [t.teamId, []]));
+  // ---- 轮换影响力：先用「上赛季名单 → 上赛季净效率」拟合换算系数
+  const lastSeasonRoster = new Map(teams.map((t) => [t.teamId, []]));
+  const currentRoster = new Map(teams.map((t) => [t.teamId, []]));
   for (const p of players) {
-    if (!p.onRoster || !p.impactRaw) continue;
-    byTeam.get(p.teamId)?.push(p);
+    if (p.gp > 0 && lastSeasonRoster.has(p.priorTeamId)) lastSeasonRoster.get(p.priorTeamId).push(p);
+    if (p.onRoster) currentRoster.get(p.teamId)?.push(p);
   }
-  const strengths = teams.map((t) => ({
-    teamId: t.teamId,
-    raw: (byTeam.get(t.teamId) ?? []).reduce((s, p) => s + p.impactRaw, 0),
+
+  const impactFit = fitRosterImpact(teams.map((t) => ({
+    raw: rotationImpact(lastSeasonRoster.get(t.teamId) ?? []),
     net: t.adv.netRtg ?? 0,
-  }));
-  const impactFit = fitRosterImpact(strengths);
+  })));
+
+  // 阵容更迭：新名单与上赛季名单的轮换影响力之差，换算成每场分数。
+  // 联盟层面做零和归一——净效率的联盟平均恒为 0，个别球员退役不该抬高整体水位。
+  const turnover = teams.map((t) => {
+    const before = rotationImpact(lastSeasonRoster.get(t.teamId) ?? []);
+    const after = rotationImpact(currentRoster.get(t.teamId) ?? []);
+    return { teamId: t.teamId, before, after, delta: after - before };
+  });
+  const meanDelta = turnover.reduce((s, x) => s + x.delta, 0) / turnover.length;
 
   for (const t of teams) {
+    const row = turnover.find((x) => x.teamId === t.teamId);
     t.eloEnd = r1(eloFinal[t.teamId]) ?? 1500;
     t.elo = r1(eloStart[t.teamId]) ?? 1500;
-    t.rosterRaw = strengths.find((s) => s.teamId === t.teamId).raw;
+    t.rotationPrior = row.before;
+    t.rotationNow = row.after;
+    // 未加权的阵容更迭修正（每场分），预测引擎再乘以 turnoverWeight
+    t.turnoverPts = impactFit.b * (row.delta - meanDelta) * ((t.adv.pace ?? 100) / 100);
   }
 
   const meta = {
@@ -355,6 +372,7 @@ async function main() {
     fetchedAt: new Date().toISOString(),
     gamesPlayedPrior: games.length,
     impactFit,
+    turnoverMeanDelta: meanDelta,
     leagueAvg: {
       offRtg: teams.reduce((s, t) => s + (t.adv.offRtg ?? 0), 0) / teams.length,
       defRtg: teams.reduce((s, t) => s + (t.adv.defRtg ?? 0), 0) / teams.length,
@@ -370,7 +388,10 @@ async function main() {
 
   console.log(`\n完成，用时 ${((Date.now() - t0) / 1000).toFixed(1)}s`);
   console.log(`  球队 ${teams.length} · 球员 ${players.length} · ${TARGET_SEASON} 赛程 ${schedule.games.length} 场`);
-  console.log(`  阵容影响力回归 R²=${impactFit.r2.toFixed(3)}  b=${impactFit.b.toFixed(4)}`);
+  console.log(`  轮换影响力回归 R²=${impactFit.r2.toFixed(3)}  b=${impactFit.b.toFixed(4)}`);
+  const moved = [...teams].sort((a, b) => b.turnoverPts - a.turnoverPts);
+  console.log(`  阵容更迭最大: ${moved[0].abbr} ${moved[0].turnoverPts > 0 ? '+' : ''}${moved[0].turnoverPts.toFixed(2)} / `
+    + `${moved[29].abbr} ${moved[29].turnoverPts.toFixed(2)} 分每场`);
 }
 
 main().catch((e) => {

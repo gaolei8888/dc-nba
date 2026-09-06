@@ -38,7 +38,7 @@ export default function TeamDetail({ teamId }) {
   if (data.loading) return <Loading />;
   if (data.error) return <ErrorBox error={data.error} />;
 
-  const { team, roster, schedule, ranking } = data;
+  const { team, roster, arrivals, departures, schedule, ranking } = data;
   const games = month === 'all' ? schedule : schedule.filter((g) => monthOf(g.date) === Number(month));
 
   const projWins = schedule
@@ -65,7 +65,11 @@ export default function TeamDetail({ teamId }) {
         <StatTile label="综合实力（每场净胜分）" value={signed(ranking.total, 2)} hint="含当前缺阵修正" />
         <StatTile label="实力排名" value={`第 ${ranking.rank}`} unit=" / 30" />
         <StatTile label={`${meta.targetSeason} 预计胜场`} value={projWins.toFixed(1)} unit={` / ${schedule.filter((g) => g.type === 'regular').length}`} />
-        <StatTile label="主场 / 背靠背" value={`${homeGames} / ${b2b}`} hint="主场场次 与 背靠背场次" />
+        <StatTile
+          label="阵容更迭修正"
+          value={signed(ranking.turnoverAdj, 2)}
+          hint="夏窗转会、签约、离队带来的实力变化（每场净胜分）"
+        />
       </div>
 
       <div className="grid cols-2">
@@ -127,7 +131,6 @@ export default function TeamDetail({ teamId }) {
         <PlayerTable
           rows={roster}
           mode={statMode}
-          impactB={meta.impactFit.b}
           nameColumn={{
             key: 'name', label: '球员', align: 'left', width: 220,
             render: (p) => (
@@ -156,6 +159,24 @@ export default function TeamDetail({ teamId }) {
 
       <div className="card">
         <h2>
+          阵容更迭
+          <span className="sub">
+            转入 {arrivals.length} 人 · 转出 {departures.length} 人 ·
+            合计 {signed(ranking.turnoverAdj, 2)} 分/场
+          </span>
+        </h2>
+        <div className="grid cols-2">
+          <MoveList title="转入" tone="pos" rows={arrivals} teamById={teamById} from />
+          <MoveList title="转出" tone="neg" rows={departures} teamById={teamById} />
+        </div>
+        <p className="note" style={{ marginTop: 10 }}>
+          按上赛季整季总出场分钟排序。上赛季没有 NBA 出场记录的球员（新秀、海外新援）
+          模型按替补级计算，不计入实力增减。
+        </p>
+      </div>
+
+      <div className="card">
+        <h2>
           {meta.targetSeason} 赛程与预测
           <span className="sub">{games.length} 场</span>
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
@@ -167,10 +188,48 @@ export default function TeamDetail({ teamId }) {
         </h2>
         <TeamSchedule games={games} teamId={teamId} teamById={teamById} />
         <p className="note" style={{ marginTop: 10 }}>
+          全季 {homeGames} 个主场、{b2b} 场背靠背。
           预计胜场按逐场胜率累加得到，已计入主客场、休息天数与当前缺阵名单。
         </p>
       </div>
     </>
+  );
+}
+
+/** 转入/转出名单：显示球员、原属/现属球队、上赛季产出与模型估值 */
+function MoveList({ title, tone, rows, teamById, from }) {
+  if (!rows.length) return <div><b style={{ fontSize: 13 }}>{title}</b><div className="empty">无</div></div>;
+  return (
+    <div>
+      <b style={{ fontSize: 13 }} className={tone}>{title}</b>
+      <div className="scroll-y" style={{ maxHeight: 300, marginTop: 6 }}>
+        <table className="data">
+          <tbody>
+            {rows.map((p) => {
+              const other = teamById.get(from ? p.priorTeamId : p.teamId);
+              return (
+                <tr key={p.playerId}>
+                  <td className="left" style={{ width: 150 }}>{p.name}</td>
+                  <td className="left dim" style={{ width: 90, fontSize: 11 }}>
+                    {p.noPriorData
+                      ? <span className="chip">新秀/无数据</span>
+                      : other ? `${from ? '来自' : '去往'} ${other.abbr}` : (from ? '自由球员' : '离开联盟')}
+                  </td>
+                  <td className="dim" style={{ width: 78, fontSize: 11 }}>
+                    {p.gp ? `${p.gp}场 ${num(p.min)}分` : '—'}
+                  </td>
+                  <td style={{ width: 56 }} className="mono">
+                    {p.outCostPts < -0.05
+                      ? <span className={tone}>{num(Math.abs(p.outCostPts), 1)}</span>
+                      : <span className="dim">≈0</span>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 

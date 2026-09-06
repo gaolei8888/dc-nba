@@ -1,5 +1,5 @@
 /**
- * 评级计算：Elo（基于上赛季逐场结果）+ 阵容影响力回归。
+ * 评级计算：Elo（基于上赛季逐场结果）+ 轮换影响力。
  * 这两项是预测引擎的输入，在 ingest 阶段预先算好写入 data/。
  */
 
@@ -45,7 +45,7 @@ export function buildGames(logRows) {
 }
 
 /**
- * 538 风格 Elo：K=20，胜负分差放大系数抑制“垃圾时间”虚高。
+ * 538 风格 Elo：K=20，胜负分差放大系数抑制"垃圾时间"虚高。
  * 返回 { 赛季末 Elo, 逐场轨迹 }。
  */
 export function computeElo(games, { k = 20 } = {}) {
@@ -64,7 +64,11 @@ export function computeElo(games, { k = 20 } = {}) {
     const shift = k * movMult * ((g.home.win ? 1 : 0) - expHome);
     elo.set(g.home.teamId, eh + shift);
     elo.set(g.away.teamId, ea - shift);
-    history.push({ gameId: g.gameId, date: g.date, home: g.home.abbr, away: g.away.abbr, homeElo: eh + shift, awayElo: ea - shift });
+    history.push({
+      gameId: g.gameId, date: g.date,
+      home: g.home.abbr, away: g.away.abbr,
+      homeElo: eh + shift, awayElo: ea - shift,
+    });
   }
   return { final: Object.fromEntries(elo), history };
 }
@@ -76,36 +80,61 @@ export function carryOver(finalElo, { keep = 0.75, mean = ELO_BASE } = {}) {
   return out;
 }
 
-/**
- * 球员影响力：以 PIE（球员影响估值）超出替补级基准的部分，按出场时间加权。
- * 单位是“原始分”，再通过对球队净效率的最小二乘回归换算成每百回合得分。
- */
+// ---------------------------------------------------------------- 轮换影响力
+
+/** PIE 的"替补级"基准：低于此值的球员对球队没有正面贡献。 */
 export const REPLACEMENT_PIE = 0.085;
 
-export function playerRawImpact(p) {
-  const min = Number(p.MIN) || 0;
-  const pie = Number(p.PIE) || 0;
-  const gp = Number(p.GP) || 0;
-  // 样本太小的球员向替补级收缩，避免 3 场高 PIE 的噪声
-  const shrink = gp / (gp + 12);
-  return (pie - REPLACEMENT_PIE) * min * shrink;
+/** 一支球队整个常规赛的总上场时间：5 人 × 48 分钟 × 82 场。 */
+export const TEAM_SEASON_MINUTES = 240 * 82;
+
+/** 球员整季总出场分钟。场均分钟会被垃圾时间的临时工拉高，总分钟才反映真实轮换地位。 */
+export const totalMinutes = (p) => (p.min ?? 0) * (p.gp ?? 0);
+
+const pieOf = (p) => p.pie ?? p.adv?.pie ?? 0;
+
+/**
+ * 轮换影响力：按整季总出场分钟降序取球员，累计到球队总分钟上限为止，
+ * 累加 (PIE − 替补级) × 分钟，再除以 82 折算成每场。
+ *
+ * 上限的意义：一支球队每场只有 240 分钟可分配。名单再长，
+ * 也只有排在前面的人真正吃到轮换时间；填不满的部分视为替补级（影响力 0）。
+ * 这同时让"上赛季名单"与"新赛季名单"在同一把尺子上可比。
+ */
+export function rotationImpact(players, { cap = TEAM_SEASON_MINUTES, exclude } = {}) {
+  const list = exclude?.size ? players.filter((p) => !exclude.has(p.playerId)) : players;
+  const sorted = [...list].sort((a, b) => totalMinutes(b) - totalMinutes(a));
+  let remaining = cap;
+  let sum = 0;
+  for (const p of sorted) {
+    if (remaining <= 0) break;
+    const minutes = Math.min(totalMinutes(p), remaining);
+    sum += (pieOf(p) - REPLACEMENT_PIE) * minutes;
+    remaining -= minutes;
+  }
+  return sum / 82;
 }
 
-/** 用 30 队做 netRating ≈ a + b·Σimpact 的一元回归，得到换算系数。 */
-export function fitRosterImpact(teamStrengths) {
-  const n = teamStrengths.length;
-  const mx = teamStrengths.reduce((s, t) => s + t.raw, 0) / n;
-  const my = teamStrengths.reduce((s, t) => s + t.net, 0) / n;
-  let num = 0, den = 0;
-  for (const t of teamStrengths) {
+/**
+ * 一元最小二乘：净效率 ≈ a + b × 轮换影响力。
+ * 用 30 支球队的「上赛季名单 → 上赛季净效率」拟合，得到把影响力换算成
+ * 每百回合得分的系数 b。
+ */
+export function fitRosterImpact(samples) {
+  const n = samples.length;
+  const mx = samples.reduce((s, t) => s + t.raw, 0) / n;
+  const my = samples.reduce((s, t) => s + t.net, 0) / n;
+  let num = 0;
+  let den = 0;
+  for (const t of samples) {
     num += (t.raw - mx) * (t.net - my);
     den += (t.raw - mx) ** 2;
   }
   const b = den === 0 ? 0 : num / den;
   const a = my - b * mx;
-  // 拟合优度，用于在界面上说明模型可信度
-  let ssTot = 0, ssRes = 0;
-  for (const t of teamStrengths) {
+  let ssTot = 0;
+  let ssRes = 0;
+  for (const t of samples) {
     ssTot += (t.net - my) ** 2;
     ssRes += (t.net - (a + b * t.raw)) ** 2;
   }

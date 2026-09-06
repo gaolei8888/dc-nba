@@ -127,7 +127,6 @@ export default function Players() {
         <PlayerTable
           rows={rows}
           mode={mode}
-          impactB={meta.impactFit.b}
           maxHeight={620}
           onRowClick={(p) => go(`team/${p.teamId}`)}
           nameColumn={{

@@ -25,8 +25,8 @@ export const BASE_COLUMNS = [
   },
 ];
 
-/** 高阶数据列。impactB 是服务端拟合出的“影响力 -> 净效率”系数。 */
-export const advColumns = (impactB = 2.6) => [
+/** 高阶数据列。 */
+export const ADV_COLUMNS = [
   { key: 'gp', label: '出场', width: 52 },
   { key: 'min', label: '时间', width: 52, render: (r) => num(r.min) },
   {
@@ -56,11 +56,13 @@ export const advColumns = (impactB = 2.6) => [
   { key: 'tovPct', label: '失误率', width: 62, value: a('tovPct'), render: (r) => rate(r.adv?.tovPct) },
   { key: 'astTo', label: '助攻失误比', width: 78, value: a('astTo'), render: (r) => num(r.adv?.astTo, 2) },
   {
-    key: 'impactRaw', label: '缺阵影响', width: 76,
-    title: '该球员缺阵时模型预计球队每场净胜分的损失',
-    render: (r) => (r.impactRaw > 0
-      ? <span className="neg">-{num(r.impactRaw * impactB, 1)}</span>
-      : <span className="dim">—</span>),
+    key: 'outCostPts', label: '缺阵影响', width: 80,
+    title: '该球员缺阵时，模型预计球队每场净胜分的变化（空出的时间由名单里排在后面的人顶上）',
+    render: (r) => {
+      if (r.outCostPts === null || r.outCostPts === undefined) return <span className="dim">—</span>;
+      if (r.outCostPts > -0.05) return <span className="dim" title="PIE 低于替补级，模型认为顶替者可以打平">≈0</span>;
+      return <span className="neg">{num(r.outCostPts, 1)}</span>;
+    },
   },
 ];
 
@@ -69,9 +71,9 @@ export const advColumns = (impactB = 2.6) => [
  * nameColumn 可覆盖首列（例如球队页加缺阵勾选框）
  */
 export default function PlayerTable({
-  rows, mode = 'base', nameColumn, extraColumns = [], onRowClick, maxHeight, impactB,
+  rows, mode = 'base', nameColumn, extraColumns = [], onRowClick, maxHeight,
 }) {
-  const stats = mode === 'adv' ? advColumns(impactB) : BASE_COLUMNS;
+  const stats = mode === 'adv' ? ADV_COLUMNS : BASE_COLUMNS;
   const columns = [nameColumn, ...extraColumns, ...stats].filter(Boolean);
   return (
     <DataTable

@@ -95,6 +95,12 @@ app.get('/api/meta', wrap((req, res) => {
 
 app.get('/api/teams', wrap((req, res) => res.json(store.teams)));
 
+/** 给球员补上模型算出的缺阵边际价值（每场净胜分，负数）。 */
+const withCost = (model, list) => list.map((p) => ({
+  ...p,
+  outCostPts: model.marginalCost.get(p.playerId) ?? null,
+}));
+
 app.get('/api/teams/:id', wrap((req, res) => {
   const id = Number(req.params.id);
   const team = store.teams.find((t) => t.teamId === id);
@@ -102,15 +108,27 @@ app.get('/api/teams/:id', wrap((req, res) => {
 
   const model = getModel(pickParams(req.query));
   const out = outFromQuery(req);
-  const roster = store.players
+  const roster = withCost(model, store.players
     .filter((p) => p.teamId === id && p.onRoster)
-    .sort((a, b) => (b.min ?? 0) - (a.min ?? 0));
+    .sort((a, b) => (b.min ?? 0) - (a.min ?? 0)));
+
+  // 阵容更迭明细：新加盟的人 / 上赛季在队但已不在名单的人
+  const arrivals = roster
+    .filter((p) => p.priorTeamId !== id)
+    .sort((a, b) => (b.totalMin ?? 0) - (a.totalMin ?? 0));
+  // 转出球员按他上赛季在本队的边际贡献估值，而不是在新东家的
+  const departures = store.players
+    .filter((p) => p.priorTeamId === id && p.teamId !== id && p.gp > 0)
+    .sort((a, b) => (b.totalMin ?? 0) - (a.totalMin ?? 0))
+    .map((p) => ({ ...p, outCostPts: model.priorMarginalCost.get(p.playerId) ?? null }));
   const games = store.schedule.games.filter(
     (g) => (g.homeId === id || g.awayId === id) && g.type !== 'preseason',
   );
   res.json({
     team,
     roster,
+    arrivals,
+    departures,
     schedule: predictSchedule(model, games, out),
     ranking: powerRankings(model, out).find((r) => r.teamId === id),
   });
@@ -121,7 +139,7 @@ app.get('/api/players', wrap((req, res) => {
   let list = store.players;
   if (teamId) list = list.filter((p) => p.teamId === Number(teamId));
   if (onRoster === '1') list = list.filter((p) => p.onRoster);
-  res.json(list);
+  res.json(withCost(getModel(pickParams(req.query)), list));
 }));
 
 app.get('/api/schedule', wrap((req, res) => {

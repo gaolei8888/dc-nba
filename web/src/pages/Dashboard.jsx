@@ -41,6 +41,11 @@ export default function Dashboard() {
     },
     { key: 'elo', label: 'Elo', width: 70, render: (r) => <span className="mono">{num(r.elo, 0)}</span> },
     { key: 'netPts', label: '净效率分', title: '上赛季百回合净效率折算到每场', width: 84, render: (r) => <span className={signClass(r.netPts)}>{signed(r.netPts)}</span> },
+    {
+      key: 'turnoverAdj', label: '阵容更迭', width: 84,
+      title: '转会、签约、离队带来的实力变化',
+      render: (r) => <span className={signClass(r.turnoverAdj)}>{signed(r.turnoverAdj, 2)}</span>,
+    },
     { key: 'rosterAdj', label: '缺阵修正', width: 84, render: (r) => (r.rosterAdj ? <span className="neg">{signed(r.rosterAdj, 2)}</span> : <span className="dim">—</span>) },
     { key: 'offRtg', label: '进攻', width: 64, render: (r) => num(r.offRtg) },
     { key: 'defRtg', label: '防守', width: 64, render: (r) => num(r.defRtg) },
@@ -63,9 +68,10 @@ export default function Dashboard() {
         <StatTile label="东部领头" value={east[0].cn} unit={`  ${signed(east[0].total, 1)}`} />
         <StatTile label="西部领头" value={west[0].cn} unit={`  ${signed(west[0].total, 1)}`} />
         <StatTile
-          label="模型拟合优度"
-          value={`R² ${meta.impactFit.r2.toFixed(2)}`}
-          hint="阵容影响力对球队净效率的回归拟合优度"
+          label="补强最多"
+          value={[...rankings].sort((a, b) => b.turnoverAdj - a.turnoverAdj)[0].cn}
+          unit={`  ${signed([...rankings].sort((a, b) => b.turnoverAdj - a.turnoverAdj)[0].turnoverAdj, 1)}`}
+          hint="夏窗阵容更迭带来的实力变化"
         />
       </div>
 
@@ -95,11 +101,14 @@ export default function Dashboard() {
       <div className="card">
         <h2>模型说明</h2>
         <p className="note">
-          <b>综合实力</b> = Elo 折算分 × {num(meta.defaultParams.wElo, 2)} + 净效率折算分 × {num(meta.defaultParams.wNet, 2)}，
-          单位是相对联盟平均的每场净胜分。<br />
-          <b>Elo</b> 由上赛季逐场结果迭代得出（含分差放大项），赛季间向 1500 回归 25%，模拟球员流动与均值回归。<br />
-          <b>缺阵修正</b> 把球员的 PIE × 出场时间折算成球队净效率变化（30 队最小二乘拟合，R² = {meta.impactFit.r2.toFixed(3)}），
-          在球队页或预测页勾选缺阵球员即可实时生效。<br />
+          <b>综合实力</b> = Elo 折算分 × {num(meta.defaultParams.wElo, 2)} + 净效率折算分 × {num(meta.defaultParams.wNet, 2)}
+          + 阵容更迭 + 缺阵修正，单位是相对联盟平均的每场净胜分。<br />
+          <b>Elo</b> 由上赛季逐场结果迭代得出（含分差放大项），赛季间向 1500 回归 25%。<br />
+          <b>轮换影响力</b> 按整季总出场分钟降序取球员、累计到球队总分钟上限，累加 (PIE − 替补级) × 分钟。
+          用 30 队的「上赛季名单 → 上赛季净效率」拟合，R² = {meta.impactFit.r2.toFixed(3)}。<br />
+          <b>阵容更迭</b> 是新名单与上赛季名单轮换影响力之差，联盟层面做零和归一，
+          默认按 {num(meta.defaultParams.turnoverWeight, 2)} 的强度计入（新援磨合、年龄曲线未建模，故留有折扣）。<br />
+          <b>缺阵修正</b> 把勾选的球员移出轮换后重算影响力，空出的时间由名单里排在后面的人顶上。<br />
           <b>胜率</b> 由预期分差经正态分布换算，单场分差标准差取 {num(meta.defaultParams.spreadSd)} 分。
         </p>
       </div>

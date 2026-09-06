@@ -10,6 +10,7 @@ const PARAM_FIELDS = [
   { key: 'wNet', label: '净效率权重', min: 0, max: 1, step: 0.05 },
   { key: 'restWeight', label: '休息因素强度', min: 0, max: 3, step: 0.1 },
   { key: 'rosterWeight', label: '缺阵影响强度', min: 0, max: 2, step: 0.05 },
+  { key: 'turnoverWeight', label: '阵容更迭强度', min: 0, max: 1.5, step: 0.05 },
   { key: 'spreadSd', label: '分差标准差', min: 8, max: 16, step: 0.5 },
 ];
 
@@ -217,6 +218,7 @@ export default function Predict({ initial = [] }) {
                   { k: '综合实力（每场净胜分）', h: result.strength.home.total, a: result.strength.away.total },
                   { k: 'Elo 折算', h: result.strength.home.eloPts, a: result.strength.away.eloPts },
                   { k: '净效率折算', h: result.strength.home.netPts, a: result.strength.away.netPts },
+                  { k: '阵容更迭', h: result.strength.home.turnoverAdj, a: result.strength.away.turnoverAdj },
                   { k: '缺阵修正', h: result.strength.home.rosterAdj, a: result.strength.away.rosterAdj },
                   { k: '进攻效率', h: home.adv.offRtg, a: away.adv.offRtg },
                   { k: '防守效率', h: home.adv.defRtg, a: away.adv.defRtg },
@@ -243,11 +245,11 @@ export default function Predict({ initial = [] }) {
               <div className="grid cols-2">
                 <RosterPicker
                   team={away} roster={rosters[awayId]} out={out[awayId] ?? []}
-                  onToggle={(pid) => toggleOut(awayId, pid)} impactB={meta.impactFit.b}
+                  onToggle={(pid) => toggleOut(awayId, pid)}
                 />
                 <RosterPicker
                   team={home} roster={rosters[homeId]} out={out[homeId] ?? []}
-                  onToggle={(pid) => toggleOut(homeId, pid)} impactB={meta.impactFit.b}
+                  onToggle={(pid) => toggleOut(homeId, pid)}
                 />
               </div>
               {(result.strength.home.missing.length > 0 || result.strength.away.missing.length > 0) && (
@@ -318,7 +320,7 @@ function FactorChart({ factors }) {
   );
 }
 
-function RosterPicker({ team, roster, out, onToggle, impactB }) {
+function RosterPicker({ team, roster, out, onToggle }) {
   if (!team) return null;
   return (
     <div>
@@ -345,8 +347,12 @@ function RosterPicker({ team, roster, out, onToggle, impactB }) {
                 {p.name}
               </span>
               <span className="dim mono" style={{ fontSize: 11 }}>{num(p.min, 0)}分</span>
-              <span className="mono" style={{ fontSize: 11, width: 40, textAlign: 'right', color: p.impactRaw > 0 ? 'var(--warn)' : 'var(--text-faint)' }}>
-                {p.impactRaw > 0 ? `-${num(p.impactRaw * impactB, 1)}` : '—'}
+              <span
+                className="mono"
+                title="缺阵时球队每场净胜分的变化"
+                style={{ fontSize: 11, width: 40, textAlign: 'right', color: p.outCostPts < -0.05 ? 'var(--warn)' : 'var(--text-faint)' }}
+              >
+                {p.outCostPts < -0.05 ? num(p.outCostPts, 1) : '≈0'}
               </span>
             </label>
           ))}
