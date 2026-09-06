@@ -262,3 +262,77 @@ export function Segmented({ options, value, onChange }) {
     </span>
   );
 }
+
+/**
+ * 盘口对照：模型 vs 博彩收盘/当前盘口。
+ *
+ * 刻意把盘口放在**模型旁边**而不是模型里面。盘口不参与我们的计算——
+ * 一旦让它进模型，"和市场比谁更准"就没意义了。
+ * 回测的结论也不支持跟着分歧下注：模型相对盘口选边的让分命中率 49.1%，
+ * 低于 52.38% 的打平线。所以这里只讲"分歧在哪"，不讲"该买哪边"。
+ */
+export function MarketCompare({ market, prediction, home, away }) {
+  if (!market) return null;
+  const fmtLine = (v) => (v > 0 ? `+${v}` : `${v}`);
+  const edge = market.edge ?? 0;
+  const big = Math.abs(edge) >= 3;
+  const favors = edge > 0 ? home : away;
+
+  const rows = [
+    {
+      k: '让分（主队）',
+      hint: '负数表示主队让分',
+      model: fmtLine(prediction.spread),
+      market: fmtLine(market.spread),
+    },
+    {
+      k: '总分',
+      model: prediction.total?.toFixed(1),
+      market: market.total === null || market.total === undefined ? '—' : market.total.toFixed(1),
+    },
+    {
+      k: '主队胜率',
+      hint: market.homeProb === null ? '盘口未提供钱线' : '已去除抽水',
+      model: `${(prediction.homeWinProb * 100).toFixed(0)}%`,
+      market: market.homeProb === null || market.homeProb === undefined
+        ? '—' : `${(market.homeProb * 100).toFixed(0)}%`,
+    },
+  ];
+
+  return (
+    <div className="market">
+      <div className="market-head">
+        <span className="market-title">盘口对照</span>
+        <span className="dim">
+          {market.provider ?? '博彩'}
+          {market.openSpread !== null && market.openSpread !== undefined
+            && market.openSpread !== market.spread
+            && ` · 开盘 ${fmtLine(market.openSpread)}`}
+        </span>
+      </div>
+      <table className="market-table">
+        <thead>
+          <tr><th /><th>模型</th><th>盘口</th></tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.k}>
+              <td title={r.hint}>{r.k}</td>
+              <td className="mono">{r.model}</td>
+              <td className="mono">{r.market}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className={`market-edge${big ? ' big' : ''}`}>
+        {Math.abs(edge) < 0.5
+          ? '模型与市场基本一致'
+          : <>模型比市场更看好 <b>{favors?.abbr ?? (edge > 0 ? '主队' : '客队')}</b> {Math.abs(edge).toFixed(1)} 分</>}
+      </div>
+      <div className="market-note">
+        盘口只作对照，不参与模型计算。回测显示跟着分歧下注的让分命中率是 49.1%，
+        低于 52.38% 的打平线——分歧值得看，但不构成下注建议。
+      </div>
+    </div>
+  );
+}

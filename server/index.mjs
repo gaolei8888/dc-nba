@@ -34,10 +34,12 @@ function loadStore() {
   const meta = readJson('meta.json');
   const injuries = readJson('injuries.json') ?? { players: [], counts: {}, fetchedAt: null };
   const gameday = readJson('gameday.json') ?? { season: null, games: [] };
+  // 盘口是增强项：抓不到就退回纯模型，页面不能因此挂掉
+  const odds = readJson('odds.json') ?? { source: 'ESPN', fetchedAt: null, games: {}, matched: 0 };
   if (!teams || !players || !schedule || !meta) {
     throw new Error('数据缺失，请先运行  npm run ingest');
   }
-  store = { teams, players, schedule, meta, injuries, gameday };
+  store = { teams, players, schedule, meta, injuries, gameday, odds };
   clearCaches();
   modelCache = new Map();
   console.log(`数据已加载: ${teams.length} 队 / ${players.length} 人 / ${schedule.games.length} 场 (${meta.priorSeason} → ${meta.targetSeason})`);
@@ -48,6 +50,37 @@ function getModel(overrides = {}) {
   const key = JSON.stringify(Object.entries(overrides).sort());
   if (!modelCache.has(key)) modelCache.set(key, buildModel(store, overrides));
   return modelCache.get(key);
+}
+
+// ---------------------------------------------------------------- 博彩盘口
+
+/**
+ * 把盘口贴到一场预测旁边。
+ *
+ * 盘口**不参与**模型计算，只做对照——一旦让它进模型，"和市场比谁更准"
+ * 就没有意义了，而且模型会退化成盘口的复读机。
+ * 回测结果也支持这个选择：模型相对盘口选边的让分命中率是 49.1%，
+ * 低于 52.38% 的打平线，说明我们相对市场没有可利用的优势。
+ */
+function marketOf(gameId, prediction = null) {
+  const o = store.odds?.games?.[gameId];
+  if (!o || o.spread === null || o.spread === undefined) return null;
+  const r1 = (v) => Math.round(v * 10) / 10;
+  const mktMargin = -o.spread;               // 市场预期的主队净胜分
+  return {
+    spread: o.spread,
+    openSpread: o.openSpread ?? null,
+    total: o.total ?? null,
+    homeMl: o.homeMl ?? null,
+    awayMl: o.awayMl ?? null,
+    homeProb: o.homeProb ?? null,
+    provider: o.provider ?? null,
+    // 正数 = 模型比市场更看好主队
+    edge: prediction ? r1(prediction.margin - mktMargin) : null,
+    totalEdge: prediction && o.total !== null && o.total !== undefined
+      ? r1(prediction.total - o.total)
+      : null,
+  };
 }
 
 /** 请求体里的 out: { teamId: [playerId] }，键会变成字符串，统一成数字键。 */
@@ -163,6 +196,12 @@ app.get('/api/meta', wrap((req, res) => {
       counts: store.injuries?.counts ?? {},
       matched: store.injuries?.matched ?? 0,
     },
+    odds: {
+      source: store.odds?.source ?? null,
+      fetchedAt: store.odds?.fetchedAt ?? null,
+      games: Object.keys(store.odds?.games ?? {}).length,
+      providers: store.odds?.providers ?? {},
+    },
   });
 }));
 
@@ -271,7 +310,10 @@ app.get('/api/schedule', wrap(async (req, res) => {
     pickParams(req.query), out]);
   await sendCached(res, req, `schedule|${key}`, () => ({
     seasonYear: store.schedule.seasonYear,
-    games: predictSchedule(model, games, out),
+    games: predictSchedule(model, games, out).map((g) => {
+      const market = marketOf(g.gameId, g.prediction);
+      return market ? { ...g, market } : g;
+    }),
   }));
 }));
 
@@ -370,7 +412,7 @@ app.post('/api/predict', wrap((req, res) => {
   if (!homeId || !awayId) return res.status(400).json({ error: '需要 homeId 与 awayId' });
   if (Number(homeId) === Number(awayId)) return res.status(400).json({ error: '两队不能相同' });
   const model = getModel(pickParams(params));
-  res.json(predictGame(model, {
+  const prediction = predictGame(model, {
     homeId: Number(homeId),
     awayId: Number(awayId),
     gameId: gameId ?? null,
@@ -378,7 +420,8 @@ app.post('/api/predict', wrap((req, res) => {
     restHome: restHome === undefined || restHome === null ? undefined : Number(restHome),
     restAway: restAway === undefined || restAway === null ? undefined : Number(restAway),
     out: normalizeOut(out),
-  }));
+  });
+  res.json({ ...prediction, market: marketOf(gameId ?? null, prediction) });
 }));
 
 app.post('/api/simulate', wrap(async (req, res) => {
@@ -447,6 +490,9 @@ const runLab = async (type, payload) => {
       bySeason: seasons.map((s) => ({ season: s, ...lab.score(rows.filter((r) => r.season === s)) })),
     };
   }
+  if (type === 'labMarket') {
+    return lab.market(lab.replay(labData, seasons, params));
+  }
   if (type === 'labMeasure') {
     return {
       homeAdvantage: lab.homeAdvantageBySeason(labData, seasons, params),
@@ -465,6 +511,14 @@ app.get('/api/lab/meta', wrap((req, res) => {
     games: ds ? LAB_SEASONS.reduce((n, s) => n + (ds.seasons[s]?.length ?? 0), 0) : 0,
     defaults: lab.DEFAULTS,
     keys: LAB_KEYS,
+    odds: {
+      // 有多少场带收盘盘口，决定「对标盘口」这一页能不能用
+      games: ds ? LAB_SEASONS.reduce(
+        (n, s) => n + (ds.seasons[s] ?? []).filter((g) => g.o).length, 0,
+      ) : 0,
+      providers: ds?.odds?.providers ?? {},
+      breakEven: lab.BREAK_EVEN,
+    },
   });
 }));
 
@@ -482,6 +536,14 @@ app.post('/api/lab/measure', rateLimit({ max: 30 }), wrap(async (req, res) => {
   const params = pickLabParams(req.body?.params);
   const key = JSON.stringify([seasons, params]);
   res.json(await cached('labMeasure', key, () => runLab('labMeasure', { seasons, params }), { max: 20 }));
+}));
+
+app.post('/api/lab/market', rateLimit({ max: 30 }), wrap(async (req, res) => {
+  const seasons = (Array.isArray(req.body?.seasons) ? req.body.seasons : LAB_SEASONS)
+    .filter((s) => LAB_SEASONS.includes(s));
+  const params = pickLabParams(req.body?.params);
+  const key = JSON.stringify([seasons, params]);
+  res.json(await cached('labMarket', key, () => runLab('labMarket', { seasons, params }), { max: 20 }));
 }));
 
 app.post('/api/lab/counterfactual', rateLimit({ max: 60 }), wrap(async (req, res) => {

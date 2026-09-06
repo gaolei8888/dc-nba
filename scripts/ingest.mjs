@@ -8,9 +8,9 @@
 import { nbaGet, statsUrl, toRows, writeJson } from '../server/nbaClient.mjs';
 import { TEAM_META, POS_CN } from '../server/teamMeta.mjs';
 import { fetchInjuries } from '../server/espnClient.mjs';
+import { fetchUpcomingOdds } from '../server/oddsClient.mjs';
+import { buildBacktestDataset } from '../server/dataset.mjs';
 import { replaySeasonPicks } from '../server/replay.mjs';
-import fsNode from 'node:fs';
-import pathNode from 'node:path';
 import {
   buildGames, computeElo, carryOver, rotationImpact, fitRosterImpact, totalMinutes,
 } from '../server/ratings.mjs';
@@ -314,43 +314,6 @@ async function fetchGameLog(season, { optional = false } = {}) {
 
 // ---------------------------------------------------------------- 主流程
 
-/**
- * 把 data/history/ 里的回测缓存压成一个紧凑数据集。
- * 只保留重放需要的字段：比赛 id、日期、两队 id 与得分、谁是主场。
- * 缓存不存在就跳过——它由 npm run backtest 首次运行时生成。
- */
-function buildBacktestDataset() {
-  const dir = pathNode.join(process.cwd(), 'data', 'history');
-  if (!fsNode.existsSync(dir)) {
-    console.warn('  未找到 data/history/，跳过实验室数据集（先跑一次 npm run backtest）');
-    return;
-  }
-  const out = { seasons: {}, teamAdv: {}, builtAt: new Date().toISOString() };
-  let games = 0;
-  for (const f of fsNode.readdirSync(dir)) {
-    let m = f.match(/^gamelog_(\d{4}-\d{2})\.json$/);
-    if (m) {
-      const rows = JSON.parse(fsNode.readFileSync(pathNode.join(dir, f), 'utf8'));
-      const byGame = new Map();
-      for (const r of rows) {
-        const g = byGame.get(r.GAME_ID) ?? { d: r.GAME_DATE, s: [] };
-        g.s.push([r.TEAM_ID, r.PTS, r.MATCHUP.includes('vs.') ? 1 : 0]);
-        byGame.set(r.GAME_ID, g);
-      }
-      out.seasons[m[1]] = [...byGame.entries()].map(([i, g]) => ({ i, d: g.d, s: g.s }));
-      games += out.seasons[m[1]].length;
-      continue;
-    }
-    m = f.match(/^teamadv_(\d{4}-\d{2})\.json$/);
-    if (m) {
-      out.teamAdv[m[1]] = JSON.parse(fsNode.readFileSync(pathNode.join(dir, f), 'utf8'))
-        .map((r) => ({ t: r.TEAM_ID, n: r.NET_RATING, p: r.PACE }));
-    }
-  }
-  writeJson('backtest.json', out);
-  log(`实验室数据集：${Object.keys(out.seasons).length} 个赛季 / ${games} 场`);
-}
-
 async function main() {
   console.log(`\n抓取 NBA 数据   基准赛季=${PRIOR_SEASON}   预测赛季=${TARGET_SEASON}\n`);
   const t0 = Date.now();
@@ -441,6 +404,34 @@ async function main() {
   } catch (e) {
     console.warn(`  伤病抓取失败，跳过：${String(e.message).slice(0, 90)}`);
   }
+
+  // 博彩盘口：ESPN 的公开接口带 DraftKings 的让分与总分，不需要 api key。
+  // 只有未开赛的比赛 scoreboard 才带盘口，所以这里拿到的是「还没打的比赛」；
+  // 已结束比赛的收盘盘口由 scripts/odds-history.mjs 单独抓，进 backtest.json。
+  let odds = { source: 'ESPN', fetchedAt: null, games: {}, matched: 0, providers: {} };
+  if (process.env.SKIP_ODDS !== '1') {
+    try {
+      log('博彩盘口 (ESPN)');
+      const r = await fetchUpcomingOdds(schedule.games, {
+        maxDays: Number(process.env.ODDS_DAYS) || Infinity,
+        onProgress: (m) => console.log(m),
+      });
+      odds = {
+        source: 'ESPN',
+        fetchedAt: new Date().toISOString(),
+        games: r.games,
+        matched: r.matched,
+        candidates: r.candidates,
+        scannedDays: r.scanned,
+        providers: r.providers,
+      };
+      log(`  ${r.matched}/${r.candidates} 场未开赛比赛拿到盘口`
+        + `（${Object.entries(r.providers).map(([k, v]) => `${k} ${v}`).join('、') || '无'}）`);
+    } catch (e) {
+      console.warn(`  盘口抓取失败，跳过：${String(e.message).slice(0, 90)}`);
+    }
+  }
+  writeJson('odds.json', odds);
 
   // 人机对赌题库：逐日重放上赛季，生成"模型当时的判断"+真实结果。
   // 新赛季开打前这是唯一能立即结算的对战素材。

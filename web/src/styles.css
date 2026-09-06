@@ -626,3 +626,17 @@ table.data th.left .th-label { align-items: flex-start; }
 .row-label { display: flex; flex-direction: column; line-height: 1.15; }
 .row-label b { font-size: 11px; font-weight: 700; letter-spacing: .02em; text-transform: none; }
 .row-label i { font-style: normal; font-size: 10px; opacity: .62; }
+
+/* 盘口对照 */
+.market { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.market-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+.market-title { font-size: 12.5px; font-weight: 640; }
+.market-head .dim { font-size: 10.5px; }
+.market-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.market-table th { font-size: 10px; color: var(--text-faint); font-weight: 640; text-align: right; padding: 0 0 4px; }
+.market-table th:first-child { text-align: left; }
+.market-table td { padding: 4px 0; border-top: 1px solid var(--line); text-align: right; }
+.market-table td:first-child { text-align: left; color: var(--text-dim); }
+.market-edge { margin-top: 9px; font-size: 12px; color: var(--text-dim); }
+.market-edge.big { color: var(--text); font-weight: 600; }
+.market-note { margin-top: 7px; font-size: 10px; line-height: 1.5; color: var(--text-faint); }

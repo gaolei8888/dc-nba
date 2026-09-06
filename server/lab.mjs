@@ -23,6 +23,26 @@ const normalCdf = (x, sd) => 0.5 * (1 + erf(x / (sd * Math.SQRT2)));
 const REST_ADJ = { 0: -1.1, 1: 0, 2: 0.35, 3: 0.5 };
 const restAdjust = (d) => (d === null ? 0 : REST_ADJ[Math.min(d, 3)] ?? 0.5);
 
+/** 美式赔率 -> 隐含概率（含抽水） */
+const mlProb = (ml) => (ml === null || ml === undefined
+  ? null
+  : (ml < 0 ? -ml / (-ml + 100) : 100 / (ml + 100)));
+
+/**
+ * 市场对主队胜率的判断。
+ *
+ * 优先用两边的钱线去掉抽水：博彩公司两边的隐含概率加起来大于 1，
+ * 多出来的那部分是抽水，按比例摊掉才是市场的真实判断。
+ * 没有钱线时退回让分——用与模型同一个 spreadSd 把让分折成概率，
+ * 这样两边是同一把尺子，比较才公平。
+ */
+function marketProb(odds, spreadSd) {
+  const h = mlProb(odds.homeMl);
+  const a = mlProb(odds.awayMl);
+  if (h !== null && a !== null && h + a > 0) return h / (h + a);
+  return normalCdf(-odds.spread, spreadSd);
+}
+
 /** 紧凑格式 -> buildGames 那种结构 */
 function expand(rows) {
   return rows
@@ -34,12 +54,15 @@ function expand(rows) {
       const H = home ?? a;
       const A = away ?? b;
       if (!H || !A) return null;
+      // o = [主队让分, 总分, 主队美式赔率, 客队美式赔率]，抓过盘口才有
+      const [spread, total, homeMl, awayMl] = g.o ?? [];
       return {
         gameId: g.i,
         date: g.d,
         neutral: !home || !away,
         home: { teamId: H[0], pts: H[1], win: H[1] > A[1] },
         away: { teamId: A[0], pts: A[1], win: A[1] > H[1] },
+        odds: g.o ? { spread, total: total ?? null, homeMl: homeMl ?? null, awayMl: awayMl ?? null } : null,
       };
     })
     .filter(Boolean)
@@ -137,6 +160,10 @@ export function replay(dataset, seasons, opts = {}) {
         neutral: g.neutral,
         // 冷门 = 模型看好的一方输了
         upset: (prob >= 0.5) !== g.home.win,
+        // 盘口：mktPred 与我们的 pred 同向（主队预期净胜分），方便直接相减
+        mktPred: g.odds ? -g.odds.spread : null,
+        mktTotal: g.odds?.total ?? null,
+        mktProb: g.odds ? marketProb(g.odds, p.spreadSd) : null,
       });
 
       played.set(g.home.teamId, (played.get(g.home.teamId) ?? 0) + 1);
@@ -348,4 +375,178 @@ export function restEffect(dataset, seasons, opts = {}) {
       // 相对全体平均的偏离，才是"休息这么多天"的净效应
       effect: r4(b.sum / b.n - all),
     }));
+}
+
+// ---------------------------------------------------------------- 对标盘口
+
+/** -110 的抽水下，长期打平需要的胜率 */
+export const BREAK_EVEN = 110 / 210;   // 0.5238
+
+/**
+ * McNemar 检验：两个预测器在**同一批**比赛上比高下，只看它们判断不同的那些场次。
+ *
+ * 为什么不能直接比命中率：66.3% 和 68.4% 看着差 2 个百分点，
+ * 但两边共享绝大多数容易的比赛，那部分对比较毫无信息量。
+ * 只有"一个对一个错"的场次才是证据。chi2 > 3.84 相当于 p < 0.05。
+ */
+export function mcnemar(rows) {
+  let onlyModel = 0; let onlyMarket = 0;
+  for (const r of rows) {
+    const m = (r.p >= 0.5) === r.homeWin;
+    const k = (r.mktProb >= 0.5) === r.homeWin;
+    if (m && !k) onlyModel += 1;
+    else if (!m && k) onlyMarket += 1;
+  }
+  const n = onlyModel + onlyMarket;
+  // 带连续性校正
+  const chi2 = n ? ((Math.abs(onlyModel - onlyMarket) - 1) ** 2) / n : 0;
+  return {
+    onlyModel, onlyMarket, chi2: r4(chi2), significant: chi2 > 3.84,
+  };
+}
+
+const EDGE_BUCKETS = [
+  ['0 ~ 1 分', 0, 1],
+  ['1 ~ 2 分', 1, 2],
+  ['2 ~ 3 分', 2, 3],
+  ['3 ~ 5 分', 3, 5],
+  ['5 分以上', 5, Infinity],
+];
+
+/**
+ * 拿模型和博彩收盘盘口正面比较。
+ *
+ * 为什么值得做：盘口是市场共识，是公开可得的最强对手之一。
+ * 拿它当标尺，比我自己拍脑袋调参数可靠得多——之前"阵容更迭权重"
+ * 就是靠回测才发现调错了方向。
+ *
+ * 三件事分开看，别混：
+ *   1) 胜负预测谁更准（同一批比赛上直接对比）
+ *   2) 分差预测谁更接近（MAE 与偏置）
+ *   3) 模型跟盘口分歧时，谁对得更多——这是唯一能变成"下注建议"的部分，
+ *      而且必须跟 52.38% 的打平线比，不能跟 50% 比。
+ */
+export function market(rows) {
+  const withMkt = rows.filter((r) => r.mktPred !== null && r.mktPred !== undefined);
+  if (!withMkt.length) {
+    return { available: false, n: 0, coverage: 0 };
+  }
+
+  const modelScore = score(withMkt);
+  // 把市场概率当成"另一个模型"的预测，用同一套指标打分
+  const marketRows = withMkt.map((r) => ({
+    ...r, p: r.mktProb, pred: r.mktPred,
+  }));
+  const marketScore = score(marketRows);
+
+  // ---- 一致 / 分歧
+  let agree = 0; let agreeRight = 0;
+  let disagree = 0; let modelRight = 0; let marketRight = 0;
+  for (const r of withMkt) {
+    const mSide = r.p >= 0.5;
+    const kSide = r.mktProb >= 0.5;
+    if (mSide === kSide) {
+      agree += 1;
+      if (mSide === r.homeWin) agreeRight += 1;
+    } else {
+      disagree += 1;
+      if (mSide === r.homeWin) modelRight += 1;
+      if (kSide === r.homeWin) marketRight += 1;
+    }
+  }
+
+  // ---- 让分盘（ATS）：模型相对盘口选边，结果按实际分差有没有过盘算
+  const atsOf = (subset) => {
+    let win = 0; let lose = 0; let push = 0;
+    for (const r of subset) {
+      const edge = r.pred - r.mktPred;
+      if (edge === 0) { push += 1; continue; }
+      const cover = r.actual - r.mktPred;
+      if (cover === 0) { push += 1; continue; }
+      if ((edge > 0) === (cover > 0)) win += 1; else lose += 1;
+    }
+    const decided = win + lose;
+    return {
+      n: subset.length,
+      win,
+      lose,
+      push,
+      rate: decided ? r4(win / decided) : null,
+      // 相对打平线的净胜率，正数才是真的有优势
+      edgeOverBreakEven: decided ? r4(win / decided - BREAK_EVEN) : null,
+    };
+  };
+
+  const byEdge = EDGE_BUCKETS.map(([label, lo, hi]) => {
+    const sub = withMkt.filter((r) => {
+      const e = Math.abs(r.pred - r.mktPred);
+      return e >= lo && e < hi;
+    });
+    return sub.length ? { label, ...atsOf(sub) } : null;
+  }).filter(Boolean);
+
+  const seasons = [...new Set(withMkt.map((r) => r.season))].sort();
+  const bySeason = seasons.map((s) => {
+    const sub = withMkt.filter((r) => r.season === s);
+    const mk = sub.map((r) => ({ ...r, p: r.mktProb, pred: r.mktPred }));
+    const m = score(sub); const k = score(mk);
+    return {
+      season: s,
+      n: sub.length,
+      modelAccuracy: m.accuracy,
+      marketAccuracy: k.accuracy,
+      accuracyGap: r4(m.accuracy - k.accuracy),
+      modelMae: m.marginMae,
+      marketMae: k.marginMae,
+      ats: atsOf(sub).rate,
+      significant: mcnemar(sub).significant,
+    };
+  });
+
+  // ---- 模型在哪类比赛上被盘口拉开差距
+  const gapSlices = [
+    ['背靠背相关', (r) => r.b2bHome || r.b2bAway],
+    ['实力接近 (Elo 差<50)', (r) => Math.abs(r.eloDiff) < 50],
+    ['实力悬殊 (Elo 差>200)', (r) => Math.abs(r.eloDiff) > 200],
+    ['赛季初 (<10场)', (r) => r.teamGp < 10],
+    ['赛季末 (≥60场)', (r) => r.teamGp >= 60],
+  ].map(([label, f]) => {
+    const sub = withMkt.filter(f);
+    if (sub.length < 30) return null;
+    const mk = sub.map((r) => ({ ...r, p: r.mktProb, pred: r.mktPred }));
+    const m = score(sub); const k = score(mk);
+    return {
+      label,
+      n: sub.length,
+      modelAccuracy: m.accuracy,
+      marketAccuracy: k.accuracy,
+      accuracyGap: r4(m.accuracy - k.accuracy),
+      modelMae: m.marginMae,
+      marketMae: k.marginMae,
+      maeGap: r4(m.marginMae - k.marginMae),
+    };
+  }).filter(Boolean).sort((a, b) => a.accuracyGap - b.accuracyGap);
+
+  return {
+    available: true,
+    n: withMkt.length,
+    coverage: r4(withMkt.length / rows.length),
+    model: modelScore,
+    marketModel: marketScore,
+    accuracyGap: r4(modelScore.accuracy - marketScore.accuracy),
+    maeGap: r4(modelScore.marginMae - marketScore.marginMae),
+    mcnemar: mcnemar(withMkt),
+    agreement: {
+      agree,
+      agreeAccuracy: agree ? r4(agreeRight / agree) : null,
+      disagree,
+      disagreeRate: r4(disagree / withMkt.length),
+      modelRight,
+      marketRight,
+      modelWinsWhenDisagree: disagree ? r4(modelRight / disagree) : null,
+    },
+    ats: { all: atsOf(withMkt), byEdge, breakEven: r4(BREAK_EVEN) },
+    bySeason,
+    gapSlices,
+  };
 }

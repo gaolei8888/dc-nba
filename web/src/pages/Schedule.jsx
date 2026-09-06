@@ -113,6 +113,7 @@ export default function Schedule() {
                   <th style={{ width: 122 }}>主队胜率</th>
                   <th style={{ width: 94 }}>预测比分</th>
                   <th style={{ width: 62 }}>总分</th>
+                  <th style={{ width: 96 }} title="博彩让分（主队），以及模型与它的分歧">盘口 / 分歧</th>
                   <th className="left" style={{ width: 170 }}>场馆 / 备注</th>
                 </tr>
               </thead>
@@ -141,6 +142,17 @@ export default function Schedule() {
                       {g.prediction.awayScore.toFixed(0)} - {g.prediction.homeScore.toFixed(0)}
                     </td>
                     <td className="mono dim">{num(g.prediction.total, 0)}</td>
+                    <td className="mono" style={{ fontSize: 10.5 }}>
+                      {g.market ? (
+                        <>
+                          {g.market.spread > 0 ? `+${g.market.spread}` : g.market.spread}
+                          <br />
+                          <span className={Math.abs(g.market.edge) >= 3 ? 'pos' : 'dim'}>
+                            {g.market.edge > 0 ? `+${g.market.edge}` : g.market.edge}
+                          </span>
+                        </>
+                      ) : <span className="dim">—</span>}
+                    </td>
                     <td className="left dim" style={{ fontSize: 10.5 }}>
                       {g.label ? <span className="chip blue">{g.label}</span> : g.arena}
                     </td>

@@ -46,6 +46,12 @@ const HANDLERS = {
     };
   },
 
+  /** 对标博彩收盘盘口 */
+  labMarket({ seasons, params }) {
+    if (!labData) throw new Error('缺少 data/backtest.json');
+    return lab.market(lab.replay(labData, seasons, params));
+  },
+
   /** 逐年测量：主场优势与休息效应 */
   labMeasure({ seasons, params }) {
     if (!labData) throw new Error('缺少 data/backtest.json');

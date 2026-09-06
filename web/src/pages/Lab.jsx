@@ -11,6 +11,7 @@ const TABS = [
   { value: 'errors', label: '模型错在哪' },
   { value: 'measure', label: '逐年测量' },
   { value: 'whatif', label: '反事实' },
+  { value: 'market', label: '对标盘口' },
 ];
 
 /** 可调的模型参数。范围是根据回测里有意义的区间定的 */
@@ -69,6 +70,7 @@ export default function Lab() {
       {tab === 'errors' && <ErrorsTab meta={meta} />}
       {tab === 'measure' && <MeasureTab meta={meta} />}
       {tab === 'whatif' && <WhatIfTab meta={meta} teams={teams} teamById={teamById} />}
+      {tab === 'market' && <MarketTab meta={meta} />}
     </>
   );
 }
@@ -513,6 +515,205 @@ function WhatIfTab({ meta, teams, teamById }) {
           </div>
         </>
       )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------- 对标盘口
+
+/**
+ * 拿模型和博彩收盘盘口正面比。
+ *
+ * 这一页刻意不做成"看谁赢了"的爽点页。盘口是公开可得的最强对手之一，
+ * 拿它当标尺的价值在于知道自己差在哪，而不是自我感觉良好。
+ * 所以三块内容都保留了对我们不利的数字。
+ */
+function MarketTab({ meta }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    if (!meta.odds?.games) return;
+    api.labMarket({ params: meta.defaults }).then(setData).catch(setErr);
+  }, [meta]);
+
+  if (!meta.odds?.games) {
+    return (
+      <div className="card">
+        <p className="note">
+          还没有历史盘口。运行一次 <code>npm run odds:history</code> 抓取，
+          再运行 <code>npm run dataset</code> 并进数据集即可。
+          数据来自 ESPN 的公开接口，不需要 api key。
+        </p>
+      </div>
+    );
+  }
+  if (err) return <ErrorBox error={err} />;
+  if (!data) return <Loading text="正在与历史收盘盘口对账…" />;
+  if (!data.available) {
+    return <div className="card"><p className="note">这批比赛没有盘口数据。</p></div>;
+  }
+
+  const { model, marketModel, agreement, ats } = data;
+  const books = Object.entries(meta.odds.providers ?? {})
+    .sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v} 场`).join('、');
+
+  return (
+    <>
+      <div className="grid cols-4" style={{ marginBottom: 14 }}>
+        <StatTile
+          abbr="模型" label="胜负命中率" value={pct(model.accuracy)}
+          hint={`${data.n} 场有盘口的比赛`}
+        />
+        <StatTile
+          abbr="盘口" label="胜负命中率" value={pct(marketModel.accuracy)}
+          hint="同一批比赛，用去抽水后的钱线判断胜负"
+        />
+        <StatTile
+          abbr="Δ" label="差距" value={signed(data.accuracyGap * 100, 1)} unit=" pp"
+          hint={data.mcnemar.significant
+            ? `McNemar χ²=${data.mcnemar.chi2}，差异显著（p<0.05）`
+            : `McNemar χ²=${data.mcnemar.chi2}，差异不显著`}
+        />
+        <StatTile
+          abbr="MAE" label="分差误差差距" value={signed(data.maeGap, 2)} unit=" 分"
+          hint={`模型 ${model.marginMae} / 盘口 ${marketModel.marginMae}`}
+        />
+      </div>
+
+      <div className="card" style={{ marginBottom: 14 }}>
+        <h2>结论 <span className="sub">先说难听的</span></h2>
+        <p className="note" style={{ marginBottom: 10 }}>
+          在 {data.n} 场比赛上，收盘盘口的胜负命中率是 <b>{pct(marketModel.accuracy)}</b>，
+          我们的模型是 <b>{pct(model.accuracy)}</b>，
+          落后 {Math.abs(data.accuracyGap * 100).toFixed(1)} 个百分点。
+          {data.mcnemar.significant
+            ? `这个差距是显著的——只看两边判断不同的 ${data.mcnemar.onlyModel + data.mcnemar.onlyMarket} 场，模型独对 ${data.mcnemar.onlyModel} 场，盘口独对 ${data.mcnemar.onlyMarket} 场。`
+            : '不过这个差距在统计上不显著。'}
+        </p>
+        <p className="note">
+          更要紧的是让分盘：模型相对盘口选边的命中率是 <b>{pct(ats.all.rate)}</b>
+          （{ats.all.win} 胜 {ats.all.lose} 负 {ats.all.push} 走盘），
+          低于 -110 抽水下 <b>{pct(ats.breakEven)}</b> 的打平线。
+          结论很直接——<b>模型相对市场没有可利用的优势，分歧不构成下注建议。</b>
+          盘口在这里的价值是当标尺，不是当提款机。
+        </p>
+      </div>
+
+      <div className="grid cols-2">
+        <div className="card">
+          <h2>分歧时谁对 <span className="sub">共 {agreement.disagree} 场分歧</span></h2>
+          <div className="grid cols-3" style={{ marginBottom: 12 }}>
+            <StatTile
+              label="意见一致" value={agreement.agree} unit=" 场"
+              hint={`这些比赛命中率 ${pct(agreement.agreeAccuracy)}`}
+            />
+            <StatTile label="模型对" value={agreement.modelRight} unit=" 场" />
+            <StatTile label="盘口对" value={agreement.marketRight} unit=" 场" />
+          </div>
+          <p className="note">
+            两边意见一致的 {agreement.agree} 场里命中率有 {pct(agreement.agreeAccuracy)}——
+            容易的比赛谁都会做。真正的分水岭是那 {pct(agreement.disagreeRate)} 的分歧场次，
+            模型在其中只赢下 {pct(agreement.modelWinsWhenDisagree)}。
+          </p>
+        </div>
+
+        <div className="card">
+          <h2>按分歧大小看让分命中率</h2>
+          <DataTable
+            rows={ats.byEdge}
+            rowKey={(r) => r.label}
+            initialSort={{ key: 'label', dir: 'asc' }}
+            columns={[
+              { key: 'label', label: '模型与盘口分歧', align: 'left', width: 116 },
+              { key: 'n', label: '场次', width: 56 },
+              {
+                key: 'rate', label: '让分命中', width: 76,
+                render: (r) => <span className="mono">{pct(r.rate)}</span>,
+              },
+              {
+                key: 'edgeOverBreakEven', label: '相对打平线', width: 88,
+                render: (r) => (
+                  <span className={signClass(r.edgeOverBreakEven)}>
+                    {signed(r.edgeOverBreakEven * 100, 1)} pp
+                  </span>
+                ),
+              },
+            ]}
+          />
+          <p className="note" style={{ marginTop: 8 }}>
+            如果模型真有优势，分歧越大的那几档应该越高于打平线。实际上没有这个趋势——
+            这正是"没有优势"的样子，而不是"优势藏在某一档里"。
+          </p>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 14 }}>
+        <h2>逐年</h2>
+        <DataTable
+          rows={data.bySeason}
+          rowKey={(r) => r.season}
+          initialSort={{ key: 'season', dir: 'asc' }}
+          columns={[
+            { key: 'season', label: '赛季', align: 'left', width: 86 },
+            { key: 'n', label: '场次', width: 60 },
+            { key: 'modelAccuracy', label: '模型', width: 70, render: (r) => pct(r.modelAccuracy) },
+            { key: 'marketAccuracy', label: '盘口', width: 70, render: (r) => pct(r.marketAccuracy) },
+            {
+              key: 'accuracyGap', label: '差距', width: 104,
+              render: (r) => (
+                <span className={signClass(r.accuracyGap)}>
+                  {signed(r.accuracyGap * 100, 1)} pp
+                  {!r.significant && <span className="dim" title="McNemar 检验不显著"> ·不显著</span>}
+                </span>
+              ),
+            },
+            { key: 'modelMae', label: '模型 MAE', width: 82, render: (r) => num(r.modelMae, 2) },
+            { key: 'marketMae', label: '盘口 MAE', width: 82, render: (r) => num(r.marketMae, 2) },
+            { key: 'ats', label: '让分命中', width: 78, render: (r) => pct(r.ats) },
+          ]}
+        />
+      </div>
+
+      <div className="card" style={{ marginTop: 14 }}>
+        <h2>被盘口拉开差距的地方 <span className="sub">这才是能改进的线索</span></h2>
+        <DataTable
+          rows={data.gapSlices}
+          rowKey={(r) => r.label}
+          initialSort={{ key: 'accuracyGap', dir: 'asc' }}
+          columns={[
+            { key: 'label', label: '比赛类型', align: 'left', width: 168 },
+            { key: 'n', label: '场次', width: 60 },
+            { key: 'modelAccuracy', label: '模型', width: 70, render: (r) => pct(r.modelAccuracy) },
+            { key: 'marketAccuracy', label: '盘口', width: 70, render: (r) => pct(r.marketAccuracy) },
+            {
+              key: 'accuracyGap', label: '命中率差', width: 84,
+              render: (r) => (
+                <span className={signClass(r.accuracyGap)}>{signed(r.accuracyGap * 100, 1)} pp</span>
+              ),
+            },
+            {
+              key: 'maeGap', label: '分差误差差', width: 92,
+              render: (r) => <span className={signClass(-r.maeGap)}>{signed(r.maeGap, 2)}</span>,
+            },
+          ]}
+        />
+        <p className="note" style={{ marginTop: 8 }}>
+          差距最大的那几类，就是模型里最该改的地方——盘口能看到我们看不到的东西
+          （当天的轮换安排、临场伤情、球队的动机），差距的大小等于这些信息值多少分。
+        </p>
+      </div>
+
+      <div className="card" style={{ marginTop: 14 }}>
+        <h2>数据来源</h2>
+        <p className="note">
+          盘口来自 ESPN 的公开接口（不需要 api key），覆盖 {meta.odds.games} 场
+          （{pct(data.coverage)}）。各年份的默认博彩商不同：{books || '—'}。
+          不同博彩商的让分通常差 0.5 以内，但这是真实存在的口径差异，不当作同一个源看待。
+          胜负判断优先用两边钱线去抽水后的概率，缺钱线时才退回让分折算——
+          两边用的是同一把尺子，比较才公平。
+        </p>
+      </div>
     </>
   );
 }

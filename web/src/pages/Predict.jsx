@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useApp, go } from '../App.jsx';
 import { api } from '../lib/api.js';
 import {
-  TeamLogo, PlayerHeadshot, StatTile, Loading, ErrorBox, DataTable, InjuryBadge,
+  TeamLogo, PlayerHeadshot, StatTile, Loading, ErrorBox, DataTable, InjuryBadge, MarketCompare,
 } from '../components/common.jsx';
 import { num, signed, signClass, rate, fmtDate, restLabel } from '../lib/format.js';
 import { inkOn } from '../lib/color.js';
@@ -230,6 +230,17 @@ export default function Predict({ initial = [] }) {
                 hint="客队 / 主队"
               />
             </div>
+
+            {result.market && (
+              <div style={{ marginTop: 16 }}>
+                <MarketCompare
+                  market={result.market}
+                  prediction={result}
+                  home={home}
+                  away={away}
+                />
+              </div>
+            )}
           </div>
 
           <div className="grid cols-2">

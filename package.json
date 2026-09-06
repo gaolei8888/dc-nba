@@ -12,7 +12,9 @@
     "server": "node server/index.mjs",
     "dev": "concurrently -n server,web -c cyan,magenta \"node --watch server/index.mjs\" \"vite --config web/vite.config.js\"",
     "build": "node scripts/check-jsx.mjs && vite build --config web/vite.config.js",
-    "start": "npm run build && node server/index.mjs"
+    "start": "npm run build && node server/index.mjs",
+    "odds:history": "node scripts/odds-history.mjs",
+    "dataset": "node scripts/build-dataset.mjs"
   },
   "dependencies": {
     "compression": "^1.8.1",
