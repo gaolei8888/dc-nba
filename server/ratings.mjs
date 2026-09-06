@@ -101,19 +101,33 @@ const pieOf = (p) => p.pie ?? p.adv?.pie ?? 0;
  * 也只有排在前面的人真正吃到轮换时间；填不满的部分视为替补级（影响力 0）。
  * 这同时让"上赛季名单"与"新赛季名单"在同一把尺子上可比。
  */
-export function rotationImpact(players, { cap = TEAM_SEASON_MINUTES, exclude } = {}) {
+export function rotationImpact(players, {
+  cap = TEAM_SEASON_MINUTES, exclude, minutesOf = totalMinutes,
+} = {}) {
   const list = exclude?.size ? players.filter((p) => !exclude.has(p.playerId)) : players;
-  const sorted = [...list].sort((a, b) => totalMinutes(b) - totalMinutes(a));
+  const sorted = [...list].sort((a, b) => minutesOf(b) - minutesOf(a));
   let remaining = cap;
   let sum = 0;
   for (const p of sorted) {
     if (remaining <= 0) break;
-    const minutes = Math.min(totalMinutes(p), remaining);
+    const minutes = Math.min(minutesOf(p), remaining);
     sum += (pieOf(p) - REPLACEMENT_PIE) * minutes;
     remaining -= minutes;
   }
   return sum / 82;
 }
+
+/**
+ * 「假设全员健康」情景下的预计总分钟：把场均分钟按一个典型的出勤场次放大。
+ * 只对上赛季确实有轮换角色的球员生效（出场 ≥ 10 场），
+ * 否则垃圾时间打几场高分钟的临时工会被误当成主力。
+ */
+export const HEALTHY_GAMES = 70;
+export const MIN_GAMES_FOR_PROJECTION = 10;
+
+export const healthyMinutes = (p) => ((p.gp ?? 0) >= MIN_GAMES_FOR_PROJECTION
+  ? (p.min ?? 0) * HEALTHY_GAMES
+  : totalMinutes(p));
 
 /**
  * 一元最小二乘：净效率 ≈ a + b × 轮换影响力。

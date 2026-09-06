@@ -10,7 +10,9 @@
  * 用正态分布（NBA 单场分差对盘口的标准差约 12 分）转成胜率。
  * 比分则由双方进攻/防守效率与节奏推出总分后按分差拆分。
  */
-import { ELO_BASE, ELO_PER_POINT, rotationImpact } from './ratings.mjs';
+import {
+  ELO_BASE, ELO_PER_POINT, rotationImpact, totalMinutes, healthyMinutes,
+} from './ratings.mjs';
 
 /** 默认可调参数，前端可覆盖。 */
 export const DEFAULT_PARAMS = {
@@ -20,6 +22,7 @@ export const DEFAULT_PARAMS = {
   restWeight: 1.0,      // 休息/背靠背修正强度
   rosterWeight: 1.0,    // 缺阵影响强度
   turnoverWeight: 0.8,  // 阵容更迭修正强度
+  assumeHealthy: 0,     // 1 = 假设全员健康：按场均分钟×典型出勤估算新赛季轮换
   spreadSd: 12.0,       // 单场分差标准差，用于胜率换算
   seasonNoiseSd: 2.0,   // 赛季模拟中每队的实力不确定性（分）
 };
@@ -64,19 +67,31 @@ export function buildModel(store, overrides = {}) {
   /** playerId -> 该球员上赛季对原属球队的边际贡献，用于展示转出损失 */
   const priorMarginalCost = new Map();
 
+  // 新赛季名单的分钟口径：默认沿用上赛季实际出勤，
+  // 开启"假设全员健康"后按场均分钟 × 典型出勤估算（伤停整季的球星才不会被埋没）。
+  const minutesOf = params.assumeHealthy ? healthyMinutes : totalMinutes;
+
+  // 先算各队新名单的轮换影响力，再做联盟零和归一得到阵容更迭修正
+  const rotationNow = new Map();
   for (const t of teams) {
+    rotationNow.set(t.teamId, rotationImpact(rosterByTeam.get(t.teamId) ?? [], { minutesOf }));
+  }
+  const deltas = teams.map((t) => rotationNow.get(t.teamId) - (t.rotationPrior ?? 0));
+  const meanDelta = deltas.reduce((a, b) => a + b, 0) / teams.length;
+
+  for (const [i, t] of teams.entries()) {
     const roster = rosterByTeam.get(t.teamId) ?? [];
     const pace = t.adv.pace ?? leagueAvg.pace;
     const toPts = (raw) => impactB * raw * (pace / 100);
-    const baseRotation = rotationImpact(roster);
+    const baseRotation = rotationNow.get(t.teamId);
 
     // 逐个球员算边际价值：把他移出轮换，空出的时间由排在后面的人顶上
     for (const p of roster) {
-      const without = rotationImpact(roster, { exclude: new Set([p.playerId]) });
+      const without = rotationImpact(roster, { exclude: new Set([p.playerId]), minutesOf });
       marginalCost.set(p.playerId, round(Math.min(0, toPts(without - baseRotation)), 2));
     }
 
-    // 同样的算法用在上赛季名单上，得到"这名球员当时值多少"
+    // 同样的算法用在上赛季名单上（始终用实际出勤），得到"这名球员当时值多少"
     const priorRoster = priorRosterByTeam.get(t.teamId) ?? [];
     const priorBase = rotationImpact(priorRoster);
     for (const p of priorRoster) {
@@ -88,10 +103,11 @@ export function buildModel(store, overrides = {}) {
       team: t,
       roster,
       pace,
+      minutesOf,
       baseRotation,
       eloPts: (t.elo - ELO_BASE) / ELO_PER_POINT,
       netPts: (t.adv.netRtg ?? 0) * (pace / 100),
-      turnoverPts: t.turnoverPts ?? 0,
+      turnoverPts: toPts(deltas[i] - meanDelta),
     });
   }
 
@@ -139,7 +155,7 @@ function rosterAdjustment(model, teamId, outIds) {
   if (!info || !outIds?.length) return { deltaPts: 0, missing: [] };
 
   const exclude = new Set(outIds);
-  const without = rotationImpact(info.roster, { exclude });
+  const without = rotationImpact(info.roster, { exclude, minutesOf: info.minutesOf });
   const raw = model.impactB * (without - info.baseRotation) * (info.pace / 100);
   // 顶替者最差也是替补级：缺人不会让球队变强
   const deltaPts = Math.min(0, raw) * model.params.rosterWeight;

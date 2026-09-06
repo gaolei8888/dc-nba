@@ -336,10 +336,8 @@ async function main() {
 
   // ---- 轮换影响力：先用「上赛季名单 → 上赛季净效率」拟合换算系数
   const lastSeasonRoster = new Map(teams.map((t) => [t.teamId, []]));
-  const currentRoster = new Map(teams.map((t) => [t.teamId, []]));
   for (const p of players) {
     if (p.gp > 0 && lastSeasonRoster.has(p.priorTeamId)) lastSeasonRoster.get(p.priorTeamId).push(p);
-    if (p.onRoster) currentRoster.get(p.teamId)?.push(p);
   }
 
   const impactFit = fitRosterImpact(teams.map((t) => ({
@@ -347,23 +345,11 @@ async function main() {
     net: t.adv.netRtg ?? 0,
   })));
 
-  // 阵容更迭：新名单与上赛季名单的轮换影响力之差，换算成每场分数。
-  // 联盟层面做零和归一——净效率的联盟平均恒为 0，个别球员退役不该抬高整体水位。
-  const turnover = teams.map((t) => {
-    const before = rotationImpact(lastSeasonRoster.get(t.teamId) ?? []);
-    const after = rotationImpact(currentRoster.get(t.teamId) ?? []);
-    return { teamId: t.teamId, before, after, delta: after - before };
-  });
-  const meanDelta = turnover.reduce((s, x) => s + x.delta, 0) / turnover.length;
-
   for (const t of teams) {
-    const row = turnover.find((x) => x.teamId === t.teamId);
     t.eloEnd = r1(eloFinal[t.teamId]) ?? 1500;
     t.elo = r1(eloStart[t.teamId]) ?? 1500;
-    t.rotationPrior = row.before;
-    t.rotationNow = row.after;
-    // 未加权的阵容更迭修正（每场分），预测引擎再乘以 turnoverWeight
-    t.turnoverPts = impactFit.b * (row.delta - meanDelta) * ((t.adv.pace ?? 100) / 100);
+    // 上赛季名单的轮换影响力基准；新名单一侧与阵容更迭修正由预测引擎按参数实时计算
+    t.rotationPrior = rotationImpact(lastSeasonRoster.get(t.teamId) ?? []);
   }
 
   const meta = {
@@ -372,7 +358,6 @@ async function main() {
     fetchedAt: new Date().toISOString(),
     gamesPlayedPrior: games.length,
     impactFit,
-    turnoverMeanDelta: meanDelta,
     leagueAvg: {
       offRtg: teams.reduce((s, t) => s + (t.adv.offRtg ?? 0), 0) / teams.length,
       defRtg: teams.reduce((s, t) => s + (t.adv.defRtg ?? 0), 0) / teams.length,
@@ -389,9 +374,7 @@ async function main() {
   console.log(`\n完成，用时 ${((Date.now() - t0) / 1000).toFixed(1)}s`);
   console.log(`  球队 ${teams.length} · 球员 ${players.length} · ${TARGET_SEASON} 赛程 ${schedule.games.length} 场`);
   console.log(`  轮换影响力回归 R²=${impactFit.r2.toFixed(3)}  b=${impactFit.b.toFixed(4)}`);
-  const moved = [...teams].sort((a, b) => b.turnoverPts - a.turnoverPts);
-  console.log(`  阵容更迭最大: ${moved[0].abbr} ${moved[0].turnoverPts > 0 ? '+' : ''}${moved[0].turnoverPts.toFixed(2)} / `
-    + `${moved[29].abbr} ${moved[29].turnoverPts.toFixed(2)} 分每场`);
+
 }
 
 main().catch((e) => {

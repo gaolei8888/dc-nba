@@ -381,8 +381,16 @@ function ParamPanel({ meta, params, setParams }) {
           </div>
         ))}
       </div>
-      <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
+      <div style={{ marginTop: 10, display: 'flex', gap: 12, alignItems: 'center' }}>
         <button className="btn" onClick={() => setParams({})}>恢复默认</button>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+          <input
+            type="checkbox"
+            checked={!!params.assumeHealthy}
+            onChange={(e) => setParams((p) => ({ ...p, assumeHealthy: e.target.checked ? 1 : 0 }))}
+          />
+          假设全员健康
+        </label>
         <span className="note">参数为全站共享，会同时影响赛程页与赛季模拟。</span>
       </div>
     </div>

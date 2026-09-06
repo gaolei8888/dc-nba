@@ -120,6 +120,18 @@ export default function App() {
             </button>
           ))}
 
+          <div className="sidebar-toggle">
+            <label title="上赛季因伤缺阵的球星会被埋没。开启后按场均分钟 × 典型出勤(70场)估算新赛季轮换，只对上赛季出场满 10 场的球员生效。">
+              <input
+                type="checkbox"
+                checked={!!params.assumeHealthy}
+                onChange={(e) => setParams((p) => ({ ...p, assumeHealthy: e.target.checked ? 1 : 0 }))}
+              />
+              <span>假设全员健康</span>
+            </label>
+            <p>不勾选则沿用上赛季实际出勤</p>
+          </div>
+
           <div className="sidebar-foot">
             <div>{state.meta.targetSeason} 赛季</div>
             <div>基准数据 {state.meta.priorSeason}</div>
