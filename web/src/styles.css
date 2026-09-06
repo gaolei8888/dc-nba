@@ -593,3 +593,16 @@ input[type='checkbox'] { accent-color: var(--team-raw); }
 .group-head span {
   font-weight: 400; font-size: 11px; color: var(--text-faint); letter-spacing: 0;
 }
+
+/* 需要用户真正看见的告知，比 .note 显眼、比 .err 温和 */
+.warn-box {
+  background: rgba(232, 177, 60, .12);
+  border: 1px solid rgba(232, 177, 60, .35);
+  color: var(--warn);
+  padding: 10px 13px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+.warn-box b { color: var(--text); }
