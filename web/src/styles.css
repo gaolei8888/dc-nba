@@ -640,3 +640,9 @@ table.data th.left .th-label { align-items: flex-start; }
 .market-edge { margin-top: 9px; font-size: 12px; color: var(--text-dim); }
 .market-edge.big { color: var(--text); font-weight: 600; }
 .market-note { margin-top: 7px; font-size: 10px; line-height: 1.5; color: var(--text-faint); }
+.market-age.stale { color: var(--warn); }
+.market-stale {
+  margin: 6px 0 2px; padding: 6px 8px; border-radius: 6px;
+  font-size: 10.5px; line-height: 1.5;
+  background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn);
+}

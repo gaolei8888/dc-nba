@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { probColor } from '../lib/format.js';
+import { probColor, snapshotAge } from '../lib/format.js';
 
 const LOGO = (teamId) => `https://cdn.nba.com/logos/nba/${teamId}/primary/L/logo.svg`;
 const HEADSHOT = (playerId) => `https://cdn.nba.com/headshots/nba/latest/260x190/${playerId}.png`;
@@ -274,6 +274,9 @@ export function Segmented({ options, value, onChange }) {
 export function MarketCompare({ market, prediction, home, away }) {
   if (!market) return null;
   const fmtLine = (v) => (v > 0 ? `+${v}` : `${v}`);
+  // 盘口是抓取时的快照，博彩商随后可能改线。旧到一定程度就要显式警告：
+  // 用户看到一条三周前的线却以为是当前的，比看不到盘口更糟。
+  const age = snapshotAge(market.fetchedAt);
   const edge = market.edge ?? 0;
   const big = Math.abs(edge) >= 3;
   const favors = edge > 0 ? home : away;
@@ -308,8 +311,18 @@ export function MarketCompare({ market, prediction, home, away }) {
           {market.openSpread !== null && market.openSpread !== undefined
             && market.openSpread !== market.spread
             && ` · 开盘 ${fmtLine(market.openSpread)}`}
+          {age && (
+            <span className={age.stale ? 'market-age stale' : 'market-age'} title={market.fetchedAt}>
+              {` · ${age.text}`}
+            </span>
+          )}
         </span>
       </div>
+      {age?.stale && (
+        <div className="market-stale">
+          这批盘口是 {age.days} 天前抓的，博彩商此后可能已经改线。以当前实际盘口为准。
+        </div>
+      )}
       <table className="market-table">
         <thead>
           <tr><th /><th>模型</th><th>盘口</th></tr>

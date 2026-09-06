@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useApp, go } from '../App.jsx';
 import { api, withOut } from '../lib/api.js';
 import { TeamCell, Loading, ErrorBox, ProbBar, StatTile } from '../components/common.jsx';
-import { fmtDate, restLabel, probColor, num } from '../lib/format.js';
+import { fmtDate, restLabel, probColor, num, snapshotAge } from '../lib/format.js';
 
 const TYPES = [
   { value: 'regular', label: '常规赛' },
@@ -38,6 +38,12 @@ export default function Schedule() {
       .catch((error) => alive && setData({ loading: false, error }));
     return () => { alive = false; };
   }, [type, teamFilter, from, to, params, out]);
+
+  // 盘口是快照，页面上要说清它有多旧——用户看到一条三周前的线却以为是当前的，
+  // 比看不到盘口更容易被误导
+  const withOdds = useMemo(() => (data.games ?? []).filter((g) => g.market), [data.games]);
+  const oddsCount = withOdds.length;
+  const oddsAge = oddsCount ? snapshotAge(withOdds[0].market.fetchedAt) : null;
 
   const byDate = useMemo(() => {
     if (!data.games) return [];
@@ -101,7 +107,18 @@ export default function Schedule() {
 
       {data.loading ? <Loading /> : (
         <div className="card">
-          <h2>赛程列表 <span className="sub">胜率为主队获胜概率</span></h2>
+          <h2>
+            赛程列表
+            <span className="sub">
+              胜率为主队获胜概率
+              {oddsAge && ` · 盘口 ${oddsCount} 场，${oddsAge.text}`}
+            </span>
+          </h2>
+          {oddsAge?.stale && (
+            <div className="market-stale" style={{ marginBottom: 10 }}>
+              盘口是 {oddsAge.days} 天前抓的，博彩商此后可能已经改线。以当前实际盘口为准。
+            </div>
+          )}
           <div className="table-wrap" style={{ maxHeight: 700, overflowY: 'auto' }}>
             <table className="data">
               <thead>

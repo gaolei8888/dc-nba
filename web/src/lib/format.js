@@ -95,3 +95,25 @@ export const probColor = (p) => {
   const k = (0.5 - t) * 2;
   return `rgb(${Math.round(150 + 98 * k)}, ${Math.round(163 - 82 * k)}, ${Math.round(179 - 106 * k)})`;
 };
+
+/**
+ * 快照有多旧。
+ *
+ * 用于盘口这类"抓下来就不会自己更新"的数据：
+ * "没有盘口"和"盘口是三周前的"是两回事，后者更危险——
+ * 用户看到一条过期的线却以为是当前的。所以时间要显式写出来。
+ *
+ * @returns {{days:number, text:string, stale:boolean}|null}
+ */
+export const snapshotAge = (iso, { staleDays = 3 } = {}) => {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return null;
+  const days = Math.floor((Date.now() - t) / 86400000);
+  const hours = Math.floor((Date.now() - t) / 3600000);
+  let text;
+  if (hours < 1) text = '刚刚抓取';
+  else if (hours < 24) text = `${hours} 小时前抓取`;
+  else text = `${days} 天前抓取`;
+  return { days, text, stale: days >= staleDays };
+};

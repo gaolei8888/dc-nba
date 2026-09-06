@@ -75,6 +75,9 @@ function marketOf(gameId, prediction = null) {
     awayMl: o.awayMl ?? null,
     homeProb: o.homeProb ?? null,
     provider: o.provider ?? null,
+    // 盘口是快照，不会自己更新。把抓取时间带上，界面才能告诉用户这条线有多旧——
+    // "没有盘口"和"盘口是三周前的"是两回事，后者更容易误导人。
+    fetchedAt: store.odds?.fetchedAt ?? null,
     // 正数 = 模型比市场更看好主队
     edge: prediction ? r1(prediction.margin - mktMargin) : null,
     totalEdge: prediction && o.total !== null && o.total !== undefined
