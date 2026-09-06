@@ -11,12 +11,18 @@ const TYPES = [
 ];
 
 export default function Schedule() {
-  const { meta, teams, teamById, out, params } = useApp();
+  const { meta, teams, teamById, out, params, setAccent } = useApp();
   const [type, setType] = useState('regular');
   const [teamFilter, setTeamFilter] = useState('all');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [data, setData] = useState({ loading: true });
+
+  // 筛选到某支球队时整站配色跟着走
+  useEffect(() => {
+    setAccent(teamFilter === 'all' ? null : teamById.get(Number(teamFilter)) ?? null);
+    return () => setAccent(null);
+  }, [teamFilter, teamById, setAccent]);
 
   useEffect(() => {
     let alive = true;
@@ -86,7 +92,7 @@ export default function Schedule() {
         </div>
       </div>
 
-      <div className="grid cols-4" style={{ marginBottom: 16 }}>
+      <div className="grid cols-4" style={{ marginBottom: 14 }}>
         <StatTile label="比赛场次" value={games.length} unit=" 场" />
         <StatTile label="比赛日" value={byDate.length} unit=" 天" />
         <StatTile label="日期范围" value={dateRange} />
@@ -95,19 +101,19 @@ export default function Schedule() {
 
       {data.loading ? <Loading /> : (
         <div className="card">
-          <h2>赛程列表 <span className="sub">主队标于下方，胜率为主队获胜概率</span></h2>
+          <h2>赛程列表 <span className="sub">胜率为主队获胜概率</span></h2>
           <div className="table-wrap" style={{ maxHeight: 700, overflowY: 'auto' }}>
             <table className="data">
               <thead>
                 <tr>
-                  <th className="left" style={{ width: 120 }}>日期</th>
-                  <th className="left" style={{ width: 190 }}>客队</th>
-                  <th className="left" style={{ width: 190 }}>主队</th>
-                  <th style={{ width: 60 }}>休息</th>
-                  <th style={{ width: 130 }}>主队胜率</th>
-                  <th style={{ width: 100 }}>预测比分</th>
-                  <th style={{ width: 70 }}>总分</th>
-                  <th className="left" style={{ width: 180 }}>场馆 / 备注</th>
+                  <th className="left" style={{ width: 112 }}>日期</th>
+                  <th className="left" style={{ width: 184 }}>客队</th>
+                  <th className="left" style={{ width: 184 }}>主队</th>
+                  <th style={{ width: 58 }}>休息</th>
+                  <th style={{ width: 122 }}>主队胜率</th>
+                  <th style={{ width: 94 }}>预测比分</th>
+                  <th style={{ width: 62 }}>总分</th>
+                  <th className="left" style={{ width: 170 }}>场馆 / 备注</th>
                 </tr>
               </thead>
               <tbody>
@@ -120,12 +126,12 @@ export default function Schedule() {
                     <td className="left sched-date">{i === 0 ? fmtDate(date) : ''}</td>
                     <td className="left"><TeamCell team={teamById.get(g.awayId)} size={20} showAbbr={false} /></td>
                     <td className="left"><TeamCell team={teamById.get(g.homeId)} size={20} showAbbr={false} /></td>
-                    <td className="dim" style={{ fontSize: 11 }}>
+                    <td className="dim" style={{ fontSize: 10.5 }}>
                       {restLabel(g.prediction.restAway)}<br />{restLabel(g.prediction.restHome)}
                     </td>
                     <td>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
-                        <ProbBar p={g.prediction.homeWinProb} width={56} />
+                        <ProbBar p={g.prediction.homeWinProb} width={52} />
                         <b className="mono" style={{ color: probColor(g.prediction.homeWinProb) }}>
                           {(g.prediction.homeWinProb * 100).toFixed(0)}%
                         </b>
@@ -135,7 +141,7 @@ export default function Schedule() {
                       {g.prediction.awayScore.toFixed(0)} - {g.prediction.homeScore.toFixed(0)}
                     </td>
                     <td className="mono dim">{num(g.prediction.total, 0)}</td>
-                    <td className="left dim" style={{ fontSize: 11 }}>
+                    <td className="left dim" style={{ fontSize: 10.5 }}>
                       {g.label ? <span className="chip blue">{g.label}</span> : g.arena}
                     </td>
                   </tr>

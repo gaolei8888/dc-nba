@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useApp, go } from '../App.jsx';
 import { api, withOut } from '../lib/api.js';
 import {
-  TeamBadge, TeamCell, StatTile, DataTable, Loading, ErrorBox, Segmented, ProbBar,
+  TeamLogo, TeamCell, PlayerHeadshot, StatTile, DataTable,
+  Loading, ErrorBox, Segmented, ProbBar,
 } from '../components/common.jsx';
 import PlayerTable from '../components/PlayerTable.jsx';
 import {
@@ -10,10 +11,17 @@ import {
 } from '../lib/format.js';
 
 export default function TeamDetail({ teamId }) {
-  const { meta, teamById, out, toggleOut, params } = useApp();
+  const { meta, teamById, out, toggleOut, params, setAccent } = useApp();
   const [data, setData] = useState({ loading: true });
   const [statMode, setStatMode] = useState('base');
   const [month, setMonth] = useState('all');
+
+  // 整站配色切到这支球队
+  const team = teamById.get(teamId);
+  useEffect(() => {
+    if (team) setAccent(team);
+    return () => setAccent(null);
+  }, [team, setAccent]);
 
   useEffect(() => {
     let alive = true;
@@ -38,75 +46,74 @@ export default function TeamDetail({ teamId }) {
   if (data.loading) return <Loading />;
   if (data.error) return <ErrorBox error={data.error} />;
 
-  const { team, roster, arrivals, departures, schedule, ranking } = data;
+  const { roster, arrivals, departures, schedule, ranking } = data;
+  const t = data.team;
   const games = month === 'all' ? schedule : schedule.filter((g) => monthOf(g.date) === Number(month));
 
-  const projWins = schedule
-    .filter((g) => g.type === 'regular')
-    .reduce((s, g) => s + (g.homeId === teamId ? g.prediction.homeWinProb : 1 - g.prediction.homeWinProb), 0);
+  const regular = schedule.filter((g) => g.type === 'regular');
+  const projWins = regular.reduce(
+    (s, g) => s + (g.homeId === teamId ? g.prediction.homeWinProb : 1 - g.prediction.homeWinProb),
+    0,
+  );
   const homeGames = schedule.filter((g) => g.homeId === teamId).length;
-  const b2b = schedule.filter((g) => (g.homeId === teamId ? g.prediction.restHome : g.prediction.restAway) === 0).length;
+  const b2b = schedule.filter(
+    (g) => (g.homeId === teamId ? g.prediction.restHome : g.prediction.restAway) === 0,
+  ).length;
 
   return (
     <>
-      <div className="page-head" style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-        <TeamBadge team={team} size={52} />
-        <div style={{ flex: 1 }}>
-          <h1 style={{ marginBottom: 2 }}>{team.cn}</h1>
-          <p>
-            {team.full} · {team.conference === 'East' ? '东部' : '西部'} {team.division} 赛区 ·
-            {' '}{meta.priorSeason} 战绩 {team.wins}-{team.losses}（分区第 {team.confRank}）
-          </p>
+      <div className="card team-head">
+        <TeamLogo team={t} size={62} />
+        <div>
+          <h1>{t.cn}</h1>
+          <div className="en">
+            {t.full} · {t.conference === 'East' ? '东部' : '西部'} {t.division} · {meta.priorSeason} {t.wins}-{t.losses}（分区第 {t.confRank}）
+          </div>
         </div>
-        <button className="btn" onClick={() => go('teams')}>← 返回球队列表</button>
+        <div className="right">
+          <b className={signClass(ranking.total)}>{signed(ranking.total, 2)}</b>
+          <span>综合实力 · 联盟第 {ranking.rank}</span>
+        </div>
+        <button className="btn" style={{ marginLeft: 14 }} onClick={() => go('teams')}>← 球队列表</button>
       </div>
 
-      <div className="grid cols-4" style={{ marginBottom: 16 }}>
-        <StatTile label="综合实力（每场净胜分）" value={signed(ranking.total, 2)} hint="含当前缺阵修正" />
-        <StatTile label="实力排名" value={`第 ${ranking.rank}`} unit=" / 30" />
-        <StatTile label={`${meta.targetSeason} 预计胜场`} value={projWins.toFixed(1)} unit={` / ${schedule.filter((g) => g.type === 'regular').length}`} />
+      <div className="grid cols-5" style={{ marginBottom: 14 }}>
+        <StatTile label="进攻效率" value={num(t.adv.offRtg)} hint="每百回合得分" />
+        <StatTile label="防守效率" value={num(t.adv.defRtg)} hint="每百回合失分" />
+        <StatTile label="净效率" value={signed(t.adv.netRtg)} />
+        <StatTile label="节奏" value={num(t.adv.pace)} hint="每 48 分钟回合数" />
         <StatTile
-          label="阵容更迭修正"
-          value={signed(ranking.turnoverAdj, 2)}
-          hint="夏窗转会、签约、离队带来的实力变化（每场净胜分）"
+          label={`${meta.targetSeason} 预计胜场`}
+          value={projWins.toFixed(1)}
+          unit={` / ${regular.length}`}
         />
       </div>
 
       <div className="grid cols-2">
         <div className="card">
-          <h2>球队高阶数据 <span className="sub">{meta.priorSeason}</span></h2>
+          <h2>球队数据 <span className="sub">{meta.priorSeason} 场均</span></h2>
           <div className="grid cols-3">
-            <StatTile label="进攻效率" value={num(team.adv.offRtg)} hint="每百回合得分" />
-            <StatTile label="防守效率" value={num(team.adv.defRtg)} hint="每百回合失分" />
-            <StatTile label="净效率" value={signed(team.adv.netRtg)} />
-            <StatTile label="节奏" value={num(team.adv.pace)} hint="每 48 分钟回合数" />
-            <StatTile label="真实命中率" value={`${rate(team.adv.tsPct)}%`} />
-            <StatTile label="助攻率" value={`${rate(team.adv.astPct)}%`} />
+            <StatTile label="得分" value={num(t.base.pts)} />
+            <StatTile label="篮板" value={num(t.base.reb)} />
+            <StatTile label="助攻" value={num(t.base.ast)} />
+            <StatTile label="投篮%" value={rate(t.base.fgPct)} />
+            <StatTile label="三分%" value={rate(t.base.fg3Pct)} />
+            <StatTile label="罚球%" value={rate(t.base.ftPct)} />
+            <StatTile label="真实命中%" value={rate(t.adv.tsPct)} />
+            <StatTile label="助攻率%" value={rate(t.adv.astPct)} />
+            <StatTile label="三分占比%" value={rate(t.scoring.pct3pt)} />
           </div>
-          <div className="divider" />
-          <h2 style={{ marginBottom: 10 }}>四要素 <span className="sub">己方 vs 对手</span></h2>
-          <FourFactors ff={team.fourFactors} />
         </div>
 
         <div className="card">
-          <h2>球队基础数据 <span className="sub">场均</span></h2>
-          <div className="grid cols-3">
-            <StatTile label="得分" value={num(team.base.pts)} />
-            <StatTile label="篮板" value={num(team.base.reb)} />
-            <StatTile label="助攻" value={num(team.base.ast)} />
-            <StatTile label="抢断" value={num(team.base.stl)} />
-            <StatTile label="盖帽" value={num(team.base.blk)} />
-            <StatTile label="失误" value={num(team.base.tov)} />
-            <StatTile label="投篮命中率" value={`${rate(team.base.fgPct)}%`} />
-            <StatTile label="三分命中率" value={`${rate(team.base.fg3Pct)}%`} />
-            <StatTile label="罚球命中率" value={`${rate(team.base.ftPct)}%`} />
-          </div>
+          <h2>四要素 <span className="sub">己方 vs 对手</span></h2>
+          <FourFactors ff={t.fourFactors} />
           <div className="divider" />
-          <h2 style={{ marginBottom: 10 }}>得分构成</h2>
+          <h2>赛程特征</h2>
           <div className="grid cols-3">
-            <StatTile label="三分占比" value={`${rate(team.scoring.pct3pt)}%`} />
-            <StatTile label="内线占比" value={`${rate(team.scoring.pctPaint)}%`} />
-            <StatTile label="快攻占比" value={`${rate(team.scoring.pctFastBreak)}%`} />
+            <StatTile label="主场场次" value={homeGames} />
+            <StatTile label="背靠背" value={b2b} />
+            <StatTile label="阵容更迭" value={signed(ranking.turnoverAdj, 2)} hint="夏窗转会带来的实力变化" />
           </div>
         </div>
       </div>
@@ -114,7 +121,7 @@ export default function TeamDetail({ teamId }) {
       <div className="card">
         <h2>
           阵容
-          <span className="sub">{roster.length} 人 · 勾选表示缺阵，会实时影响全站预测</span>
+          <span className="sub">{roster.length} 人 · 勾选表示缺阵，全站预测实时生效</span>
           <span style={{ marginLeft: 'auto' }}>
             <Segmented
               value={statMode}
@@ -124,7 +131,7 @@ export default function TeamDetail({ teamId }) {
           </span>
         </h2>
         {outIds.length > 0 && (
-          <div className="err" style={{ background: 'rgba(240,136,62,.1)', borderColor: 'rgba(240,136,62,.3)', color: 'var(--accent)' }}>
+          <div className="notice">
             {outIds.length} 名球员标记为缺阵，球队实力修正 {signed(ranking.rosterAdj, 2)} 分/场
           </div>
         )}
@@ -132,7 +139,7 @@ export default function TeamDetail({ teamId }) {
           rows={roster}
           mode={statMode}
           nameColumn={{
-            key: 'name', label: '球员', align: 'left', width: 220,
+            key: 'name', label: '球员', align: 'left', width: 226,
             render: (p) => (
               <span className="player-row">
                 <input
@@ -142,6 +149,7 @@ export default function TeamDetail({ teamId }) {
                   onChange={() => toggleOut(teamId, p.playerId)}
                   onClick={(e) => e.stopPropagation()}
                 />
+                <PlayerHeadshot player={p} size={28} />
                 <span style={{ opacity: outIds.includes(p.playerId) ? 0.42 : 1 }}>
                   {p.name}
                   {p.noPriorData && <span className="chip" style={{ marginLeft: 6 }}>无上季数据</span>}
@@ -150,9 +158,9 @@ export default function TeamDetail({ teamId }) {
             ),
           }}
           extraColumns={[
-            { key: 'number', label: '号', width: 40, render: (p) => <span className="dim">{p.number}</span> },
-            { key: 'posCn', label: '位置', width: 76, align: 'left', render: (p) => <span className="dim">{p.posCn || '—'}</span> },
-            { key: 'age', label: '年龄', width: 48, render: (p) => num(p.age, 0) },
+            { key: 'number', label: '号', width: 36, render: (p) => <span className="dim">{p.number}</span> },
+            { key: 'posCn', label: '位置', width: 72, align: 'left', render: (p) => <span className="dim">{p.posCn || '—'}</span> },
+            { key: 'age', label: '年龄', width: 44, render: (p) => num(p.age, 0) },
           ]}
         />
       </div>
@@ -161,8 +169,7 @@ export default function TeamDetail({ teamId }) {
         <h2>
           阵容更迭
           <span className="sub">
-            转入 {arrivals.length} 人 · 转出 {departures.length} 人 ·
-            合计 {signed(ranking.turnoverAdj, 2)} 分/场
+            转入 {arrivals.length} 人 · 转出 {departures.length} 人 · 合计 {signed(ranking.turnoverAdj, 2)} 分/场
           </span>
         </h2>
         <div className="grid cols-2">
@@ -179,7 +186,7 @@ export default function TeamDetail({ teamId }) {
         <h2>
           {meta.targetSeason} 赛程与预测
           <span className="sub">{games.length} 场</span>
-          <span style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          <span style={{ marginLeft: 'auto' }}>
             <select value={month} onChange={(e) => setMonth(e.target.value)}>
               <option value="all">全部月份</option>
               {months.map((m) => <option key={m} value={m}>{MONTH_CN[m] ?? `${m}月`}</option>)}
@@ -196,43 +203,6 @@ export default function TeamDetail({ teamId }) {
   );
 }
 
-/** 转入/转出名单：显示球员、原属/现属球队、上赛季产出与模型估值 */
-function MoveList({ title, tone, rows, teamById, from }) {
-  if (!rows.length) return <div><b style={{ fontSize: 13 }}>{title}</b><div className="empty">无</div></div>;
-  return (
-    <div>
-      <b style={{ fontSize: 13 }} className={tone}>{title}</b>
-      <div className="scroll-y" style={{ maxHeight: 300, marginTop: 6 }}>
-        <table className="data">
-          <tbody>
-            {rows.map((p) => {
-              const other = teamById.get(from ? p.priorTeamId : p.teamId);
-              return (
-                <tr key={p.playerId}>
-                  <td className="left" style={{ width: 150 }}>{p.name}</td>
-                  <td className="left dim" style={{ width: 90, fontSize: 11 }}>
-                    {p.noPriorData
-                      ? <span className="chip">新秀/无数据</span>
-                      : other ? `${from ? '来自' : '去往'} ${other.abbr}` : (from ? '自由球员' : '离开联盟')}
-                  </td>
-                  <td className="dim" style={{ width: 78, fontSize: 11 }}>
-                    {p.gp ? `${p.gp}场 ${num(p.min)}分` : '—'}
-                  </td>
-                  <td style={{ width: 56 }} className="mono">
-                    {p.outCostPts < -0.05
-                      ? <span className={tone}>{num(Math.abs(p.outCostPts), 1)}</span>
-                      : <span className="dim">≈0</span>}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
 function FourFactors({ ff }) {
   const rows = [
     { i: 1, label: '有效命中率', own: ff.efgPct, opp: ff.oppEfgPct, better: 'high' },
@@ -244,11 +214,11 @@ function FourFactors({ ff }) {
     <DataTable
       columns={[
         // 按四要素的公认权重顺序固定排列，而不是按中文名排序
-        { key: 'label', label: '要素', align: 'left', width: 110, value: (r) => r.i, render: (r) => r.label },
-        { key: 'own', label: '己方', width: 70, render: (r) => `${rate(r.own)}%` },
-        { key: 'opp', label: '对手', width: 70, render: (r) => `${rate(r.opp)}%` },
+        { key: 'label', label: '要素', align: 'left', width: 106, value: (r) => r.i, render: (r) => r.label },
+        { key: 'own', label: '己方', width: 66, render: (r) => `${rate(r.own)}%` },
+        { key: 'opp', label: '对手', width: 66, render: (r) => `${rate(r.opp)}%` },
         {
-          key: 'diff', label: '优势', width: 70,
+          key: 'diff', label: '优势', width: 66,
           value: (r) => (r.better === 'high' ? r.own - r.opp : r.opp - r.own),
           render: (r) => {
             const d = (r.better === 'high' ? r.own - r.opp : r.opp - r.own) * 100;
@@ -263,6 +233,52 @@ function FourFactors({ ff }) {
   );
 }
 
+/** 转入/转出名单 */
+function MoveList({ title, tone, rows, teamById, from }) {
+  if (!rows.length) {
+    return <div><b className={tone} style={{ fontSize: 12.5 }}>{title}</b><div className="empty">无</div></div>;
+  }
+  return (
+    <div>
+      <b className={tone} style={{ fontSize: 12.5 }}>{title}</b>
+      <div className="scroll-y" style={{ maxHeight: 300, marginTop: 6 }}>
+        <table className="data">
+          <tbody>
+            {rows.map((p) => {
+              const other = teamById.get(from ? p.priorTeamId : p.teamId);
+              return (
+                <tr key={p.playerId}>
+                  <td className="left" style={{ width: 176 }}>
+                    <span className="player-cell">
+                      <PlayerHeadshot player={p} size={26} />
+                      <span>{p.name}</span>
+                    </span>
+                  </td>
+                  <td className="left dim" style={{ width: 92, fontSize: 11 }}>
+                    {p.noPriorData
+                      ? <span className="chip">新秀/无数据</span>
+                      : other
+                        ? <span className="team-cell"><TeamLogo team={other} size={17} />{from ? '来自' : '去往'}</span>
+                        : (from ? '自由球员' : '离开联盟')}
+                  </td>
+                  <td className="dim" style={{ width: 74, fontSize: 11 }}>
+                    {p.gp ? `${p.gp}场 ${num(p.min)}分` : '—'}
+                  </td>
+                  <td style={{ width: 52 }} className="mono">
+                    {p.outCostPts < -0.05
+                      ? <span className={tone}>{num(Math.abs(p.outCostPts), 1)}</span>
+                      : <span className="dim">≈0</span>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function TeamSchedule({ games, teamId, teamById }) {
   return (
     <DataTable
@@ -272,23 +288,26 @@ function TeamSchedule({ games, teamId, teamById }) {
       initialSort={{ key: 'date', dir: 'asc' }}
       onRowClick={(g) => go(`predict/${g.awayId}/${g.homeId}/${g.gameId}`)}
       columns={[
-        { key: 'date', label: '日期', align: 'left', width: 116, render: (g) => <span className="dim">{fmtDate(g.date)}</span> },
         {
-          key: 'opp', label: '对手', align: 'left', width: 210,
+          key: 'date', label: '日期', align: 'left', width: 110,
+          render: (g) => <span className="dim">{fmtDate(g.date)}</span>,
+        },
+        {
+          key: 'opp', label: '对手', align: 'left', width: 206,
           value: (g) => (g.homeId === teamId ? g.awayAbbr : g.homeAbbr),
           render: (g) => {
             const home = g.homeId === teamId;
             const opp = teamById.get(home ? g.awayId : g.homeId);
             return (
               <span className="team-cell">
-                <span className="ab" style={{ width: 20 }}>{home ? 'vs' : '@'}</span>
+                <span className="ab" style={{ width: 18 }}>{home ? 'vs' : '@'}</span>
                 <TeamCell team={opp} size={20} showAbbr={false} />
               </span>
             );
           },
         },
         {
-          key: 'rest', label: '休息', width: 66,
+          key: 'rest', label: '休息', width: 62,
           value: (g) => (g.homeId === teamId ? g.prediction.restHome : g.prediction.restAway),
           render: (g) => {
             const r = g.homeId === teamId ? g.prediction.restHome : g.prediction.restAway;
@@ -296,20 +315,20 @@ function TeamSchedule({ games, teamId, teamById }) {
           },
         },
         {
-          key: 'win', label: '预测胜率', width: 120,
+          key: 'win', label: '预测胜率', width: 116,
           value: (g) => (g.homeId === teamId ? g.prediction.homeWinProb : 1 - g.prediction.homeWinProb),
           render: (g) => {
             const p = g.homeId === teamId ? g.prediction.homeWinProb : 1 - g.prediction.homeWinProb;
             return (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
-                <ProbBar p={p} width={52} />
+                <ProbBar p={p} width={50} />
                 <b className="mono" style={{ color: probColor(p) }}>{(p * 100).toFixed(0)}%</b>
               </span>
             );
           },
         },
         {
-          key: 'score', label: '预测比分', width: 96,
+          key: 'score', label: '预测比分', width: 90,
           value: (g) => (g.homeId === teamId ? g.prediction.margin : -g.prediction.margin),
           render: (g) => {
             const own = g.homeId === teamId ? g.prediction.homeScore : g.prediction.awayScore;
@@ -317,7 +336,12 @@ function TeamSchedule({ games, teamId, teamById }) {
             return <span className="mono">{own.toFixed(0)} - {opp.toFixed(0)}</span>;
           },
         },
-        { key: 'label', label: '备注', align: 'left', width: 160, render: (g) => (g.label ? <span className="chip blue">{g.label}</span> : <span className="dim">{g.national?.join('/') || ''}</span>) },
+        {
+          key: 'label', label: '备注', align: 'left', width: 152,
+          render: (g) => (g.label
+            ? <span className="chip blue">{g.label}</span>
+            : <span className="dim">{g.national?.join('/') || ''}</span>),
+        },
       ]}
     />
   );

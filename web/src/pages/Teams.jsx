@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useApp, go } from '../App.jsx';
 import { api, withOut } from '../lib/api.js';
-import { TeamBadge, Loading, ErrorBox, Segmented } from '../components/common.jsx';
+import { TeamLogo, Loading, ErrorBox, Segmented } from '../components/common.jsx';
 import { num, signed, signClass } from '../lib/format.js';
+import { teamPalette } from '../lib/color.js';
 
 const CONF_CN = { East: '东部', West: '西部' };
 const DIV_CN = {
@@ -11,10 +12,12 @@ const DIV_CN = {
 };
 
 export default function Teams() {
-  const { teams, meta, out, params } = useApp();
+  const { teams, meta, out, params, dark, setAccent } = useApp();
   const [rankings, setRankings] = useState(null);
   const [error, setError] = useState(null);
   const [groupBy, setGroupBy] = useState('conference');
+
+  useEffect(() => { setAccent(null); }, [setAccent]);
 
   useEffect(() => {
     let alive = true;
@@ -60,7 +63,9 @@ export default function Teams() {
             {groups[key]
               .slice()
               .sort((a, b) => (rankById.get(b.teamId)?.total ?? 0) - (rankById.get(a.teamId)?.total ?? 0))
-              .map((t) => <TeamCard key={t.teamId} team={t} rank={rankById.get(t.teamId)} />)}
+              .map((t) => (
+                <TeamCard key={t.teamId} team={t} rank={rankById.get(t.teamId)} dark={dark} />
+              ))}
           </div>
         </div>
       ))}
@@ -68,34 +73,33 @@ export default function Teams() {
   );
 }
 
-function TeamCard({ team, rank }) {
+function TeamCard({ team, rank, dark }) {
+  const p = teamPalette(team, dark);
   return (
     <div
-      className="stat-tile"
-      style={{ cursor: 'pointer', borderLeft: `3px solid ${team.color}` }}
+      className="team-card"
+      style={{ '--tc': p.base, '--tc-soft': p.soft, '--tc-line': p.line }}
       onClick={() => go(`team/${team.teamId}`)}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <TeamBadge team={team} size={34} />
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontWeight: 650 }}>{team.cn}</div>
-          <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>
-            {team.full} · 上季 {team.wins}-{team.losses}
-          </div>
+      <div className="row">
+        <TeamLogo team={team} size={40} />
+        <div style={{ minWidth: 0 }}>
+          <div className="nm">{team.cn}</div>
+          <div className="sub">{team.full} · 上季 {team.wins}-{team.losses}</div>
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <div className={`mono ${signClass(rank?.total)}`} style={{ fontWeight: 700, fontSize: 16 }}>
-            {signed(rank?.total, 1)}
-          </div>
-          <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>联盟第 {rank?.rank}</div>
+        <div className="val">
+          <b className={signClass(rank?.total)}>{signed(rank?.total, 1)}</b>
+          <div style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>联盟第 {rank?.rank}</div>
         </div>
       </div>
-      <div className="divider" style={{ margin: '10px 0 8px' }} />
-      <div style={{ display: 'flex', gap: 14, fontSize: 11, color: 'var(--text-faint)' }}>
-        <span>Elo <b className="mono" style={{ color: 'var(--text-dim)' }}>{num(team.elo, 0)}</b></span>
-        <span>进攻 <b className="mono" style={{ color: 'var(--text-dim)' }}>{num(team.adv.offRtg)}</b></span>
-        <span>防守 <b className="mono" style={{ color: 'var(--text-dim)' }}>{num(team.adv.defRtg)}</b></span>
-        <span>节奏 <b className="mono" style={{ color: 'var(--text-dim)' }}>{num(team.adv.pace)}</b></span>
+      <div className="foot">
+        <span>Elo <b className="mono">{num(team.elo, 0)}</b></span>
+        <span>进攻 <b className="mono">{num(team.adv.offRtg)}</b></span>
+        <span>防守 <b className="mono">{num(team.adv.defRtg)}</b></span>
+        <span>
+          更迭{' '}
+          <b className={`mono ${signClass(rank?.turnoverAdj)}`}>{signed(rank?.turnoverAdj, 1)}</b>
+        </span>
       </div>
     </div>
   );

@@ -1,27 +1,78 @@
 import React, { useMemo, useState } from 'react';
 import { probColor } from '../lib/format.js';
 
-/** 球队色块徽标（NBA 官方 logo 需外链，这里用队色+缩写，离线也稳定） */
-export function TeamBadge({ team, size = 26 }) {
+const LOGO = (teamId) => `https://cdn.nba.com/logos/nba/${teamId}/primary/L/logo.svg`;
+const HEADSHOT = (playerId) => `https://cdn.nba.com/headshots/nba/latest/260x190/${playerId}.png`;
+
+/**
+ * 官方队标，加载失败（离线等）时回退到队色缩写块。
+ */
+export function TeamLogo({ team, size = 26 }) {
+  const [failed, setFailed] = useState(false);
   if (!team) return null;
+  if (failed) {
+    return (
+      <span
+        className="badge"
+        style={{
+          width: size, height: size,
+          fontSize: Math.round(size * 0.36),
+          background: `linear-gradient(140deg, ${team.color}, ${team.colorAlt})`,
+        }}
+        title={team.full}
+      >
+        {team.abbr}
+      </span>
+    );
+  }
   return (
-    <span
-      className="badge"
-      style={{
-        width: size,
-        height: size,
-        fontSize: Math.round(size * 0.38),
-        background: `linear-gradient(140deg, ${team.color}, ${team.colorAlt})`,
-      }}
+    <img
+      className="logo"
+      src={LOGO(team.teamId)}
+      width={size}
+      height={size}
+      alt={team.abbr}
       title={team.full}
-    >
-      {team.abbr}
-    </span>
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
   );
 }
 
-/** 球队单元格：徽标 + 中文名 + 缩写 */
-export function TeamCell({ team, onClick, showAbbr = true, size = 24 }) {
+/** 球员头像，失败时回退到姓名首字母 */
+export function PlayerHeadshot({ player, size = 30 }) {
+  const [failed, setFailed] = useState(false);
+  if (!player) return null;
+  if (failed || !player.playerId) {
+    const initials = (player.name ?? '')
+      .split(' ')
+      .map((w) => w[0])
+      .slice(0, 2)
+      .join('');
+    return (
+      <span
+        className="headshot-fallback"
+        style={{ width: size, height: size, fontSize: Math.round(size * 0.36) }}
+      >
+        {initials}
+      </span>
+    );
+  }
+  return (
+    <img
+      className="headshot"
+      src={HEADSHOT(player.playerId)}
+      width={size}
+      height={size}
+      alt={player.name}
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+/** 球队单元格：队标 + 中文名（+ 缩写） */
+export function TeamCell({ team, onClick, showAbbr = true, size = 22 }) {
   if (!team) return <span className="dim">—</span>;
   return (
     <span
@@ -29,16 +80,29 @@ export function TeamCell({ team, onClick, showAbbr = true, size = 24 }) {
       style={onClick ? { cursor: 'pointer' } : undefined}
       onClick={onClick}
     >
-      <TeamBadge team={team} size={size} />
+      <TeamLogo team={team} size={size} />
       <span className="nm">{team.cn}</span>
       {showAbbr && <span className="ab">{team.abbr}</span>}
     </span>
   );
 }
 
+/** 球员单元格：头像 + 姓名（+ 附加内容） */
+export function PlayerCell({ player, size = 28, children }) {
+  return (
+    <span className="player-cell">
+      <PlayerHeadshot player={player} size={size} />
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        {player.name}
+        {children}
+      </span>
+    </span>
+  );
+}
+
 export function StatTile({ label, value, unit, hint }) {
   return (
-    <div className="stat-tile" title={hint}>
+    <div className="tile" title={hint}>
       <div className="k">{label}</div>
       <div className="v">
         {value}

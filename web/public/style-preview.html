@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>界面方案预览 · NBA 预测中心</title>
+<style>
+/* ============================================================
+   预览页：同一份湖人真实数据，用三套视觉方案分别渲染。
+   每套方案都支持深色 / 浅色主题。
+   ============================================================ */
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  font: 14px/1.55 "Inter", "PingFang SC", "Microsoft YaHei", -apple-system,
+    BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  background: var(--bg);
+  color: var(--text);
+  transition: background .25s, color .25s;
+}
+.mono { font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+
+/* ---------- 顶部方案切换条 ---------- */
+.bar {
+  position: sticky; top: 0; z-index: 50;
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 12px 22px;
+  background: var(--bar-bg);
+  border-bottom: 1px solid var(--bar-line);
+  backdrop-filter: blur(12px);
+}
+.bar .title { font-weight: 750; font-size: 14px; margin-right: 4px; }
+.bar .hint { font-size: 12px; color: var(--dim); }
+.switch { display: flex; gap: 3px; background: var(--sw-bg); border-radius: 10px; padding: 3px; }
+.switch button {
+  border: 0; background: none; cursor: pointer; font: inherit;
+  padding: 7px 15px; border-radius: 8px; color: var(--dim); font-size: 13px;
+  transition: all .15s;
+}
+.switch button.on { background: var(--sw-on); color: var(--text); font-weight: 680; box-shadow: 0 1px 3px rgba(0,0,0,.18); }
+.bar .spacer { flex: 1; }
+
+.stage { padding: 22px; }
+.caption {
+  max-width: 1120px; margin: 0 auto 16px; font-size: 12.5px;
+  color: var(--dim); line-height: 1.75;
+}
+.caption b { color: var(--text); }
+.frame { max-width: 1120px; margin: 0 auto; }
+
+/* 队色（湖人）—— 实际应用里由 JS 按当前球队注入 */
+.frame {
+  --team-raw: #552583;
+  --team-alt-raw: #FDB927;
+}
+
+/* ============================================================
+   方案 A · 队色沉浸式
+   ============================================================ */
+body[data-style="a"] { --bg: #0b0f16; --text: #eaf0f7; --dim: #97a5b8; --faint: #63728a;
+  --card: #121824; --card2: #18202e; --line: #263145; --line2: #1c2432;
+  --bar-bg: rgba(18,24,36,.85); --bar-line: #263145; --sw-bg: #18202e; --sw-on: #232e40;
+  --team: #8a5fc0; --good: #35c46b; --bad: #ff5f56; }
+body[data-style="a"][data-theme="light"] { --bg: #f4f6f9; --text: #131a25; --dim: #5b6879; --faint: #8d9aac;
+  --card: #ffffff; --card2: #f7f9fc; --line: #dde4ee; --line2: #e9eef5;
+  --bar-bg: rgba(255,255,255,.88); --bar-line: #dde4ee; --sw-bg: #eaeff6; --sw-on: #ffffff;
+  --team: #552583; --good: #17924a; --bad: #d6392f; }
+
+body[data-style="a"] .hero {
+  position: relative; overflow: hidden; border-radius: 16px; padding: 28px 30px;
+  background: linear-gradient(115deg, var(--team-raw) 0%, #7a3fb5 60%, var(--team-raw) 100%);
+  color: #fff; box-shadow: 0 10px 30px rgba(0,0,0,.28); margin-bottom: 18px;
+}
+body[data-style="a"] .hero .wm {
+  position: absolute; right: -34px; top: 50%; transform: translateY(-50%);
+  width: 250px; opacity: .17; filter: grayscale(1) brightness(2.6);
+}
+body[data-style="a"] .hero .inner { position: relative; display: flex; align-items: center; gap: 20px; }
+body[data-style="a"] .hero img.lg { width: 80px; height: 80px; filter: drop-shadow(0 4px 14px rgba(0,0,0,.45)); }
+body[data-style="a"] .hero h1 { margin: 0 0 4px; font-size: 31px; font-weight: 800; letter-spacing: -.7px; }
+body[data-style="a"] .hero .en { font-size: 12px; opacity: .78; letter-spacing: 1.5px; text-transform: uppercase; font-weight: 600; }
+body[data-style="a"] .hero .meta { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+body[data-style="a"] .hero .pill {
+  background: rgba(255,255,255,.19); border: 1px solid rgba(255,255,255,.24);
+  padding: 4px 11px; border-radius: 20px; font-size: 12px; font-weight: 620;
+}
+body[data-style="a"] .tiles { display: grid; grid-template-columns: repeat(4,1fr); gap: 13px; margin-bottom: 18px; }
+body[data-style="a"] .tile {
+  background: var(--card); border: 1px solid var(--line2); border-left: 4px solid var(--team-raw);
+  border-radius: 10px; padding: 13px 15px;
+}
+body[data-style="a"][data-theme="dark"] .tile { border-left-color: var(--team); }
+body[data-style="a"] .tile .k { font-size: 11px; color: var(--faint); letter-spacing: .3px; }
+body[data-style="a"] .tile .v { font-size: 23px; font-weight: 730; margin-top: 4px; letter-spacing: -.5px; }
+body[data-style="a"] .panel { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px; }
+body[data-style="a"] .panel + .panel { margin-top: 16px; }
+body[data-style="a"] .panel h2 { margin: 0 0 14px; font-size: 14.5px; font-weight: 720; display: flex; align-items: center; gap: 9px; }
+body[data-style="a"] .panel h2 span { font-weight: 400; color: var(--faint); font-size: 12px; }
+body[data-style="a"] .prow {
+  display: grid; grid-template-columns: 44px 1fr 74px repeat(4, 58px);
+  align-items: center; gap: 10px; padding: 9px 8px; border-bottom: 1px solid var(--line2);
+  border-left: 3px solid transparent; border-radius: 4px;
+}
+body[data-style="a"] .prow:hover { background: var(--card2); border-left-color: var(--team-raw); }
+body[data-style="a"] .prow img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; object-position: center top; background: var(--card2); border: 1px solid var(--line); }
+body[data-style="a"] .prow .nm { font-weight: 620; }
+body[data-style="a"] .prow .po { font-size: 11px; color: var(--faint); }
+body[data-style="a"] .prow .num { text-align: right; font-variant-numeric: tabular-nums; }
+body[data-style="a"] .prow .num.b { font-weight: 700; }
+body[data-style="a"] .phead { color: var(--faint); font-size: 11px; letter-spacing: .3px; border-bottom: 1px solid var(--line); padding-bottom: 7px; }
+body[data-style="a"] .grow {
+  display: grid; grid-template-columns: 96px 26px 1fr 92px 74px; align-items: center; gap: 10px;
+  padding: 9px 8px; border-bottom: 1px solid var(--line2); font-size: 13px;
+}
+body[data-style="a"] .grow:hover { background: var(--card2); }
+body[data-style="a"] .grow img { width: 24px; height: 24px; }
+body[data-style="a"] .grow .opp { display: flex; align-items: center; gap: 8px; }
+body[data-style="a"] .bar-track { height: 7px; border-radius: 4px; background: var(--card2); overflow: hidden; }
+body[data-style="a"] .bar-track i { display: block; height: 100%; background: linear-gradient(90deg, var(--team-raw), var(--team-alt-raw)); }
+
+/* ============================================================
+   方案 B · 体育杂志风
+   ============================================================ */
+body[data-style="b"] { --bg: #faf9f7; --text: #14181d; --dim: #5d6672; --faint: #949ba6;
+  --card: #ffffff; --card2: #f4f3f0; --line: #e3e1dc; --line2: #eeece8;
+  --bar-bg: rgba(250,249,247,.9); --bar-line: #e3e1dc; --sw-bg: #eeece8; --sw-on: #ffffff;
+  --team: #552583; --good: #17924a; --bad: #c8362c; }
+body[data-style="b"][data-theme="dark"] { --bg: #14161a; --text: #f2f0ec; --dim: #a3a8b0; --faint: #6f7681;
+  --card: #1b1e24; --card2: #23272e; --line: #2c313a; --line2: #24282f;
+  --bar-bg: rgba(20,22,26,.88); --bar-line: #2c313a; --sw-bg: #23272e; --sw-on: #2f343d;
+  --team: #a77ad4; --good: #35c46b; --bad: #ff5f56; }
+
+body[data-style="b"] .mag { position: relative; padding: 8px 4px 0; }
+body[data-style="b"] .mag .wm {
+  position: absolute; right: 0; top: -14px; width: 190px; opacity: .1;
+}
+body[data-style="b"] .kicker {
+  font-size: 11px; letter-spacing: 2.6px; text-transform: uppercase;
+  color: var(--team); font-weight: 750; margin-bottom: 10px;
+}
+body[data-style="b"] .mag h1 {
+  margin: 0; font-size: 46px; line-height: 1.02; font-weight: 820; letter-spacing: -1.8px;
+  max-width: 640px;
+}
+body[data-style="b"] .mag .sub { margin-top: 12px; color: var(--dim); font-size: 14px; }
+body[data-style="b"] .rule { height: 3px; background: var(--text); margin: 22px 0 0; }
+body[data-style="b"] .rule.thin { height: 1px; background: var(--line); margin: 0; }
+body[data-style="b"] .figs { display: grid; grid-template-columns: repeat(4,1fr); gap: 0; margin: 26px 0 30px; }
+body[data-style="b"] .fig { padding-right: 22px; border-right: 1px solid var(--line); }
+body[data-style="b"] .fig:last-child { border-right: 0; }
+body[data-style="b"] .fig .k { font-size: 11px; letter-spacing: 1.6px; text-transform: uppercase; color: var(--faint); font-weight: 680; }
+body[data-style="b"] .fig .v { font-size: 40px; font-weight: 800; letter-spacing: -1.6px; margin-top: 7px; line-height: 1; }
+body[data-style="b"] .fig .n { font-size: 12px; color: var(--dim); margin-top: 7px; }
+body[data-style="b"] h2.sec {
+  font-size: 13px; letter-spacing: 2.4px; text-transform: uppercase; font-weight: 750;
+  margin: 34px 0 4px; display: flex; align-items: baseline; gap: 12px;
+}
+body[data-style="b"] h2.sec small { font-size: 11px; letter-spacing: .4px; text-transform: none; color: var(--faint); font-weight: 400; }
+body[data-style="b"] .prow {
+  display: grid; grid-template-columns: 52px 1fr repeat(4, 92px);
+  align-items: center; gap: 12px; padding: 15px 2px; border-bottom: 1px solid var(--line);
+}
+body[data-style="b"] .prow img { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; object-position: center top; background: var(--card2); }
+body[data-style="b"] .prow .nm { font-size: 16px; font-weight: 700; letter-spacing: -.3px; }
+body[data-style="b"] .prow .po { font-size: 11.5px; color: var(--faint); margin-top: 2px; letter-spacing: .6px; text-transform: uppercase; }
+body[data-style="b"] .prow .st { text-align: right; }
+body[data-style="b"] .prow .st b { display: block; font-size: 20px; font-weight: 760; letter-spacing: -.5px; }
+body[data-style="b"] .prow .st span { font-size: 10.5px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--faint); }
+body[data-style="b"] .grow {
+  display: grid; grid-template-columns: 120px 30px 1fr 120px 80px; align-items: center;
+  gap: 12px; padding: 13px 2px; border-bottom: 1px solid var(--line); font-size: 14px;
+}
+body[data-style="b"] .grow img { width: 26px; height: 26px; }
+body[data-style="b"] .grow .opp { display: flex; align-items: center; gap: 9px; font-weight: 620; }
+body[data-style="b"] .grow .pct { font-weight: 760; font-size: 17px; text-align: right; }
+body[data-style="b"] .bar-track { height: 4px; background: var(--line2); border-radius: 0; overflow: hidden; }
+body[data-style="b"] .bar-track i { display: block; height: 100%; background: var(--team); }
+
+/* ============================================================
+   方案 C · 玻璃数据终端
+   ============================================================ */
+body[data-style="c"] { --bg: #070a10; --text: #e8eef8; --dim: #8f9db4; --faint: #5d6b83;
+  --card: rgba(28,36,52,.55); --card2: rgba(38,48,68,.5); --line: rgba(120,150,200,.16); --line2: rgba(120,150,200,.09);
+  --bar-bg: rgba(10,14,22,.8); --bar-line: rgba(120,150,200,.16); --sw-bg: rgba(38,48,68,.6); --sw-on: rgba(70,86,118,.7);
+  --team: #a97ae0; --good: #3ddc84; --bad: #ff6b63; }
+body[data-style="c"][data-theme="light"] { --bg: #eef1f7; --text: #101725; --dim: #55637a; --faint: #8593a8;
+  --card: rgba(255,255,255,.7); --card2: rgba(255,255,255,.5); --line: rgba(40,70,120,.14); --line2: rgba(40,70,120,.08);
+  --bar-bg: rgba(238,241,247,.85); --bar-line: rgba(40,70,120,.14); --sw-bg: rgba(255,255,255,.6); --sw-on: #ffffff;
+  --team: #6b34a8; --good: #17924a; --bad: #d6392f; }
+
+body[data-style="c"] .stage { position: relative; }
+body[data-style="c"] .glow {
+  position: fixed; border-radius: 50%; filter: blur(90px); pointer-events: none; z-index: 0;
+}
+body[data-style="c"] .glow.g1 { width: 420px; height: 420px; background: var(--team-raw); opacity: .42; top: 40px; left: 12%; }
+body[data-style="c"] .glow.g2 { width: 360px; height: 360px; background: var(--team-alt-raw); opacity: .22; bottom: 40px; right: 10%; }
+body[data-style="c"][data-theme="light"] .glow.g1 { opacity: .22; }
+body[data-style="c"][data-theme="light"] .glow.g2 { opacity: .16; }
+body[data-style="c"] .frame { position: relative; z-index: 1; }
+
+body[data-style="c"] .glass {
+  background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+  backdrop-filter: blur(18px) saturate(140%); -webkit-backdrop-filter: blur(18px) saturate(140%);
+  box-shadow: 0 8px 32px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.07);
+}
+body[data-style="c"] .head { padding: 20px 22px; display: flex; align-items: center; gap: 16px; margin-bottom: 14px; }
+body[data-style="c"] .head img { width: 58px; height: 58px; filter: drop-shadow(0 0 14px var(--team-raw)); }
+body[data-style="c"] .head h1 { margin: 0; font-size: 24px; font-weight: 760; letter-spacing: -.5px; }
+body[data-style="c"] .head .en { font-size: 11px; letter-spacing: 1.6px; text-transform: uppercase; color: var(--faint); font-weight: 640; margin-top: 3px; }
+body[data-style="c"] .head .right { margin-left: auto; text-align: right; }
+body[data-style="c"] .head .right b { font-size: 26px; font-weight: 780; letter-spacing: -.6px; color: var(--good); }
+body[data-style="c"] .head .right span { display: block; font-size: 11px; color: var(--faint); letter-spacing: .4px; }
+body[data-style="c"] .tiles { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 14px; }
+body[data-style="c"] .tile { padding: 13px 15px; position: relative; overflow: hidden; }
+body[data-style="c"] .tile::after {
+  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--team-raw), transparent); opacity: .8;
+}
+body[data-style="c"] .tile .k { font-size: 10.5px; color: var(--faint); letter-spacing: 1.1px; text-transform: uppercase; font-weight: 640; }
+body[data-style="c"] .tile .v { font-size: 24px; font-weight: 740; margin-top: 5px; letter-spacing: -.6px; }
+body[data-style="c"] .panel { padding: 16px 18px; }
+body[data-style="c"] .panel + .panel { margin-top: 14px; }
+body[data-style="c"] .panel h2 { margin: 0 0 12px; font-size: 11.5px; letter-spacing: 1.6px; text-transform: uppercase; font-weight: 700; color: var(--dim); display: flex; gap: 10px; align-items: center; }
+body[data-style="c"] .panel h2 span { letter-spacing: .2px; text-transform: none; color: var(--faint); font-weight: 400; font-size: 11.5px; }
+body[data-style="c"] .prow {
+  display: grid; grid-template-columns: 30px 1fr repeat(5, 52px);
+  align-items: center; gap: 9px; padding: 6px 7px; border-radius: 7px; font-size: 12.5px;
+}
+body[data-style="c"] .prow:hover { background: var(--card2); }
+body[data-style="c"] .prow img { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; object-position: center top; background: var(--card2); }
+body[data-style="c"] .prow .nm { font-weight: 620; }
+body[data-style="c"] .prow .num { text-align: right; font-variant-numeric: tabular-nums; }
+body[data-style="c"] .phead { color: var(--faint); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; border-bottom: 1px solid var(--line2); padding-bottom: 6px; margin-bottom: 3px; }
+body[data-style="c"] .grow {
+  display: grid; grid-template-columns: 78px 22px 1fr 84px 62px; align-items: center; gap: 9px;
+  padding: 6px 7px; border-radius: 7px; font-size: 12.5px;
+}
+body[data-style="c"] .grow:hover { background: var(--card2); }
+body[data-style="c"] .grow img { width: 20px; height: 20px; }
+body[data-style="c"] .grow .opp { display: flex; align-items: center; gap: 7px; }
+body[data-style="c"] .bar-track { height: 5px; border-radius: 3px; background: var(--card2); overflow: hidden; }
+body[data-style="c"] .bar-track i { display: block; height: 100%; background: var(--team-raw); box-shadow: 0 0 10px var(--team-raw); }
+
+/* 通用小工具 */
+.pos { color: var(--good); }
+.neg { color: var(--bad); }
+.dim { color: var(--faint); }
+@media (max-width: 900px) {
+  body[data-style] .tiles, body[data-style="b"] .figs { grid-template-columns: repeat(2,1fr) !important; }
+}
+</style>
+</head>
+<body data-style="a" data-theme="dark">
+
+<div class="bar">
+  <span class="title">界面方案预览</span>
+  <div class="switch" id="styleSwitch">
+    <button data-v="a" class="on">A · 队色沉浸式</button>
+    <button data-v="b">B · 体育杂志风</button>
+    <button data-v="c">C · 玻璃数据终端</button>
+  </div>
+  <div class="switch" id="themeSwitch">
+    <button data-v="dark" class="on">深色</button>
+    <button data-v="light">浅色</button>
+  </div>
+  <span class="spacer"></span>
+  <span class="hint">同一份湖人真实数据 · 官方队标与球员头像</span>
+</div>
+
+<div class="stage">
+  <div class="glow g1"></div>
+  <div class="glow g2"></div>
+  <p class="caption" id="caption"></p>
+  <div class="frame" id="frame"></div>
+</div>
+
+<script>
+// ---------- 真实数据（来自应用的 data/ 抓取结果） ----------
+const TEAM = {
+  id: 1610612747, abbr: 'LAL', cn: '洛杉矶湖人', en: 'Los Angeles Lakers',
+  rec: '53-29', conf: '西部', div: '太平洋区', rank: 4,
+  strength: '+2.04', leagueRank: 13, projWins: '44.8',
+  off: '117.0', def: '115.5', net: '+1.5', pace: '99.2',
+};
+const ROSTER = [
+  { id: 1629029, name: 'Luka Dončić',   pos: '锋卫摇摆', num: 77, min: 35.8, pts: 33.5, reb: 7.7,  ast: 8.3, fg: '47.6' },
+  { id: 1630559, name: 'Austin Reaves', pos: '后卫',     num: 15, min: 34.5, pts: 23.3, reb: 4.7,  ast: 5.5, fg: '49.0' },
+  { id: 1631117, name: 'Walker Kessler',pos: '中锋',     num: 14, min: 30.8, pts: 14.4, reb: 10.8, ast: 3.0, fg: '70.3' },
+  { id: 1629656, name: 'Quentin Grimes',pos: '后卫',     num: 5,  min: 29.4, pts: 13.4, reb: 3.6,  ast: 3.3, fg: '45.0' },
+  { id: 1629012, name: 'Collin Sexton', pos: '后卫',     num: 10, min: 23.7, pts: 15.4, reb: 2.3,  ast: 3.3, fg: '48.5' },
+  { id: 1631222, name: 'Jake LaRavia',  pos: '前锋',     num: 12, min: 25.1, pts: 8.2,  reb: 4.0,  ast: 1.8, fg: '45.9' },
+];
+const GAMES = [
+  { date: '10月21日 周三', ha: 'vs', opp: '金州勇士',   oid: 1610612744, p: 69, score: '117 - 112' },
+  { date: '10月24日 周六', ha: '@',  opp: '底特律活塞', oid: 1610612765, p: 41, score: '108 - 112' },
+  { date: '10月27日 周二', ha: 'vs', opp: '纽约尼克斯', oid: 1610612752, p: 52, score: '113 - 112' },
+  { date: '10月30日 周五', ha: '@',  opp: '波士顿凯尔特人', oid: 1610612738, p: 38, score: '107 - 113' },
+];
+
+const logo = (id) => `https://cdn.nba.com/logos/nba/${id}/primary/L/logo.svg`;
+const shot = (id) => `https://cdn.nba.com/headshots/nba/latest/260x190/${id}.png`;
+
+const CAPTIONS = {
+  a: '<b>方案 A · 队色沉浸式</b>：进入球队页时整页被该队主色接管——紫金渐变头图配大号队标与淡水印，每个数据块左侧一条队色竖条，阵容行带 40px 圆形头像，赛程行的胜率条用队色渐变。切换到别的球队，整页配色随之变化。气质接近 NBA 官网／ESPN 的球队页。',
+  b: '<b>方案 B · 体育杂志风</b>：以排版取胜。大号粗标题、宽留白、细分隔线，数字放大成版面元素，队标只作淡水印，队色仅出现在小标题与进度条等细节处。信息密度最低但最好读，气质接近 The Athletic 的数据页。',
+  c: '<b>方案 C · 玻璃数据终端</b>：深色底铺两团队色模糊光斑，所有卡片是半透明毛玻璃并带队色顶边辉光。行高最紧凑，同一屏能看到最多数据，适合长时间盯盘对比多支球队。气质接近现代 BI 面板。',
+};
+
+// ---------- 三套渲染 ----------
+function renderA() {
+  return `
+  <div class="hero">
+    <img class="wm" src="${logo(TEAM.id)}" alt="" />
+    <div class="inner">
+      <img class="lg" src="${logo(TEAM.id)}" alt="" />
+      <div>
+        <div class="en">${TEAM.en}</div>
+        <h1>${TEAM.cn}</h1>
+        <div class="meta">
+          <span class="pill">${TEAM.rec}</span>
+          <span class="pill">${TEAM.conf}第 ${TEAM.rank}</span>
+          <span class="pill">实力 ${TEAM.strength}</span>
+          <span class="pill">联盟第 ${TEAM.leagueRank}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="tiles">
+    ${tile('进攻效率', TEAM.off)}${tile('防守效率', TEAM.def)}
+    ${tile('净效率', TEAM.net)}${tile('2026-27 预计胜场', TEAM.projWins)}
+  </div>
+  <div class="panel">
+    <h2>阵容 <span>19 人 · 上赛季场均</span></h2>
+    <div class="prow phead"><span></span><span>球员</span><span class="num">时间</span><span class="num">得分</span><span class="num">篮板</span><span class="num">助攻</span><span class="num">命中%</span></div>
+    ${ROSTER.map((p) => `
+      <div class="prow">
+        <img src="${shot(p.id)}" alt="" onerror="this.style.visibility='hidden'" />
+        <div><div class="nm">${p.name}</div><div class="po">#${p.num} · ${p.pos}</div></div>
+        <span class="num dim">${p.min}</span>
+        <span class="num b">${p.pts}</span>
+        <span class="num">${p.reb}</span>
+        <span class="num">${p.ast}</span>
+        <span class="num dim">${p.fg}</span>
+      </div>`).join('')}
+  </div>
+  <div class="panel">
+    <h2>2026-27 赛程与预测 <span>前 4 场</span></h2>
+    ${GAMES.map((g) => `
+      <div class="grow">
+        <span class="dim">${g.date}</span>
+        <span class="dim">${g.ha}</span>
+        <span class="opp"><img src="${logo(g.oid)}" alt="" />${g.opp}</span>
+        <span><div class="bar-track"><i style="width:${g.p}%"></i></div></span>
+        <span class="num mono" style="text-align:right;font-weight:700">${g.p}%</span>
+      </div>`).join('')}
+  </div>`;
+}
+
+function renderB() {
+  return `
+  <div class="mag">
+    <img class="wm" src="${logo(TEAM.id)}" alt="" />
+    <div class="kicker">${TEAM.conf} · ${TEAM.div}</div>
+    <h1>${TEAM.cn}</h1>
+    <div class="sub">${TEAM.en} · 上赛季 ${TEAM.rec}，分区第 ${TEAM.rank}</div>
+    <div class="rule"></div>
+    <div class="figs">
+      ${fig('综合实力', TEAM.strength, '每场净胜分')}
+      ${fig('联盟排名', TEAM.leagueRank + '<span style="font-size:20px;color:var(--faint)">/30</span>', '实力榜')}
+      ${fig('预计胜场', TEAM.projWins, '共 80 场')}
+      ${fig('净效率', TEAM.net, '每百回合')}
+    </div>
+    <h2 class="sec">阵容 <small>上赛季场均</small></h2>
+    <div class="rule thin"></div>
+    ${ROSTER.map((p) => `
+      <div class="prow">
+        <img src="${shot(p.id)}" alt="" onerror="this.style.visibility='hidden'" />
+        <div><div class="nm">${p.name}</div><div class="po">${p.pos} · #${p.num}</div></div>
+        <div class="st"><b>${p.pts}</b><span>得分</span></div>
+        <div class="st"><b>${p.reb}</b><span>篮板</span></div>
+        <div class="st"><b>${p.ast}</b><span>助攻</span></div>
+        <div class="st"><b>${p.min}</b><span>分钟</span></div>
+      </div>`).join('')}
+    <h2 class="sec">赛程预测 <small>2026-27 前 4 场</small></h2>
+    <div class="rule thin"></div>
+    ${GAMES.map((g) => `
+      <div class="grow">
+        <span class="dim">${g.date}</span>
+        <span class="dim">${g.ha}</span>
+        <span class="opp"><img src="${logo(g.oid)}" alt="" />${g.opp}</span>
+        <span><div class="bar-track"><i style="width:${g.p}%"></i></div></span>
+        <span class="pct">${g.p}%</span>
+      </div>`).join('')}
+  </div>`;
+}
+
+function renderC() {
+  return `
+  <div class="glass head">
+    <img src="${logo(TEAM.id)}" alt="" />
+    <div>
+      <h1>${TEAM.cn}</h1>
+      <div class="en">${TEAM.en} · ${TEAM.rec} · ${TEAM.conf}第 ${TEAM.rank}</div>
+    </div>
+    <div class="right"><b>${TEAM.strength}</b><span>综合实力 · 联盟第 ${TEAM.leagueRank}</span></div>
+  </div>
+  <div class="tiles">
+    ${tileC('进攻', TEAM.off)}${tileC('防守', TEAM.def)}${tileC('净效率', TEAM.net)}${tileC('节奏', TEAM.pace)}
+  </div>
+  <div class="glass panel">
+    <h2>阵容 <span>19 人 · 上赛季场均</span></h2>
+    <div class="prow phead"><span></span><span>球员</span><span class="num">时间</span><span class="num">得分</span><span class="num">篮板</span><span class="num">助攻</span><span class="num">命中%</span></div>
+    ${ROSTER.map((p) => `
+      <div class="prow">
+        <img src="${shot(p.id)}" alt="" onerror="this.style.visibility='hidden'" />
+        <span class="nm">${p.name}</span>
+        <span class="num dim">${p.min}</span>
+        <span class="num" style="font-weight:700">${p.pts}</span>
+        <span class="num">${p.reb}</span>
+        <span class="num">${p.ast}</span>
+        <span class="num dim">${p.fg}</span>
+      </div>`).join('')}
+  </div>
+  <div class="glass panel">
+    <h2>赛程预测 <span>2026-27 前 4 场</span></h2>
+    ${GAMES.map((g) => `
+      <div class="grow">
+        <span class="dim">${g.date}</span>
+        <span class="dim">${g.ha}</span>
+        <span class="opp"><img src="${logo(g.oid)}" alt="" />${g.opp}</span>
+        <span><div class="bar-track"><i style="width:${g.p}%"></i></div></span>
+        <span class="num mono" style="text-align:right;font-weight:700">${g.p}%</span>
+      </div>`).join('')}
+  </div>`;
+}
+
+const tile = (k, v) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`;
+const tileC = (k, v) => `<div class="glass tile"><div class="k">${k}</div><div class="v">${v}</div></div>`;
+const fig = (k, v, n) => `<div class="fig"><div class="k">${k}</div><div class="v">${v}</div><div class="n">${n}</div></div>`;
+
+const RENDER = { a: renderA, b: renderB, c: renderC };
+
+function paint() {
+  const style = document.body.dataset.style;
+  document.getElementById('frame').innerHTML = RENDER[style]();
+  document.getElementById('caption').innerHTML = CAPTIONS[style];
+}
+
+function wire(id, attr) {
+  const box = document.getElementById(id);
+  box.addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    [...box.children].forEach((b) => b.classList.toggle('on', b === btn));
+    document.body.dataset[attr] = btn.dataset.v;
+    paint();
+  });
+}
+wire('styleSwitch', 'style');
+wire('themeSwitch', 'theme');
+paint();
+</script>
+</body>
+</html>
