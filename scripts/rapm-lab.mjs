@@ -37,7 +37,15 @@ for (const f of fs.readdirSync(HISTORY)) {
   m = f.match(/^stints_(\d{4}-\d{2})\.json$/);
   if (m) stints[m[1]] = readIf(path.join(HISTORY, f));
 }
-const seasons = Object.keys(players).sort().filter((s) => lineups[s] && stints[s]);
+// 抓到一半的赛季必须排除：半个赛季的 RAPM 噪声大得没法比，
+// 混进来会把整张表带偏，而且看不出是数据不全造成的。
+const MIN_GAMES = Number(process.env.MIN_GAMES ?? 800);
+const seasons = Object.keys(players).sort().filter((s) => {
+  if (!lineups[s] || !stints[s]) return false;
+  const n = Object.keys(stints[s].games).length;
+  if (n < MIN_GAMES) { console.log(`  跳过 ${s}：只抓了 ${n} 场（不足 ${MIN_GAMES}）`); return false; }
+  return true;
+});
 if (!seasons.length) {
   console.error('还没有 stints_*.json。先跑 npm run pbp:fetch');
   process.exit(1);
@@ -163,4 +171,311 @@ if (withTeam.length > 30) {
   console.log(`\n 与所在队净效率的相关：APM ${corr(withTeam.map((x) => x.apm), tn).toFixed(3)}`
     + `  →  RAPM ${corr(withTeam.map((x) => x.rapm), tn).toFixed(3)}`);
   console.log(' （好球员本来就在好队，这个相关不该归零；但对手调整应该让它降下来一些）');
+}
+
+// ---------------------------------------------------------------- 正则强度
+//
+// 上面单季 RAPM 输给 APM，但那个对比有个明显的混淆：RAPM 的 lambda 是随手写的
+// 2000，APM 的 6000 是扫过的。RAPM 每条观测多了防守方五人，参数量翻倍，
+// 欠正则会直接变成噪声。不扫一遍就下结论等于拿没调过的新方法去比调过的旧方法。
+//
+// 而且线上真正用的是 3 季衰减，不是单季——那才是该比的配置。
+
+if (canPair) {
+  const evalStability = (get, seasonsPair) => {
+    const rs = [];
+    for (const s of seasonsPair) {
+      const c = commonRows(s);
+      if (!c) continue;
+      const ids = c.rows.map((p) => p.playerId);
+      const a = get(s); const b = get(c.nx);
+      const x = ids.map((i) => a.get(i)); const y = ids.map((i) => b.get(i));
+      if (x.some((v) => v == null) || y.some((v) => v == null)) continue;
+      rs.push(corr(x, y));
+    }
+    return rs.length ? mean(rs) : null;
+  };
+  const evalOnoff = (get) => {
+    const rs = [];
+    for (const s of seasons) {
+      const c = commonRows(s);
+      if (!c) continue;
+      const byId = new Map(players[c.nx].map((p) => [p.playerId, p]));
+      const keep = c.rows.filter((p) => byId.has(p.playerId) && get(s).get(p.playerId) != null);
+      if (keep.length < 50) continue;
+      rs.push(corr(
+        keep.map((p) => get(s).get(p.playerId)),
+        keep.map((p) => (byId.get(p.playerId).onNet ?? 0) - (byId.get(p.playerId).offNet ?? 0)),
+      ));
+    }
+    return rs.length ? mean(rs) : null;
+  };
+
+  console.log('\nRAPM 正则强度扫描（单季）');
+  console.log('  lambda   年度稳定性   预测次季on/off');
+  for (const lam of [2000, 6000, 12000, 20000, 35000, 60000]) {
+    const cache = new Map();
+    const get = (s) => {
+      if (!cache.has(s)) {
+        const r = computeRapm(stintsOf(stints[s]), { lambda: lam });
+        r.delete('__hca');
+        cache.set(s, new Map([...r].map(([k, v]) => [k, v.rapm])));
+      }
+      return cache.get(s);
+    };
+    const st = evalStability(get, seasons);
+    const oo = evalOnoff(get);
+    console.log(`  ${String(lam).padStart(6)}      ${st?.toFixed(3) ?? '—'}        ${oo?.toFixed(3) ?? '—'}`);
+  }
+  console.log('  对照 APM(6000)  '
+    + `${evalStability((s) => new Map([...apmBy.get(s)].map(([k, v]) => [k, v.apm])), seasons)?.toFixed(3)}`
+    + `        ${evalOnoff((s) => new Map([...apmBy.get(s)].map(([k, v]) => [k, v.apm])))?.toFixed(3)}`);
+}
+
+// ---------------------------------------------------------------- 真正该比的配置
+//
+// 上面比的是单季，而线上用的是 3 季衰减，而且外面还套了一层与 SPM 的混合。
+// 单季 RAPM 抖是意料之中的——衰减和先验正是治这个的。这一节比的才是决策点：
+// 把 IMP 里那一半「场上实测」从 APM 换成 RAPM，到底好不好。
+//
+// 三把尺子一起报，包括对 RAPM 不利的那两把：
+//   · 次季 on/off —— 独立，两者都不含它，这把是主判据
+//   · 次季 APM   —— 偏袒 IMP(APM)
+//   · 次季 RAPM  —— 偏袒 IMP(RAPM)
+// 只报对自己有利的那把尺子，等于自己给自己打分。
+
+if (canPair && seasons.length >= 3) {
+  const SPAN = 3; const HALF = 1;
+  const decayed = (make, upto, lambda) => {
+    const i = seasons.indexOf(upto);
+    const slice = [];
+    for (let k = SPAN - 1; k >= 0; k--) if (i - k >= 0) slice.push(seasons[i - k]);
+    return make(slice, lambda);
+  };
+  const decApm = new Map();
+  const decRapm = new Map();
+  const getDecApm = (s, lam = APM_LAMBDA) => {
+    const key = `${s}|${lam}`;
+    if (!decApm.has(key)) {
+      const rows = [];
+      const i = seasons.indexOf(s);
+      for (let k = 0; k < SPAN && i - k >= 0; k++) {
+        const w = 0.5 ** (k / HALF);
+        for (const l of lineups[seasons[i - k]]) rows.push({ ...l, poss: (l.poss ?? 0) * w });
+      }
+      decApm.set(key, new Map([...computeApm(rows, { lambda: lam })].map(([k, v]) => [k, v.apm])));
+    }
+    return decApm.get(key);
+  };
+  const getDecRapm = (s, lam) => {
+    const key = `${s}|${lam}`;
+    if (!decRapm.has(key)) {
+      const merged = [];
+      const i = seasons.indexOf(s);
+      for (let k = 0; k < SPAN && i - k >= 0; k++) {
+        const w = 0.5 ** (k / HALF);
+        for (const st of stintsOf(stints[seasons[i - k]])) {
+          merged.push([...st.slice(0, 10), st[10] * w, st[11] * w, st[12] * w, st[13] * w, st[14]]);
+        }
+      }
+      const r = computeRapm(merged, { lambda: lam, minPoss: 0.25 });
+      r.delete('__hca');
+      decRapm.set(key, new Map([...r].map(([k, v]) => [k, v.rapm])));
+    }
+    return decRapm.get(key);
+  };
+
+  // 次季的三个目标
+  const targets = {
+    'on/off（独立）': (nx) => {
+      const byId = new Map(players[nx].map((p) => [p.playerId, p]));
+      return (id) => {
+        const p = byId.get(id);
+        return p ? (p.onNet ?? 0) - (p.offNet ?? 0) : null;
+      };
+    },
+    APM: (nx) => (id) => apmBy.get(nx).get(id)?.apm ?? null,
+    RAPM: (nx) => (id) => rapmBy.get(nx).get(id)?.rapm ?? null,
+  };
+
+  const evalAgainst = (valueOf, targetName) => {
+    const rs = [];
+    for (const s of seasons) {
+      const c = commonRows(s);
+      if (!c) continue;
+      const target = targets[targetName](c.nx);
+      const keep = c.rows.filter((p) => valueOf(p, s) != null && target(p.playerId) != null);
+      if (keep.length < 50) continue;
+      rs.push(corr(keep.map((p) => valueOf(p, s)), keep.map((p) => target(p.playerId))));
+    }
+    return rs.length ? mean(rs) : null;
+  };
+
+  const spmOf = (p, s) => apply(spmFor.get(s), p);
+  const RAPM_LAMS = [6000, 20000, 60000];
+  console.log('\n3 季衰减 · 单独看实测那一半');
+  console.log('  方案                     次季on/off   次季APM   次季RAPM');
+  const show = (label, f) => {
+    console.log(`  ${label.padEnd(24)}  ${(evalAgainst(f, 'on/off（独立）') ?? 0).toFixed(3)}`
+      + `        ${(evalAgainst(f, 'APM') ?? 0).toFixed(3)}     ${(evalAgainst(f, 'RAPM') ?? 0).toFixed(3)}`);
+  };
+  show('衰减 APM', (p, s) => getDecApm(s).get(p.playerId) ?? null);
+  for (const lam of RAPM_LAMS) show(`衰减 RAPM λ=${lam}`, (p, s) => getDecRapm(s, lam).get(p.playerId) ?? null);
+  show('纯 SPM', spmOf);
+
+  console.log('\n混合 w·实测 + (1−w)·SPM —— 主判据是「次季 on/off」');
+  console.log('  w      IMP(APM)   IMP(RAPM λ=6000)   IMP(RAPM λ=20000)');
+  for (const w of [0, 0.2, 0.3, 0.35, 0.5, 0.7, 1]) {
+    const mk = (get) => (p, s) => {
+      const a = get(s).get(p.playerId);
+      const sp = spmOf(p, s);
+      if (sp == null) return null;
+      return a == null ? sp : w * a + (1 - w) * sp;
+    };
+    const a = evalAgainst(mk((s) => getDecApm(s)), 'on/off（独立）');
+    const b = evalAgainst(mk((s) => getDecRapm(s, 6000)), 'on/off（独立）');
+    const c = evalAgainst(mk((s) => getDecRapm(s, 20000)), 'on/off（独立）');
+    console.log(`  ${w.toFixed(2)}    ${a.toFixed(4)}       ${b.toFixed(4)}            ${c.toFixed(4)}`);
+  }
+}
+
+// ---------------------------------------------------------------- EPM 的原方法
+//
+// 固定权重线性混合是我们自己的简化。EPM 的做法是把 SPM 当**贝叶斯先验**
+// 内嵌进岭回归：没有证据就当他值 box score 说的那么多，回合数越多越敢偏离。
+// 这比线性混合更正统——收缩是逐人按证据量来的，不是全联盟一个权重。
+//
+// 上一轮用 APM 试过，比线性混合差（0.3988 对 0.4061）。但那时缺的正是
+// 对手调整这一块，所以有了 RAPM 之后值得再试一次。
+// 先验只有一个总值，按进攻/防守各一半分——粗糙，但混合后看的是两者之和。
+
+if (canPair && seasons.length >= 3) {
+  const SPAN = 3; const HALF = 1;
+  const decPrior = new Map();
+  const getPriorRapm = (s, lam) => {
+    const key = `${s}|${lam}`;
+    if (!decPrior.has(key)) {
+      const merged = [];
+      const i = seasons.indexOf(s);
+      for (let k = 0; k < SPAN && i - k >= 0; k++) {
+        const w = 0.5 ** (k / HALF);
+        for (const st of stintsOf(stints[seasons[i - k]])) {
+          merged.push([...st.slice(0, 10), st[10] * w, st[11] * w, st[12] * w, st[13] * w, st[14]]);
+        }
+      }
+      const half = new Map();
+      for (const p of players[s]) {
+        const v = apply(spmFor.get(s), p);
+        if (v != null) half.set(p.playerId, v / 2);
+      }
+      const r = computeRapm(merged, { lambda: lam, minPoss: 0.25, priorO: half, priorD: half });
+      r.delete('__hca');
+      decPrior.set(key, new Map([...r].map(([k, v]) => [k, v.rapm])));
+    }
+    return decPrior.get(key);
+  };
+
+  const onoffTarget = (nx) => {
+    const byId = new Map(players[nx].map((p) => [p.playerId, p]));
+    return (id) => {
+      const p = byId.get(id);
+      return p ? (p.onNet ?? 0) - (p.offNet ?? 0) : null;
+    };
+  };
+  const evalOn = (valueOf) => {
+    const rs = [];
+    for (const s of seasons) {
+      const c = commonRows(s);
+      if (!c) continue;
+      const t = onoffTarget(c.nx);
+      const keep = c.rows.filter((p) => valueOf(p, s) != null && t(p.playerId) != null);
+      if (keep.length < 50) continue;
+      rs.push(corr(keep.map((p) => valueOf(p, s)), keep.map((p) => t(p.playerId))));
+    }
+    return rs.length ? mean(rs) : null;
+  };
+
+  console.log('\nEPM 原方法：SPM 当先验内嵌进 RAPM 岭回归（判据：预测次季 on/off）');
+  console.log('  收缩强度 λ    结果      对比');
+  for (const lam of [3000, 8000, 20000, 50000]) {
+    const r = evalOn((p, s) => getPriorRapm(s, lam).get(p.playerId) ?? apply(spmFor.get(s), p));
+    console.log(`  ${String(lam).padStart(8)}     ${r.toFixed(4)}`);
+  }
+  console.log(`  线性混合最优（IMP(APM) w=0.30）  0.3492`);
+  console.log('  纯 SPM                          0.3331');
+}
+
+// ---------------------------------------------------------------- 三方混合
+//
+// 单换 RAPM 输了，但那是「二选一」的问法。两者的误差结构其实不同：
+// APM 有对手污染（系统性偏差），RAPM 没有污染但方差大。
+// 误差不相关的两个估计，加权平均往往比任何一个都好——这是最后一个
+// 值得试的配置，也是唯一还能让 play-by-play 这三小时回本的路。
+
+if (canPair && seasons.length >= 3) {
+  const SPAN = 3; const HALF = 1;
+  const cA = new Map(); const cR = new Map();
+  const dApm = (s) => {
+    if (!cA.has(s)) {
+      const rows = []; const i = seasons.indexOf(s);
+      for (let k = 0; k < SPAN && i - k >= 0; k++) {
+        const w = 0.5 ** (k / HALF);
+        for (const l of lineups[seasons[i - k]]) rows.push({ ...l, poss: (l.poss ?? 0) * w });
+      }
+      cA.set(s, new Map([...computeApm(rows, { lambda: APM_LAMBDA })].map(([k, v]) => [k, v.apm])));
+    }
+    return cA.get(s);
+  };
+  const dRapm = (s) => {
+    if (!cR.has(s)) {
+      const merged = []; const i = seasons.indexOf(s);
+      for (let k = 0; k < SPAN && i - k >= 0; k++) {
+        const w = 0.5 ** (k / HALF);
+        for (const st of stintsOf(stints[seasons[i - k]])) {
+          merged.push([...st.slice(0, 10), st[10] * w, st[11] * w, st[12] * w, st[13] * w, st[14]]);
+        }
+      }
+      const r = computeRapm(merged, { lambda: 6000, minPoss: 0.25 });
+      r.delete('__hca');
+      cR.set(s, new Map([...r].map(([k, v]) => [k, v.rapm])));
+    }
+    return cR.get(s);
+  };
+  const evalOn2 = (valueOf) => {
+    const rs = [];
+    for (const s of seasons) {
+      const c = commonRows(s);
+      if (!c) continue;
+      const byId = new Map(players[c.nx].map((p) => [p.playerId, p]));
+      const keep = c.rows.filter((p) => byId.has(p.playerId) && valueOf(p, s) != null);
+      if (keep.length < 50) continue;
+      rs.push(corr(keep.map((p) => valueOf(p, s)),
+        keep.map((p) => (byId.get(p.playerId).onNet ?? 0) - (byId.get(p.playerId).offNet ?? 0))));
+    }
+    return rs.length ? mean(rs) : null;
+  };
+
+  console.log('\n三方混合 wA·APM + wR·RAPM + (1−wA−wR)·SPM（判据：预测次季 on/off）');
+  console.log('  wA\wR    0.00     0.10     0.15     0.20     0.30');
+  const WR = [0, 0.1, 0.15, 0.2, 0.3];
+  let best = { r: -1 };
+  for (const wA of [0, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35]) {
+    const cells = WR.map((wR) => {
+      if (wA + wR > 0.7) return '  —   ';
+      const r = evalOn2((p, s) => {
+        const sp = apply(spmFor.get(s), p);
+        if (sp == null) return null;
+        const a = dApm(s).get(p.playerId) ?? sp;
+        const rr = dRapm(s).get(p.playerId) ?? sp;
+        return wA * a + wR * rr + (1 - wA - wR) * sp;
+      });
+      if (r > best.r) best = { r, wA, wR };
+      return r.toFixed(4);
+    });
+    console.log(`  ${wA.toFixed(2)}   ${cells.join('   ')}`);
+  }
+  console.log(`\n  最优：wA=${best.wA} wR=${best.wR}  r=${best.r.toFixed(4)}`);
+  console.log('  对比 只用 APM w=0.30       0.3507');
+  console.log('  对比 只用 RAPM w=0.30      0.3452');
+  console.log('  对比 纯 SPM                0.3271');
 }
