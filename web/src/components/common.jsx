@@ -178,7 +178,12 @@ export function DataTable({ columns, rows, initialSort, onRowClick, rowKey = (r,
   const valueOf = (col, row) => (col.value ? col.value(row) : row[col.key]);
 
   const sorted = useMemo(() => {
-    const col = columns.find((c) => c.key === sort.key);
+    // 列集合换掉之后（比如球员表从"基础"切到"防守拼抢"），旧的排序键可能已经不存在。
+    // 以前这里直接 return rows，表会静默地变成未排序——看起来像乱序的 bug。
+    // 退回 initialSort，实在没有就用第一列。
+    const col = columns.find((c) => c.key === sort.key)
+      ?? columns.find((c) => c.key === initialSort?.key)
+      ?? columns[0];
     if (!col) return rows;
     const dir = sort.dir === 'asc' ? 1 : -1;
     return [...rows].sort((a, b) => {

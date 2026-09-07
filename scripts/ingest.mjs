@@ -5,11 +5,14 @@
  *   node scripts/ingest.mjs
  *   PRIOR_SEASON=2025-26 TARGET_SEASON=2026-27 node scripts/ingest.mjs
  */
-import { nbaGet, statsUrl, toRows, writeJson } from '../server/nbaClient.mjs';
+import fsNode from 'node:fs';
+import pathNode from 'node:path';
+import { nbaGet, statsUrl, toRows, writeJson, DATA_DIR } from '../server/nbaClient.mjs';
 import { TEAM_META, POS_CN } from '../server/teamMeta.mjs';
 import { fetchInjuries } from '../server/espnClient.mjs';
 import { fetchUpcomingOdds } from '../server/oddsClient.mjs';
 import { buildBacktestDataset } from '../server/dataset.mjs';
+import { apply as applyImpact } from '../server/impact.mjs';
 import { replaySeasonPicks } from '../server/replay.mjs';
 import {
   buildGames, computeElo, carryOver, rotationImpact, fitRosterImpact, totalMinutes,
@@ -40,6 +43,26 @@ const DASH_BASE = {
 };
 const PLAYER_EXTRA = {
   College: '', Country: '', DraftPick: '', DraftYear: '', ISTRound: '', Weight: '',
+};
+
+/** 追踪类端点（leaguedashptstats / leaguedashptdefend）的必填空参数 */
+const PT_BASE = {
+  LeagueID: '00', SeasonType: 'Regular Season', PerMode: 'PerGame',
+  College: '', Conference: '', Country: '', DateFrom: '', DateTo: '', Division: '',
+  DraftPick: '', DraftYear: '', GameScope: '', GameSegment: '', Height: '', LastNGames: 0,
+  Location: '', Month: 0, OpponentTeamID: 0, Outcome: '', PORound: 0, Period: 0,
+  PlayerExperience: '', PlayerPosition: '', SeasonSegment: '', StarterBench: '',
+  TeamID: 0, VsConference: '', VsDivision: '', Weight: '',
+};
+
+/** 读一个可选的 data 文件，不存在或坏了都当没有 */
+const readJsonSafe = (f) => {
+  try {
+    const p = pathNode.join(DATA_DIR, f);
+    return fsNode.existsSync(p) ? JSON.parse(fsNode.readFileSync(p, 'utf8')) : null;
+  } catch {
+    return null;
+  }
 };
 
 const num = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
@@ -137,13 +160,51 @@ function buildTeams(stats, standings, tricodeById) {
 
 async function fetchPlayerStats(season) {
   const out = {};
-  for (const [key, measure] of [['base', 'Base'], ['advanced', 'Advanced']]) {
+  for (const [key, measure] of [['base', 'Base'], ['advanced', 'Advanced'], ['misc', 'Misc']]) {
     log(`球员数据 ${measure} (${season})`);
     const payload = await nbaGet(statsUrl('leaguedashplayerstats', {
       ...DASH_BASE, ...PLAYER_EXTRA, MeasureType: measure, PerMode: 'PerGame', Season: season,
     }));
     out[key] = toRows(payload);
   }
+
+  // 官方估计效率：E_OFF/E_DEF/E_NET_RATING。
+  // 和 Advanced 里的 OFF_RATING 不是一回事——那个是"在场时球队的效率"，
+  // 受队友影响极大；这组是 NBA 自己按球员贡献估计的，出场少的球员稳定得多。
+  log(`球员估计效率 (${season})`);
+  out.estimated = toRows(await nbaGet(statsUrl('playerestimatedmetrics', {
+    LeagueID: '00', Season: season, SeasonType: 'Regular Season',
+  })));
+
+  // 拼抢：干扰投篮、抢断偏转、造进攻犯规、掩护助攻、卡位、争抢球。
+  // 这些是传统 box score 完全看不到的东西，也是现代影响力指标的重要输入。
+  log(`球员拼抢数据 (${season})`);
+  out.hustle = toRows(await nbaGet(statsUrl('leaguehustlestatsplayer', {
+    LeagueID: '00', Season: season, SeasonType: 'Regular Season',
+    PerMode: 'PerGame', PlayerOrTeam: 'Player',
+  })));
+
+  // 防守对位：被防投篮命中率 vs 对手的正常命中率。
+  // 这是少数能真正衡量个人防守的公开数据——抢断盖帽只反映了防守的一小部分。
+  log(`球员防守对位 (${season})`);
+  out.defend = toRows(await nbaGet(statsUrl('leaguedashptdefend', {
+    ...PT_BASE, Season: season, DefenseCategory: 'Overall',
+  })));
+
+  // 追踪数据。11 组里挑 7 组：其余（肘区/低位/油漆区触球）已被 Possessions 覆盖大半，
+  // 每多一组就多一次请求、多一份体积，取用得上的即可。
+  for (const [key, measure] of [
+    ['drives', 'Drives'], ['catchShoot', 'CatchShoot'], ['pullUp', 'PullUpShot'],
+    ['passing', 'Passing'], ['possessions', 'Possessions'],
+    ['rebounding', 'Rebounding'], ['speed', 'SpeedDistance'],
+  ]) {
+    log(`球员追踪 ${measure} (${season})`);
+    out[key] = toRows(await nbaGet(statsUrl('leaguedashptstats', {
+      ...PT_BASE, Season: season, PerMode: 'PerGame',
+      PlayerOrTeam: 'Player', PtMeasureType: measure,
+    })));
+  }
+
   return out;
 }
 
@@ -164,6 +225,21 @@ async function fetchRosters(teams, season) {
 
 function buildPlayers(playerStats, rosters, teams) {
   const advIdx = new Map(playerStats.advanced.map((r) => [r.PLAYER_ID, r]));
+  // 新增的几组都按 PLAYER_ID 建索引；某个球员在某组里没有记录是正常的
+  // （比如追踪数据要求最低出场），取不到就留空对象，下游的 num() 会给 null。
+  const idxOf = (rows, key = 'PLAYER_ID') => new Map((rows ?? []).map((r) => [r[key], r]));
+  const estIdx = idxOf(playerStats.estimated);
+  const miscIdx = idxOf(playerStats.misc);
+  const hustleIdx = idxOf(playerStats.hustle);
+  const defIdx = idxOf(playerStats.defend, 'CLOSE_DEF_PERSON_ID');
+  const drvIdx = idxOf(playerStats.drives);
+  const csIdx = idxOf(playerStats.catchShoot);
+  const puIdx = idxOf(playerStats.pullUp);
+  const passIdx = idxOf(playerStats.passing);
+  const possIdx = idxOf(playerStats.possessions);
+  const rebIdx = idxOf(playerStats.rebounding);
+  const spdIdx = idxOf(playerStats.speed);
+
   const teamIdx = new Map(teams.map((t) => [t.teamId, t]));
   const rosterIdx = new Map();
   for (const [teamId, r] of Object.entries(rosters)) {
@@ -172,6 +248,17 @@ function buildPlayers(playerStats, rosters, teams) {
 
   const players = playerStats.base.map((b) => {
     const a = advIdx.get(b.PLAYER_ID) ?? {};
+    const e = estIdx.get(b.PLAYER_ID) ?? {};
+    const mi = miscIdx.get(b.PLAYER_ID) ?? {};
+    const hu = hustleIdx.get(b.PLAYER_ID) ?? {};
+    const de = defIdx.get(b.PLAYER_ID) ?? {};
+    const dr = drvIdx.get(b.PLAYER_ID) ?? {};
+    const cs = csIdx.get(b.PLAYER_ID) ?? {};
+    const pu = puIdx.get(b.PLAYER_ID) ?? {};
+    const pa = passIdx.get(b.PLAYER_ID) ?? {};
+    const po = possIdx.get(b.PLAYER_ID) ?? {};
+    const rb = rebIdx.get(b.PLAYER_ID) ?? {};
+    const sp = spdIdx.get(b.PLAYER_ID) ?? {};
     const ros = rosterIdx.get(b.PLAYER_ID);
     // 若球员已转队，以最新名单的球队为准
     const teamId = ros ? ros.teamId : b.TEAM_ID;
@@ -210,6 +297,55 @@ function buildPlayers(playerStats, rosters, teams) {
         orebPct: num(a.OREB_PCT), drebPct: num(a.DREB_PCT), rebPct: num(a.REB_PCT),
         tovPct: num(a.TM_TOV_PCT), pace: num(a.PACE), pie: num(a.PIE), poss: num(a.POSS),
       },
+      // 官方估计效率。E_ 开头的这组是按球员贡献估计的，
+      // 不像 adv.offRtg 那样几乎等于"在场时球队的效率"。
+      est: {
+        offRtg: num(e.E_OFF_RATING), defRtg: num(e.E_DEF_RATING), netRtg: num(e.E_NET_RATING),
+        usgPct: num(e.E_USG_PCT), pace: num(e.E_PACE), tovPct: num(e.E_TOV_PCT),
+        astRatio: num(e.E_AST_RATIO), rebPct: num(e.E_REB_PCT),
+      },
+      // 拼抢：box score 之外的贡献
+      hustle: {
+        contested: num(hu.CONTESTED_SHOTS),
+        contested2pt: num(hu.CONTESTED_SHOTS_2PT),
+        contested3pt: num(hu.CONTESTED_SHOTS_3PT),
+        deflections: num(hu.DEFLECTIONS),
+        charges: num(hu.CHARGES_DRAWN),
+        screenAst: num(hu.SCREEN_ASSISTS),
+        screenAstPts: num(hu.SCREEN_AST_PTS),
+        looseBalls: num(hu.LOOSE_BALLS_RECOVERED),
+        boxOuts: num(hu.BOX_OUTS),
+      },
+      // 防守对位：diff 为负表示把对手压到了低于其正常水平
+      defend: {
+        freq: num(de.FREQ),
+        dFga: num(de.D_FGA),
+        dFgPct: num(de.D_FG_PCT),
+        normalFgPct: num(de.NORMAL_FG_PCT),
+        diffPct: num(de.PCT_PLUSMINUS),
+      },
+      // 得分方式与控球，来自球场追踪摄像头
+      track: {
+        drives: num(dr.DRIVES), drivePts: num(dr.DRIVE_PTS),
+        driveFga: num(dr.DRIVE_FGA), driveFgPct: num(dr.DRIVE_FG_PCT),
+        driveAst: num(dr.DRIVE_AST), driveTov: num(dr.DRIVE_TOV),
+        csPts: num(cs.CATCH_SHOOT_PTS), csFga: num(cs.CATCH_SHOOT_FGA),
+        csEfg: num(cs.CATCH_SHOOT_EFG_PCT),
+        puPts: num(pu.PULL_UP_PTS), puFga: num(pu.PULL_UP_FGA),
+        puEfg: num(pu.PULL_UP_EFG_PCT),
+        passes: num(pa.PASSES_MADE), potentialAst: num(pa.POTENTIAL_AST),
+        astPtsCreated: num(pa.AST_POINTS_CREATED), secondaryAst: num(pa.SECONDARY_AST),
+        touches: num(po.TOUCHES), timeOfPoss: num(po.TIME_OF_POSS),
+        secPerTouch: num(po.AVG_SEC_PER_TOUCH), ptsPerTouch: num(po.PTS_PER_TOUCH),
+        orebChancePct: num(rb.OREB_CHANCE_PCT), drebChancePct: num(rb.DREB_CHANCE_PCT),
+        distMiles: num(sp.DIST_MILES), avgSpeed: num(sp.AVG_SPEED),
+      },
+      // 得分构成
+      misc: {
+        ptsOffTov: num(mi.PTS_OFF_TOV), pts2nd: num(mi.PTS_2ND_CHANCE),
+        ptsFb: num(mi.PTS_FB), ptsPaint: num(mi.PTS_PAINT),
+        pfd: num(mi.PFD), blka: num(mi.BLKA),
+      },
       // 轮换影响力的两个输入，扁平存放便于 ratings.mjs 直接使用
       pie: num(a.PIE) ?? 0,
       totalMin: (num(b.MIN) ?? 0) * (num(b.GP) ?? 0),
@@ -236,7 +372,7 @@ function buildPlayers(playerStats, rosters, teams) {
       number: ros.NUM ?? '', height: ros.HEIGHT ?? '', weight: ros.WEIGHT ?? '',
       exp: ros.EXP ?? '', school: ros.SCHOOL ?? '',
       gp: 0, w: 0, l: 0, min: 0,
-      base: {}, adv: {},
+      base: {}, adv: {}, est: {}, hustle: {}, defend: {}, track: {}, misc: {},
       pie: 0, totalMin: 0, onRoster: true, noPriorData: true,
     });
   }
@@ -340,6 +476,20 @@ async function main() {
   }
   const players = buildPlayers(playerStats, rosters, teams);
 
+  // 综合影响力指标：系数由 npm run impact:fit 训练并验证后写进 data/impact-model.json。
+  // 模型文件不存在就跳过——这一项是增强，不该让整个抓取失败。
+  const impactModel = readJsonSafe('impact-model.json');
+  if (impactModel) {
+    let n = 0;
+    for (const p of players) {
+      const v = applyImpact(impactModel, p);
+      if (v !== null) { p.impact = v; n += 1; }
+    }
+    log(`综合影响力指标：${n} 名球员（模型训练于 ${(impactModel.seasons ?? []).join("、")}）`);
+  } else {
+    console.warn('  缺少 data/impact-model.json，跳过综合影响力指标（跑 npm run impact:fit 生成）');
+  }
+
   // 再往前一个赛季，只用来给 PRIOR_SEASON 定开赛日 Elo（人机对赌题库要用）
   const priorPriorSeason = (() => {
     const y = Number(PRIOR_SEASON.slice(0, 4));
@@ -408,8 +558,14 @@ async function main() {
   // 博彩盘口：ESPN 的公开接口带 DraftKings 的让分与总分，不需要 api key。
   // 只有未开赛的比赛 scoreboard 才带盘口，所以这里拿到的是「还没打的比赛」；
   // 已结束比赛的收盘盘口由 scripts/odds-history.mjs 单独抓，进 backtest.json。
-  let odds = { source: 'ESPN', fetchedAt: null, games: {}, matched: 0, providers: {} };
-  if (process.env.SKIP_ODDS !== '1') {
+  //
+  // 跳过或抓取失败时**保留磁盘上已有的那份**，不要写空。
+  // 之前这里无论如何都会 writeJson，结果 SKIP_ODDS=1 跑一次就把好数据清成空的，
+  // 抓取失败时更糟——一次网络抖动就毁掉上一次的成果。
+  let odds = null;
+  if (process.env.SKIP_ODDS === '1') {
+    log('博彩盘口：按 SKIP_ODDS=1 跳过，保留磁盘上已有的那份');
+  } else {
     try {
       log('博彩盘口 (ESPN)');
       const r = await fetchUpcomingOdds(schedule.games, {
@@ -428,10 +584,15 @@ async function main() {
       log(`  ${r.matched}/${r.candidates} 场未开赛比赛拿到盘口`
         + `（${Object.entries(r.providers).map(([k, v]) => `${k} ${v}`).join('、') || '无'}）`);
     } catch (e) {
-      console.warn(`  盘口抓取失败，跳过：${String(e.message).slice(0, 90)}`);
+      console.warn(`  盘口抓取失败，保留已有数据：${String(e.message).slice(0, 90)}`);
     }
   }
-  writeJson('odds.json', odds);
+  if (odds) {
+    writeJson('odds.json', odds);
+  } else if (!fsNode.existsSync(pathNode.join(DATA_DIR, 'odds.json'))) {
+    // 从没抓过就落一份空的，免得服务端读不到文件
+    writeJson('odds.json', { source: 'ESPN', fetchedAt: null, games: {}, matched: 0, providers: {} });
+  }
 
   // 人机对赌题库：逐日重放上赛季，生成"模型当时的判断"+真实结果。
   // 新赛季开打前这是唯一能立即结算的对战素材。

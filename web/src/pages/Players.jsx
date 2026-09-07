@@ -4,7 +4,7 @@ import { api } from '../lib/api.js';
 import {
   TeamCell, PlayerHeadshot, Loading, ErrorBox, Segmented, StatTile,
 } from '../components/common.jsx';
-import PlayerTable from '../components/PlayerTable.jsx';
+import PlayerTable, { MODE_OPTIONS, MODE_LABEL } from '../components/PlayerTable.jsx';
 import { num, rate } from '../lib/format.js';
 
 const POS_FILTERS = [
@@ -113,7 +113,7 @@ export default function Players() {
           <Segmented
             value={mode}
             onChange={setMode}
-            options={[{ value: 'base', label: '基础数据' }, { value: 'adv', label: '高阶数据' }]}
+            options={MODE_OPTIONS}
           />
         </div>
       </div>
@@ -131,7 +131,7 @@ export default function Players() {
 
       <div className="card">
         <h2>
-          {mode === 'base' ? '基础数据' : '高阶数据'}
+          {MODE_LABEL[mode]}数据
           <span className="sub">点击表头排序 · 点击行进入所属球队</span>
         </h2>
         <PlayerTable

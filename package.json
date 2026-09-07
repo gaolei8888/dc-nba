@@ -14,7 +14,9 @@
     "build": "node scripts/check-jsx.mjs && vite build --config web/vite.config.js",
     "start": "npm run build && node server/index.mjs",
     "odds:history": "node scripts/odds-history.mjs",
-    "dataset": "node scripts/build-dataset.mjs"
+    "dataset": "node scripts/build-dataset.mjs",
+    "impact:fetch": "node scripts/impact-history.mjs",
+    "impact:fit": "node scripts/fit-impact.mjs"
   },
   "dependencies": {
     "compression": "^1.8.1",

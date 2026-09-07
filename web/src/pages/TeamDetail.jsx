@@ -5,7 +5,7 @@ import {
   TeamLogo, TeamCell, PlayerHeadshot, StatTile, DataTable, InjuryBadge,
   Loading, ErrorBox, Segmented, ProbBar, Th,
 } from '../components/common.jsx';
-import PlayerTable from '../components/PlayerTable.jsx';
+import PlayerTable, { MODE_OPTIONS } from '../components/PlayerTable.jsx';
 import {
   num, rate, signed, signClass, fmtDate, restLabel, probColor, MONTH_CN, monthOf,
 } from '../lib/format.js';
@@ -126,7 +126,7 @@ export default function TeamDetail({ teamId }) {
             <Segmented
               value={statMode}
               onChange={setStatMode}
-              options={[{ value: 'base', label: '基础数据' }, { value: 'adv', label: '高阶数据' }]}
+              options={MODE_OPTIONS}
             />
           </span>
         </h2>

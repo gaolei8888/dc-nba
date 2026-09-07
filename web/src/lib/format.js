@@ -42,6 +42,22 @@ export const ABBR = {
   ftaRate: 'FTr', pct3pt: '3PT%pts', pctPaint: 'PITP%', pctFastBreak: 'FB%',
   // 本项目自有
   elo: 'ELO', total: 'RTG', turnoverAdj: 'ΔROS', outCostPts: 'OUT',
+  // 自制综合影响力指标（server/impact.mjs）
+  impact: 'IMP',
+  // 官方估计效率（playerestimatedmetrics，按球员贡献估计，不是在场时球队表现）
+  estNetRtg: 'E-NET',
+  // 防守对位与拼抢
+  diffPct: 'DIFF%', dFgPct: 'D-FG%', dFga: 'D-FGA', contested: 'CONT',
+  deflections: 'DEFL', charges: 'CHG', looseBalls: 'LOOSE', boxOuts: 'BOX',
+  drebChancePct: 'DREB-CH%', screenAstPts: 'SC-PTS',
+  // 得分方式（球场追踪摄像头）
+  drives: 'DRV', drivePts: 'DRV-PTS', driveFgPct: 'DRV-FG%',
+  csPts: 'C&S-PTS', csEfg: 'C&S-eFG%', puPts: 'PU-PTS', puEfg: 'PU-eFG%',
+  ptsPaint: 'PITP', ptsFb: 'FBPS', pts2nd: '2ND-PTS', ptsOffTov: 'PTS-OFF-TO', pfd: 'PFD',
+  // 传球控球
+  potentialAst: 'POT-AST', astPtsCreated: 'AST-PTS', secondaryAst: '2ND-AST',
+  touches: 'TCH', timeOfPoss: 'POSS-MIN', secPerTouch: 'SEC/TCH',
+  ptsPerTouch: 'PTS/TCH', passes: 'PASS', distMiles: 'DIST',
 };
 
 /** 分区与赛区的中文名。球队页和总览页共用，避免各写一份走样。 */
