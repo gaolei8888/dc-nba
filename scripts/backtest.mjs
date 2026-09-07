@@ -18,8 +18,10 @@ import path from 'node:path';
 import { nbaGet, statsUrl, toRows, DATA_DIR } from '../server/nbaClient.mjs';
 import {
   buildGames, computeElo, carryOver, rotationImpact, fitRosterImpact,
-  ELO_BASE, ELO_HOME_ADV, ELO_PER_POINT,
+  ELO_BASE, ELO_HOME_ADV, ELO_PER_POINT, VALUE_IMP, VALUE_PIE,
 } from '../server/ratings.mjs';
+import { decayedApm } from '../server/rapm.mjs';
+import { impactOf, DECAY_SPAN, DECAY_HALFLIFE } from '../server/impact.mjs';
 
 const HIST_DIR = path.join(DATA_DIR, 'history');
 
@@ -99,11 +101,52 @@ const seasonRosters = (season, teamIds) => cached(`rosters_${season}`, async () 
  * 注意：历史赛季的名单接口返回的是该赛季全程名单，含交易截止日加盟的球员，
  * 用来预测赛季初的比赛存在轻微信息泄漏。因此这里测出的收益是乐观上界。
  */
-async function turnoverForSeason(season, priorSeason) {
+/**
+ * 某赛季每名球员的 IMP。
+ *
+ * 回测里的球员行来自 leaguedashplayerstats，只有 PIE，没有 IMP 需要的
+ * 追踪字段。IMP 的原料在 data/history/impact_<season>.json 里，
+ * 按 playerId 贴回去即可——两边都是同一批 stats.nba.com 的球员 id。
+ * 缺 impact_/lineups_ 文件时返回 null，调用方自动退回 PIE 口径。
+ */
+const impactCache = new Map();
+function impactFor(season) {
+  if (impactCache.has(season)) return impactCache.get(season);
+  const model = readIfExists(path.join(DATA_DIR, 'impact-model.json'));
+  const seasonsAll = [];
+  for (let y = Number(season.slice(0, 4)) - DECAY_SPAN + 1; y <= Number(season.slice(0, 4)); y++) {
+    const s = `${y}-${String((y + 1) % 100).padStart(2, '0')}`;
+    const rows = readIfExists(path.join(HIST_DIR, `lineups_${s}.json`))?.rows;
+    if (rows) seasonsAll.push({ season: s, rows });
+  }
+  const own = readIfExists(path.join(HIST_DIR, `impact_${season}.json`))?.players;
+  if (!model || !own || !seasonsAll.length) { impactCache.set(season, null); return null; }
+  const dec = decayedApm(seasonsAll, {
+    span: DECAY_SPAN, halfLife: DECAY_HALFLIFE, lambda: model.apmLambda ?? 6000,
+  });
+  const out = new Map();
+  for (const p of own) {
+    const v = impactOf(model, p, dec.get(p.playerId)?.apm ?? null);
+    if (v !== null) out.set(p.playerId, v);
+  }
+  impactCache.set(season, out);
+  return out;
+}
+
+const readIfExists = (f) => (fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : null);
+
+async function turnoverForSeason(season, priorSeason, useImpact = true) {
   const priorPlayers = await seasonPlayers(priorSeason);
   const priorAdv = await seasonTeamAdv(priorSeason);
   const teamIds = priorAdv.map((r) => r.TEAM_ID);
   const rosters = await seasonRosters(season, teamIds);
+
+  // 把 IMP 贴到球员行上。贴不上（缺模型或历史文件）就退回 PIE 口径，
+  // 于是这条支路测出来的就是旧行为，两者可以直接对比。
+  const impMap = useImpact ? impactFor(priorSeason) : null;
+  if (impMap) for (const p of priorPlayers) p.impact = impMap.get(p.playerId) ?? null;
+  else for (const p of priorPlayers) delete p.impact;
+  const basis = impMap ? VALUE_IMP : VALUE_PIE;
 
   // 上赛季各队实际阵容 -> 上赛季净效率，拟合换算系数
   const priorByTeam = new Map(teamIds.map((id) => [id, []]));
@@ -111,7 +154,7 @@ async function turnoverForSeason(season, priorSeason) {
     if (p.gp > 0) priorByTeam.get(p.teamId)?.push(p);
   }
   const fit = fitRosterImpact(priorAdv.map((r) => ({
-    raw: rotationImpact(priorByTeam.get(r.TEAM_ID) ?? []),
+    raw: rotationImpact(priorByTeam.get(r.TEAM_ID) ?? [], { basis }),
     net: Number(r.NET_RATING) || 0,
   })));
 
@@ -120,7 +163,8 @@ async function turnoverForSeason(season, priorSeason) {
   const deltas = new Map();
   for (const id of teamIds) {
     const now = (rosters[id] ?? []).map((pid) => statById.get(pid)).filter(Boolean);
-    deltas.set(id, rotationImpact(now) - rotationImpact(priorByTeam.get(id) ?? []));
+    deltas.set(id, rotationImpact(now, { basis })
+      - rotationImpact(priorByTeam.get(id) ?? [], { basis }));
   }
   const mean = [...deltas.values()].reduce((a, b) => a + b, 0) / deltas.size;
 
@@ -129,7 +173,7 @@ async function turnoverForSeason(season, priorSeason) {
   for (const [id, d] of deltas) {
     pts.set(id, fit.b * (d - mean) * (paceById.get(id) / 100));
   }
-  return { pts, r2: fit.r2 };
+  return { pts, r2: fit.r2, basis: basis.name };
 }
 
 // ---------------------------------------------------------------- 指标
@@ -197,7 +241,7 @@ async function replaySeason(season, priorSeason, opts) {
   const {
     inSeasonElo = false, k = 20, wElo = 0.55, wNet = 0.45,
     spreadSd = 12, homeAdv = 2.4, restWeight = 1, priorDecay = 0,
-    turnoverWeight = 0,
+    turnoverWeight = 0, rotationBasis = 'imp',
   } = opts;
 
   const priorGames = buildGames(await seasonGames(priorSeason));
@@ -216,7 +260,7 @@ async function replaySeason(season, priorSeason, opts) {
 
   // 阵容更迭修正（turnoverWeight = 0 时完全不参与）
   const turnover = turnoverWeight
-    ? (await turnoverForSeason(season, priorSeason)).pts
+    ? (await turnoverForSeason(season, priorSeason, rotationBasis === 'imp')).pts
     : new Map();
   const getTurnover = (id) => (turnover.get(id) ?? 0) * turnoverWeight;
 
@@ -304,10 +348,12 @@ async function main() {
     { name: '当前模型（评级冻结）', opts: { inSeasonElo: false } },
     { name: '滚动Elo＋纯Elo（基线）', opts: { inSeasonElo: true, wElo: 1, wNet: 0 } },
     // 阵容更迭修正到底有没有用？基线是当前默认配置（滚动Elo＋纯Elo）
-    { name: '＋阵容更迭 w=0.15', opts: { inSeasonElo: true, wElo: 1, wNet: 0, turnoverWeight: 0.15 } },
-    { name: '＋阵容更迭 w=0.27（理论最优）', opts: { inSeasonElo: true, wElo: 1, wNet: 0, turnoverWeight: 0.27 } },
-    { name: '＋阵容更迭 w=0.4', opts: { inSeasonElo: true, wElo: 1, wNet: 0, turnoverWeight: 0.4 } },
-    { name: '＋阵容更迭 w=0.8（旧默认）', opts: { inSeasonElo: true, wElo: 1, wNet: 0, turnoverWeight: 0.8 } },
+    // 阵容更迭的球员价值口径：PIE 还是 IMP？两条支路同权重对比。
+    { name: '＋阵容更迭 PIE w=0.15', opts: { inSeasonElo: true, wElo: 1, wNet: 0, turnoverWeight: 0.15, rotationBasis: 'pie' } },
+    { name: '＋阵容更迭 IMP w=0.15', opts: { inSeasonElo: true, wElo: 1, wNet: 0, turnoverWeight: 0.15 } },
+    { name: '＋阵容更迭 PIE w=0.4', opts: { inSeasonElo: true, wElo: 1, wNet: 0, turnoverWeight: 0.4, rotationBasis: 'pie' } },
+    { name: '＋阵容更迭 IMP w=0.4', opts: { inSeasonElo: true, wElo: 1, wNet: 0, turnoverWeight: 0.4 } },
+    { name: '＋阵容更迭 IMP w=0.8', opts: { inSeasonElo: true, wElo: 1, wNet: 0, turnoverWeight: 0.8 } },
   ];
 
   // 按赛季阶段分段：双方都还没打满 N 场时算"赛季初"

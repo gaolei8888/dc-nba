@@ -12,6 +12,7 @@
  */
 import {
   ELO_BASE, ELO_PER_POINT, rotationImpact, totalMinutes, healthyMinutes,
+  VALUE_IMP, VALUE_PIE,
 } from './ratings.mjs';
 
 /** 默认可调参数，前端可覆盖。 */
@@ -36,6 +37,9 @@ export const DEFAULT_PARAMS = {
   // 保留一个很小的默认值，滑块可调；详见 README「回测」一节。
   turnoverWeight: 0.15, // 阵容更迭修正强度
   assumeHealthy: 0,     // 1 = 假设全员健康：按场均分钟×典型出勤估算新赛季轮换
+  // 轮换影响力用哪套球员价值：auto = 有 IMP 就用 IMP，否则 PIE。
+  // 写死成 'pie' 可以复现旧行为，对照用。
+  rotationBasis: 'auto',
   spreadSd: 12.0,       // 单场分差标准差，用于胜率换算
   seasonNoiseSd: 2.0,   // 赛季模拟中每队的实力不确定性（分）
 };
@@ -84,10 +88,23 @@ export function buildModel(store, overrides = {}) {
   // 开启"假设全员健康"后按场均分钟 × 典型出勤估算（伤停整季的球星才不会被埋没）。
   const minutesOf = params.assumeHealthy ? healthyMinutes : totalMinutes;
 
+  // 价值口径（IMP 还是 PIE）在**全联盟层面**定一次，绝不能逐队各判各的——
+  // 一支队用 IMP、另一支用 PIE，两边的数根本不在同一把尺子上。
+  //
+  // 更要紧的是**必须跟数据文件对齐**：teams.json 里的 rotationPrior 和
+  // meta.impactFit 的换算系数 b 都是 ingest 按某个口径算好写进去的。
+  // 这里要是自作主张换一个，就会拿 IMP 量纲的新名单去减 PIE 量纲的旧基准，
+  // 实测湖人的阵容更迭会算成 +206 分/场。所以口径以 meta 里记的为准，
+  // meta 没记（老数据文件）就按当时的行为退回 PIE。
+  const BASES = { imp: VALUE_IMP, pie: VALUE_PIE };
+  const basis = BASES[params.rotationBasis]     // 显式指定最优先（对照实验用）
+    ?? BASES[meta.rotationBasis]                // 其次跟数据文件对齐
+    ?? VALUE_PIE;                               // 老数据文件没记，当时用的就是 PIE
+
   // 先算各队新名单的轮换影响力，再做联盟零和归一得到阵容更迭修正
   const rotationNow = new Map();
   for (const t of teams) {
-    rotationNow.set(t.teamId, rotationImpact(rosterByTeam.get(t.teamId) ?? [], { minutesOf }));
+    rotationNow.set(t.teamId, rotationImpact(rosterByTeam.get(t.teamId) ?? [], { minutesOf, basis }));
   }
   const deltas = teams.map((t) => rotationNow.get(t.teamId) - (t.rotationPrior ?? 0));
   const meanDelta = deltas.reduce((a, b) => a + b, 0) / teams.length;
@@ -100,15 +117,15 @@ export function buildModel(store, overrides = {}) {
 
     // 逐个球员算边际价值：把他移出轮换，空出的时间由排在后面的人顶上
     for (const p of roster) {
-      const without = rotationImpact(roster, { exclude: new Set([p.playerId]), minutesOf });
+      const without = rotationImpact(roster, { exclude: new Set([p.playerId]), minutesOf, basis });
       marginalCost.set(p.playerId, round(Math.min(0, toPts(without - baseRotation)), 2));
     }
 
     // 同样的算法用在上赛季名单上（始终用实际出勤），得到"这名球员当时值多少"
     const priorRoster = priorRosterByTeam.get(t.teamId) ?? [];
-    const priorBase = rotationImpact(priorRoster);
+    const priorBase = rotationImpact(priorRoster, { basis });
     for (const p of priorRoster) {
-      const without = rotationImpact(priorRoster, { exclude: new Set([p.playerId]) });
+      const without = rotationImpact(priorRoster, { exclude: new Set([p.playerId]), basis });
       priorMarginalCost.set(p.playerId, round(Math.min(0, toPts(without - priorBase)), 2));
     }
 
@@ -128,7 +145,7 @@ export function buildModel(store, overrides = {}) {
   const restByGame = buildRestTable(schedule.games);
 
   return {
-    params, teams, players, schedule, meta, leagueAvg, impactB,
+    params, teams, players, schedule, meta, leagueAvg, impactB, basis,
     byId, marginalCost, priorMarginalCost, restByGame,
     // 总经理模式要能对任意阵容重算，所以需要一个全联盟球员索引，
     // 以及联盟平均更迭量（阵容更迭是零和归一的，换人后要用同一个基准）
@@ -176,9 +193,9 @@ function rosterAdjustment(model, teamId, outIds, overrideRoster = null) {
 
   const exclude = new Set(outIds);
   const base = overrideRoster
-    ? rotationImpact(roster, { minutesOf: info.minutesOf })
+    ? rotationImpact(roster, { minutesOf: info.minutesOf, basis: model.basis })
     : info.baseRotation;
-  const without = rotationImpact(roster, { exclude, minutesOf: info.minutesOf });
+  const without = rotationImpact(roster, { exclude, minutesOf: info.minutesOf, basis: model.basis });
   const raw = model.impactB * (without - base) * (info.pace / 100);
   // 顶替者最差也是替补级：缺人不会让球队变强
   const deltaPts = Math.min(0, raw) * model.params.rosterWeight;
@@ -218,7 +235,7 @@ export function teamStrength(model, teamId, outIds = [], rosterIds = null) {
   let roster;
   if (rosterIds) {
     const list = rosterIds.map((id) => model.playerById.get(id)).filter(Boolean);
-    const rot = rotationImpact(list, { minutesOf: model.minutesOf });
+    const rot = rotationImpact(list, { minutesOf: model.minutesOf, basis: model.basis });
     const delta = rot - (info.team.rotationPrior ?? 0) - model.meanTurnoverDelta;
     turnoverPts = model.impactB * delta * (info.pace / 100);
     roster = rosterAdjustment(model, teamId, outIds, list);

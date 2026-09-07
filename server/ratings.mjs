@@ -83,8 +83,20 @@ export function carryOver(finalElo, { keep = 0.75, mean = ELO_BASE } = {}) {
 
 // ---------------------------------------------------------------- 轮换影响力
 
-/** PIE 的"替补级"基准：低于此值的球员对球队没有正面贡献。 */
+/** PIE 的「替补级」基准：低于此值的球员对球队没有正面贡献。 */
 export const REPLACEMENT_PIE = 0.085;
+
+/**
+ * IMP 的替补级。两个独立锚点对上了才敢用：
+ *   · 实测：每队按总分钟排第 10 人起，分钟加权 IMP = −0.65（5 季 675 人次）
+ *   · 换算：把旧的 PIE 0.085 用 IMP ≈ −3.44 + 34.7×PIE 折过来 = −0.49
+ *
+ * 扫描显示取 −4 时「预测次季净效率」的相关能到 0.694，比 −0.5 的 0.653 高。
+ * **没有采纳**：替补级压得越低，这一项就越接近「名单总分钟」——而光数分钟、
+ * 完全不看球员好坏，本身就有 r=0.49。那是「上赛季谁健康打得多」的信号，
+ * 是真的，但不该伪装成一个衡量球员质量的项偷偷混进来。
+ */
+export const REPLACEMENT_IMP = -0.5;
 
 /** 一支球队整个常规赛的总上场时间：5 人 × 48 分钟 × 82 场。 */
 export const TEAM_SEASON_MINUTES = 240 * 82;
@@ -92,27 +104,56 @@ export const TEAM_SEASON_MINUTES = 240 * 82;
 /** 球员整季总出场分钟。场均分钟会被垃圾时间的临时工拉高，总分钟才反映真实轮换地位。 */
 export const totalMinutes = (p) => (p.min ?? 0) * (p.gp ?? 0);
 
-const pieOf = (p) => p.pie ?? p.adv?.pie ?? 0;
+/**
+ * 球员价值的两套口径。**同一次计算里必须全队、全联盟统一**——
+ * PIE 是 0~0.2 的比例，IMP 是 ±8 的每百回合分，混着加毫无意义。
+ */
+export const VALUE_IMP = {
+  name: 'imp',
+  of: (p) => p.impact ?? null,
+  replacement: REPLACEMENT_IMP,
+};
+export const VALUE_PIE = {
+  name: 'pie',
+  of: (p) => p.pie ?? p.adv?.pie ?? null,
+  replacement: REPLACEMENT_PIE,
+};
+
+/**
+ * 选口径：名单里只要有人带 IMP 就用 IMP，否则退回 PIE。
+ *
+ * 为什么这样定：IMP 要靠 data/impact-model.json，缺了模型文件（或在
+ * 历史赛季回测里）就该无痛退化，而不是整队算成替补级。
+ * 判据不是「哪个更高级」，是可测的——用第 N 季数值 + 第 N+1 季名单预测
+ * 第 N+1 季净效率，IMP 0.653 / PIE 0.612，四对赛季 IMP 赢三对。
+ */
+export const pickBasis = (players) => (players.some((p) => p.impact != null)
+  ? VALUE_IMP : VALUE_PIE);
 
 /**
  * 轮换影响力：按整季总出场分钟降序取球员，累计到球队总分钟上限为止，
- * 累加 (PIE − 替补级) × 分钟，再除以 82 折算成每场。
+ * 累加 (球员价值 − 替补级) × 分钟，再除以 82 折算成每场。
  *
  * 上限的意义：一支球队每场只有 240 分钟可分配。名单再长，
  * 也只有排在前面的人真正吃到轮换时间；填不满的部分视为替补级（影响力 0）。
- * 这同时让"上赛季名单"与"新赛季名单"在同一把尺子上可比。
+ * 这同时让「上赛季名单」与「新赛季名单」在同一把尺子上可比。
+ *
+ * 够不到 IMP 门槛（20 场 / 10 分钟）的球员按替补级计。他们占全联盟 3.6% 的
+ * 分钟，个别队到 12%；试过用 PIE 线性换算兜底，跨季相关 0.654 对 0.653，
+ * 没有差别，就用简单的那个。
  */
 export function rotationImpact(players, {
-  cap = TEAM_SEASON_MINUTES, exclude, minutesOf = totalMinutes,
+  cap = TEAM_SEASON_MINUTES, exclude, minutesOf = totalMinutes, basis,
 } = {}) {
   const list = exclude?.size ? players.filter((p) => !exclude.has(p.playerId)) : players;
+  const use = basis ?? pickBasis(list);
   const sorted = [...list].sort((a, b) => minutesOf(b) - minutesOf(a));
   let remaining = cap;
   let sum = 0;
   for (const p of sorted) {
     if (remaining <= 0) break;
     const minutes = Math.min(minutesOf(p), remaining);
-    sum += (pieOf(p) - REPLACEMENT_PIE) * minutes;
+    sum += ((use.of(p) ?? use.replacement) - use.replacement) * minutes;
     remaining -= minutes;
   }
   return sum / 82;

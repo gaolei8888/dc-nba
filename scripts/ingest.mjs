@@ -16,7 +16,7 @@ import { impactOf } from '../server/impact.mjs';
 import { decayedApm } from '../server/rapm.mjs';
 import { replaySeasonPicks } from '../server/replay.mjs';
 import {
-  buildGames, computeElo, carryOver, rotationImpact, fitRosterImpact, totalMinutes,
+  buildGames, computeElo, carryOver, rotationImpact, fitRosterImpact, totalMinutes, pickBasis,
 } from '../server/ratings.mjs';
 
 /** 依据当前日期推断“最近一个已结束赛季”和“即将开始的赛季”。 */
@@ -566,8 +566,11 @@ async function main() {
     if (p.gp > 0 && lastSeasonRoster.has(p.priorTeamId)) lastSeasonRoster.get(p.priorTeamId).push(p);
   }
 
+  // 价值口径全联盟统一定一次：有 IMP 就用 IMP，没有（缺模型文件）退回 PIE。
+  // 换算系数 b 会随口径一起变，所以这两步必须用同一个 basis。
+  const basis = pickBasis(players);
   const impactFit = fitRosterImpact(teams.map((t) => ({
-    raw: rotationImpact(lastSeasonRoster.get(t.teamId) ?? []),
+    raw: rotationImpact(lastSeasonRoster.get(t.teamId) ?? [], { basis }),
     net: t.adv.netRtg ?? 0,
   })));
 
@@ -576,7 +579,7 @@ async function main() {
     t.eloPreseason = r1(eloPreseason[t.teamId]) ?? 1500;
     t.elo = r1(eloStart[t.teamId]) ?? 1500;
     // 上赛季名单的轮换影响力基准；新名单一侧与阵容更迭修正由预测引擎按参数实时计算
-    t.rotationPrior = rotationImpact(lastSeasonRoster.get(t.teamId) ?? []);
+    t.rotationPrior = rotationImpact(lastSeasonRoster.get(t.teamId) ?? [], { basis });
   }
 
   const meta = {
@@ -587,6 +590,7 @@ async function main() {
     gamesPlayedCurrent: currentGames.length,
     lastResultDate: currentGames.length ? currentGames[currentGames.length - 1].date : null,
     impactFit,
+    rotationBasis: basis.name,
     leagueAvg: {
       offRtg: teams.reduce((s, t) => s + (t.adv.offRtg ?? 0), 0) / teams.length,
       defRtg: teams.reduce((s, t) => s + (t.adv.defRtg ?? 0), 0) / teams.length,
@@ -667,7 +671,8 @@ async function main() {
 
   console.log(`\n完成，用时 ${((Date.now() - t0) / 1000).toFixed(1)}s`);
   console.log(`  球队 ${teams.length} · 球员 ${players.length} · ${TARGET_SEASON} 赛程 ${schedule.games.length} 场`);
-  console.log(`  轮换影响力回归 R²=${impactFit.r2.toFixed(3)}  b=${impactFit.b.toFixed(4)}`);
+  console.log(`  轮换影响力回归 R²=${impactFit.r2.toFixed(3)}  b=${impactFit.b.toFixed(4)}`
+    + `  口径=${basis.name.toUpperCase()}`);
   if (injuries.matched) {
     console.log(`  伤病 ${injuries.matched} 条（确定缺阵 ${injuries.counts.out ?? 0}，每日观察 ${injuries.counts.dayToDay ?? 0}）`
       + (injuries.unmatched.length ? `，${injuries.unmatched.length} 条未匹配` : ''));
