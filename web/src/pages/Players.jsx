@@ -203,85 +203,81 @@ function PlayerTile({ label, player, value }) {
  * 只看界面的人会以为 IMP 全面优于 PIE，实际情况更微妙。
  * 「对标盘口」那页用同样的方式处理过自己的短处，这里保持一致。
  */
+/**
+ * IMP 的验证成绩。
+ *
+ * 验收标准是「用第 N 季的数据预测第 N+1 季的真实表现」——不是同赛季。
+ * 同赛季的比法有两个毛病：IMP 里含当季 APM，等于拿目标的一部分预测目标；
+ * 而且不对题，这个应用本来就是拿上赛季预测下赛季。
+ *
+ * 把各个候选指标一起列出来，包括 IMP 输的那些格子。
+ * 「对标盘口」那页也是这么处理自己的短处的——只报好数字的指标不值得信。
+ */
 export function ImpactValidation({ impact }) {
-  if (!impact?.validation) return null;
-  const { individual = [], team = [] } = impact.validation;
-  if (!individual.length) return null;
-
-  const avg = (rows, key) => rows.reduce((s, r) => s + r[key], 0) / rows.length;
-  const teamWins = team.filter((r) => r.imp >= r.pie).length;
-  const teamLosses = team.length - teamWins;
-  const lostSeasons = team.filter((r) => r.imp < r.pie).map((r) => r.season);
+  const v = impact?.validation;
+  if (!v?.perPair?.length) return null;
+  const names = v.candidates ?? Object.keys(v.average ?? {});
+  const avg = v.average ?? {};
+  const best = (row) => Math.max(...names.map((n) => row[n] ?? -9));
+  const wins = v.perPair.filter((row) => (row.IMP ?? -9) >= best(row)).length;
 
   return (
     <div className="card">
       <h2>
         IMP 准不准
-        <span className="sub">留出一个赛季验证，训练时看不到它</span>
+        <span className="sub">{v.criterion}</span>
       </h2>
 
       <div className="grid cols-3" style={{ marginBottom: 12 }}>
         <StatTile
-          abbr="IMP" label="个人层面相关" value={avg(individual, 'impApm').toFixed(3)}
-          hint="在留出赛季上，与该球员真实 APM 的相关系数"
+          abbr="IMP" label="平均相关" value={(avg.IMP ?? 0).toFixed(3)}
+          hint="用第 N 季的数据预测第 N+1 季真实表现的相关系数"
         />
         <StatTile
-          abbr="PIE" label="同一批比赛" value={avg(individual, 'pieApm').toFixed(3)}
-          hint="现状指标 PIE 在同一批球员上的相关系数"
+          abbr="PIE" label="同一批球员" value={(avg.PIE ?? 0).toFixed(3)}
+          hint="现状指标 PIE 在同一批球员上的成绩"
         />
         <StatTile
-          abbr="W-L" label="球队层面战绩" value={`${teamWins} 胜 ${teamLosses} 负`}
-          hint="分钟加权聚合后还原球队净效率，与 PIE 逐赛季比较"
+          abbr="W" label="逐季排第一" value={`${wins} / ${v.perPair.length}`}
+          hint="有多少个赛季对里，IMP 在所有候选指标中排第一"
         />
       </div>
 
       <DataTable
-        rows={individual.map((r) => {
-          const t = team.find((x) => x.season === r.season) ?? {};
-          return { ...r, teamImp: t.imp ?? null, teamPie: t.pie ?? null };
-        })}
-        rowKey={(r) => r.season}
-        initialSort={{ key: 'season', dir: 'asc' }}
+        rows={v.perPair}
+        rowKey={(r) => r.pair}
+        initialSort={{ key: 'pair', dir: 'asc' }}
         columns={[
-          { key: 'season', label: '留出赛季', align: 'left', width: 86 },
+          { key: 'pair', label: '赛季对', align: 'left', width: 132 },
           { key: 'n', label: '人数', width: 58 },
-          {
-            key: 'impApm', label: <Th abbr="IMP" cn="个人相关" />, title: '个人层面：IMP 与真实 APM 的相关',
-            width: 82, render: (r) => <b>{r.impApm.toFixed(3)}</b>,
-          },
-          {
-            key: 'pieApm', label: <Th abbr="PIE" cn="个人相关" />, title: '个人层面：PIE 与真实 APM 的相关',
-            width: 82, render: (r) => r.pieApm.toFixed(3),
-          },
-          {
-            key: 'teamImp', label: <Th abbr="IMP" cn="球队 R²" />, title: '球队层面：IMP 还原球队净效率',
-            width: 82,
-            render: (r) => (r.teamImp === null ? <span className="dim">—</span> : (
-              <b className={r.teamImp >= r.teamPie ? 'pos' : 'neg'}>{r.teamImp.toFixed(3)}</b>
-            )),
-          },
-          {
-            key: 'teamPie', label: <Th abbr="PIE" cn="球队 R²" />, title: '球队层面：PIE 还原球队净效率',
-            width: 82,
-            render: (r) => (r.teamPie === null ? <span className="dim">—</span> : r.teamPie.toFixed(3)),
-          },
+          ...names.map((n) => ({
+            key: n,
+            label: n === 'IMP' ? <Th abbr="IMP" cn="混合" /> : n,
+            title: n,
+            width: n === 'IMP' ? 76 : 112,
+            render: (r) => {
+              const val = r[n];
+              if (val === null || val === undefined) return <span className="dim">—</span>;
+              const isBest = val >= best(r);
+              return isBest ? <b className="pos">{val.toFixed(3)}</b> : val.toFixed(3);
+            },
+          })),
         ]}
       />
 
       <p className="note" style={{ marginTop: 10 }}>
-        <b>个人层面 IMP 五个赛季全胜</b>（平均 {avg(individual, 'impApm').toFixed(3)} 对
-        PIE 的 {avg(individual, 'pieApm').toFixed(3)}），这个结论是硬的。
-        <b> 但球队层面只有 {teamWins} 胜 {teamLosses} 负</b>
-        {lostSeasons.length > 0 && <>，输的是 {lostSeasons.join('、')}</>}。
-        把 IMP 按分钟加权求和去还原球队净效率时，它并不总是比 PIE 好——
-        PIE 本来就是"球队全部可统计事件里占多少份额"，天生就该加得回球队表现，
-        这个比法对它有利。两项一起看才是完整的：
-        <b>IMP 更适合评价个人，PIE 更适合加总成球队。</b>
+        IMP 是<b>统计栏模型（SPM）</b>与<b>场上实测（APM）</b>的混合，两半各占
+        {' '}{Math.round((1 - (impact.blendW ?? 0.35)) * 100)}% 与
+        {' '}{Math.round((impact.blendW ?? 0.35) * 100)}%。
+        单看任何一半都更差——这一点表里就能看到。混合权重是扫出来的，
+        而且用了两把尺子：预测次季 APM，以及预测次季 on/off。
+        只用前者不行，因为 IMP 里含 APM，两者共享同一个偏差。
       </p>
       <p className="note">
-        指标做法与 EPM 的公开方法一致（box + 追踪回归到阵容级 APM），
-        但 EPM 用的是逐回合、含对手阵容的完整 RAPM，我们只有球队自己的五人组合数据，
-        算出来的是<b>未做对手调整</b>的 APM。这个差别对出场少、对手分布不均的球员影响更大。
+        做法对齐 EPM 的公开方法，但 EPM 用的是逐回合、含对手阵容的完整 RAPM，
+        我们只有球队自己的五人组合数据，算出来的是<b>未做对手调整</b>的 APM。
+        后果是<b>总在一起上场的球员分不太开</b>——某支强队的角色球员会被抬高，
+        榜单上还能看到这个痕迹。这是当前最大的已知缺陷。
       </p>
     </div>
   );

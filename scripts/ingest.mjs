@@ -12,7 +12,8 @@ import { TEAM_META, POS_CN } from '../server/teamMeta.mjs';
 import { fetchInjuries } from '../server/espnClient.mjs';
 import { fetchUpcomingOdds } from '../server/oddsClient.mjs';
 import { buildBacktestDataset } from '../server/dataset.mjs';
-import { apply as applyImpact } from '../server/impact.mjs';
+import { impactOf } from '../server/impact.mjs';
+import { decayedApm } from '../server/rapm.mjs';
 import { replaySeasonPicks } from '../server/replay.mjs';
 import {
   buildGames, computeElo, carryOver, rotationImpact, fitRosterImpact, totalMinutes,
@@ -54,6 +55,32 @@ const PT_BASE = {
   PlayerExperience: '', PlayerPosition: '', SeasonSegment: '', StarterBench: '',
   TeamID: 0, VsConference: '', VsDivision: '', Weight: '',
 };
+
+/**
+ * 读最近几季的五人组合数据，算出时间衰减的 APM。
+ * 文件不全就返回 null——IMP 会退回纯统计栏模型，而不是把 APM 当 0。
+ */
+function loadDecayedApm(model) {
+  const dir = pathNode.join(DATA_DIR, 'history');
+  if (!fsNode.existsSync(dir)) return null;
+  const files = fsNode.readdirSync(dir)
+    .map((f) => f.match(/^lineups_(\d{4}-\d{2})\.json$/))
+    .filter(Boolean)
+    .map((m) => m[1])
+    .sort();
+  if (!files.length) return null;
+  const span = model.decaySpan ?? 3;
+  const bySeason = files.slice(-span).map((season) => ({
+    season,
+    rows: JSON.parse(fsNode.readFileSync(pathNode.join(dir, `lineups_${season}.json`), 'utf8')).rows,
+  }));
+  log(`  实测 APM 取自 ${bySeason.map((b) => b.season).join('、')}（越近权重越高）`);
+  return decayedApm(bySeason, {
+    span,
+    halfLife: model.decayHalfLife ?? 1,
+    lambda: model.apmLambda ?? 6000,
+  });
+}
 
 /** 读一个可选的 data 文件，不存在或坏了都当没有 */
 const readJsonSafe = (f) => {
@@ -494,12 +521,19 @@ async function main() {
   // 模型文件不存在就跳过——这一项是增强，不该让整个抓取失败。
   const impactModel = readJsonSafe('impact-model.json');
   if (impactModel) {
+    // IMP 是「统计栏模型」与「场上实测 APM」的混合，两半都要现算。
+    // APM 用最近几季的五人组合数据做时间衰减，缺数据时退回纯统计栏模型。
+    const apm = loadDecayedApm(impactModel);
     let n = 0;
+    let withApm = 0;
     for (const p of players) {
-      const v = applyImpact(impactModel, p);
-      if (v !== null) { p.impact = v; n += 1; }
+      const a = apm?.get(p.playerId)?.apm ?? null;
+      const v = impactOf(impactModel, p, a);
+      if (v !== null) { p.impact = v; n += 1; if (a !== null) withApm += 1; }
     }
-    log(`综合影响力指标：${n} 名球员（模型训练于 ${(impactModel.seasons ?? []).join("、")}）`);
+    log(`综合影响力指标：${n} 名球员（其中 ${withApm} 人有实测 APM，`
+      + `模型训练于 ${(impactModel.seasons ?? []).join('、')}）`);
+    if (!apm) console.warn('  缺少 data/history/lineups_*.json，IMP 退化为纯统计栏模型');
   } else {
     console.warn('  缺少 data/impact-model.json，跳过综合影响力指标（跑 npm run impact:fit 生成）');
   }

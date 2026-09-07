@@ -213,6 +213,8 @@ app.get('/api/meta', wrap((req, res) => {
       target: store.impactModel.target,
       seasons: store.impactModel.seasons,
       validation: store.impactModel.validation,
+      blendW: store.impactModel.blendW,
+      decaySpan: store.impactModel.decaySpan,
       distribution: store.impactModel.distribution,
     } : null,
   });

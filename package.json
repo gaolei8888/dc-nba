@@ -18,7 +18,8 @@
     "impact:fetch": "node scripts/impact-history.mjs",
     "impact:fit": "node scripts/fit-impact.mjs",
     "check:data": "node scripts/check-data.mjs",
-    "lineups:fetch": "node scripts/lineups-history.mjs"
+    "lineups:fetch": "node scripts/lineups-history.mjs",
+    "impact:lab": "node scripts/impact-lab.mjs"
   },
   "dependencies": {
     "compression": "^1.8.1",

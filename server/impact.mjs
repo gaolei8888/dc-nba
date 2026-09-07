@@ -30,6 +30,14 @@ export const FEATURES = [
 ];
 
 /**
+ * 年龄项。EPM 明说用了年龄（"each stat is affected differently by player age"）。
+ * 用两项：年龄本身与年龄的平方——巅峰期在中间，所以效应不是线性的。
+ * 以 27 岁为中心，让系数读起来是"相对巅峰年龄"。
+ */
+export const AGE_FEATURES = ['age', 'ageSq'];
+const ageOf = (p) => (Number.isFinite(p.age) ? p.age - 27 : 0);
+
+/**
  * 从一行球员数据取特征。
  * 同时吃两种形状：ingest 产出的嵌套结构（base/adv/track…）与
  * impact_<赛季>.json 的扁平结构。
@@ -64,7 +72,81 @@ export function features(p) {
     screen: per36(g('hustle', 'screenAstPts'), min),
     pf: per36(g('base', 'pf'), min),
     usg: (g('adv', 'usgPct') ?? 0.2) * 100,
+    age: ageOf(p),
+    ageSq: ageOf(p) ** 2,
   };
+}
+
+/**
+ * 要不要带年龄项，取决于训练时的选择；模型自己记着用了哪些特征。
+ *
+ * 实测结论：**年龄项在我们这里没用**，加上后 r 从 0.4571 变成 0.4573，
+ * 差异完全在噪声里。EPM 用年龄是因为它有 22 个赛季撑得起年龄曲线，
+ * 我们只有 5 季。代码留着，默认不启用——一个测不出收益的特征不值得进模型。
+ */
+export const featureList = (withAge) => (withAge ? [...FEATURES, ...AGE_FEATURES] : FEATURES);
+
+// ---------------------------------------------------------------- 混合
+
+/**
+ * SPM 先验与实测 APM 的混合权重。
+ *
+ * 这是 EPM 的第二步：SPM 只看统计栏，APM 只看场上结果，两个都不完整。
+ * EPM 把 SPM 当贝叶斯先验喂进 RAPM；我们用一个固定权重做线性混合，
+ * 效果的方向一致，实现简单得多。
+ *
+ * w 由实验扫出来（scripts/impact-lab.mjs），而且用了**两把尺子**：
+ * 预测次季的真实 APM，以及预测次季的真实 on/off。
+ * 后者很重要——IMP 里含 APM，只用前者等于拿目标的一部分去预测目标，
+ * 两者共享同一个偏差。两把尺子的联合最优是 0.35：
+ *
+ *   w      对次季APM   对次季on/off   平均
+ *   0.00    0.4010      0.3325       0.3667   ← 纯 SPM（旧版）
+ *   0.30    0.4542      0.3559       0.4050
+ *   0.35    0.4570      0.3552     **0.4061**
+ *   0.40    0.4584      0.3534       0.4059
+ *   1.00    0.4210      0.3027       0.3619   ← 纯 APM
+ *
+ * 0.30~0.40 一片平坦，选点不脆弱。
+ *
+ * 还试过照 EPM 原样把 SPM 当先验内嵌进 APM 的岭回归（rapm.mjs 支持 priorO/priorD），
+ * 结果是 0.3988，**不如简单线性混合**。忠实照搬未必更好——
+ * EPM 有 22 季 550 万回合和对手阵容撑着，我们只有 5 季的聚合数据。
+ */
+export const BLEND_W = 0.35;
+
+/** 多赛季衰减：越久远权重越低。半衰期 1 个赛季，取最近 3 季。 */
+export const DECAY_SPAN = 3;
+export const DECAY_HALFLIFE = 1;
+
+/**
+ * 把 SPM 与 APM 合成最终的 IMP。
+ * APM 缺失（新秀、上赛季没打）时退回纯 SPM，而不是当作 0——
+ * 当作 0 等于凭空断言"他影响力为零"。
+ */
+export function blend(spm, apm, w = BLEND_W) {
+  if (spm === null || spm === undefined) return null;
+  if (apm === null || apm === undefined) return Math.round(spm * 100) / 100;
+  return Math.round((w * apm + (1 - w) * spm) * 100) / 100;
+}
+
+/**
+ * 最终的 IMP：给一名球员和他的原始 APM，返回校准后的混合值。
+ *
+ * 单独封一个函数是因为量纲校准**必须同时作用在两半上**——
+ * `apply()` 出来的 SPM 已经乘过 scale（系数里就带着），
+ * 但 APM 是外面算的，得在这里补乘。分开写两处极容易漏掉一处。
+ *
+ * @param {object} model data/impact-model.json
+ * @param {object} p 球员行
+ * @param {number|null} rawApm 未校准的 APM，没有就传 null
+ */
+export function impactOf(model, p, rawApm) {
+  const spm = apply(model, p);
+  if (spm === null) return null;
+  const scale = model.scale ?? 1;
+  const apm = rawApm === null || rawApm === undefined ? null : rawApm * scale;
+  return blend(spm, apm, model.blendW ?? BLEND_W);
 }
 
 // ---------------------------------------------------------------- 线性代数
@@ -135,8 +217,10 @@ export const MIN_MPG = 10;
  * @param {Map<string,Map<number,object>>} [opts.apmBySeason] 赛季 -> (球员 id -> {apm, poss})
  * @param {number} [opts.minApmPoss] APM 至少要多少回合才可信，默认 500
  */
-export function buildSamples(rows, { apmBySeason = null, minApmPoss = 500 } = {}) {
+export function buildSamples(rows, { apmBySeason = null, minApmPoss = 500, withAge = false } = {}) {
+  const keys = featureList(withAge);
   const out = [];
+  out.keys = keys;
   for (const p of rows) {
     if ((p.gp ?? 0) < MIN_GP || (p.min ?? 0) < MIN_MPG) continue;
     const f = features(p);
@@ -157,7 +241,7 @@ export function buildSamples(rows, { apmBySeason = null, minApmPoss = 500 } = {}
     out.push({
       playerId: p.playerId,
       season: p.season,
-      x: FEATURES.map((k) => f[k]),
+      x: keys.map((k) => f[k]),
       y,
       w,
       pie: p.pie ?? 0,
@@ -168,12 +252,14 @@ export function buildSamples(rows, { apmBySeason = null, minApmPoss = 500 } = {}
 
 /** 训练一个模型：返回可直接用于 apply() 的对象 */
 export function fit(samples, lambda) {
-  const mu = FEATURES.map((_, j) => mean(samples.map((r) => r.x[j])));
-  const sd = FEATURES.map((_, j) => sdOf(samples.map((r) => r.x[j])));
+  // 特征清单跟着样本走——带不带年龄项由 buildSamples 决定，模型自己记住
+  const keys = samples.keys ?? FEATURES;
+  const mu = keys.map((_, j) => mean(samples.map((r) => r.x[j])));
+  const sd = keys.map((_, j) => sdOf(samples.map((r) => r.x[j])));
   const Z = samples.map((r) => r.x.map((v, j) => (v - mu[j]) / sd[j]));
   const yMean = mean(samples.map((r) => r.y));
   const beta = ridge(Z, samples.map((r) => r.y - yMean), samples.map((r) => r.w), lambda);
-  return { features: FEATURES, mu, sd, beta, intercept: yMean, lambda, n: samples.length };
+  return { features: keys, mu, sd, beta, intercept: yMean, lambda, n: samples.length };
 }
 
 /**
