@@ -16,7 +16,9 @@
     "odds:history": "node scripts/odds-history.mjs",
     "dataset": "node scripts/build-dataset.mjs",
     "impact:fetch": "node scripts/impact-history.mjs",
-    "impact:fit": "node scripts/fit-impact.mjs"
+    "impact:fit": "node scripts/fit-impact.mjs",
+    "check:data": "node scripts/check-data.mjs",
+    "lineups:fetch": "node scripts/lineups-history.mjs"
   },
   "dependencies": {
     "compression": "^1.8.1",

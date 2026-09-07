@@ -65,6 +65,16 @@ const readJsonSafe = (f) => {
   }
 };
 
+/**
+ * 百分数 -> 小数。NBA 接口里同名字段的量纲并不一致：
+ * leaguedashteamstats 的 TM_TOV_PCT 是 0.124，leaguedashplayerstats 的是 8.7。
+ * 存进 data/ 之前统一成小数，显示层才敢无脑乘 100。
+ */
+const pctToFrac = (v) => {
+  const n = v === null || v === undefined || v === '' ? null : Number(v);
+  return n === null || Number.isNaN(n) ? null : n / 100;
+};
+
 const num = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
 const r1 = (v) => (v === null || v === undefined ? null : Math.round(v * 10) / 10);
 
@@ -295,13 +305,17 @@ function buildPlayers(playerStats, rosters, teams) {
         usgPct: num(a.USG_PCT), tsPct: num(a.TS_PCT), efgPct: num(a.EFG_PCT),
         astPct: num(a.AST_PCT), astTo: num(a.AST_TO), astRatio: num(a.AST_RATIO),
         orebPct: num(a.OREB_PCT), drebPct: num(a.DREB_PCT), rebPct: num(a.REB_PCT),
-        tovPct: num(a.TM_TOV_PCT), pace: num(a.PACE), pie: num(a.PIE), poss: num(a.POSS),
+        // 坑：同名字段在两个接口里量纲不同——球队的 TM_TOV_PCT 是小数（0.124），
+        // 球员的却已经是百分数（8.7）。统一在这里折成小数，
+        // 让 adv.* 里所有百分比字段是同一个意思，显示层只管乘 100。
+        tovPct: pctToFrac(a.TM_TOV_PCT),
+        pace: num(a.PACE), pie: num(a.PIE), poss: num(a.POSS),
       },
       // 官方估计效率。E_ 开头的这组是按球员贡献估计的，
       // 不像 adv.offRtg 那样几乎等于"在场时球队的效率"。
       est: {
         offRtg: num(e.E_OFF_RATING), defRtg: num(e.E_DEF_RATING), netRtg: num(e.E_NET_RATING),
-        usgPct: num(e.E_USG_PCT), pace: num(e.E_PACE), tovPct: num(e.E_TOV_PCT),
+        usgPct: num(e.E_USG_PCT), pace: num(e.E_PACE), tovPct: pctToFrac(e.E_TOV_PCT),
         astRatio: num(e.E_AST_RATIO), rebPct: num(e.E_REB_PCT),
       },
       // 拼抢：box score 之外的贡献

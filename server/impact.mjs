@@ -121,20 +121,44 @@ export const onoffWeight = (r) => {
 export const MIN_GP = 20;
 export const MIN_MPG = 10;
 
-/** 把若干赛季的球员行整理成训练样本 */
-export function buildSamples(rows) {
+/**
+ * 把若干赛季的球员行整理成训练样本。
+ *
+ * 目标默认取 on/off 差；传入 apmBySeason 时改用 APM，后者好得多——
+ * 实测年度稳定性 APM 0.398、on/off 0.286，四对赛季全胜。
+ * on/off 衡量的是「这个人 vs 其余所有人」，队友一好就跟着好；
+ * APM 把每个五人组合当一条观测，让回归自己去分离谁带来的。
+ * EPM 拿 RAPM 当回归目标，就是这个道理。
+ *
+ * @param {Array} rows 球员行
+ * @param {object} [opts]
+ * @param {Map<string,Map<number,object>>} [opts.apmBySeason] 赛季 -> (球员 id -> {apm, poss})
+ * @param {number} [opts.minApmPoss] APM 至少要多少回合才可信，默认 500
+ */
+export function buildSamples(rows, { apmBySeason = null, minApmPoss = 500 } = {}) {
   const out = [];
   for (const p of rows) {
     if ((p.gp ?? 0) < MIN_GP || (p.min ?? 0) < MIN_MPG) continue;
-    const w = onoffWeight(p);
-    if (!w) continue;
     const f = features(p);
     if (!f) continue;
+
+    let y; let w;
+    if (apmBySeason) {
+      const a = apmBySeason.get(p.season)?.get(p.playerId);
+      if (!a || a.poss < minApmPoss) continue;
+      y = a.apm;
+      w = a.poss;
+    } else {
+      w = onoffWeight(p);
+      if (!w) continue;
+      y = (p.onNet ?? 0) - (p.offNet ?? 0);
+    }
+
     out.push({
       playerId: p.playerId,
       season: p.season,
       x: FEATURES.map((k) => f[k]),
-      y: (p.onNet ?? 0) - (p.offNet ?? 0),
+      y,
       w,
       pie: p.pie ?? 0,
     });

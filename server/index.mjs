@@ -36,10 +36,12 @@ function loadStore() {
   const gameday = readJson('gameday.json') ?? { season: null, games: [] };
   // 盘口是增强项：抓不到就退回纯模型，页面不能因此挂掉
   const odds = readJson('odds.json') ?? { source: 'ESPN', fetchedAt: null, games: {}, matched: 0 };
+  // 影响力指标的模型与验证成绩，界面上要把它的弱点一并显示
+  const impactModel = readJson('impact-model.json');
   if (!teams || !players || !schedule || !meta) {
     throw new Error('数据缺失，请先运行  npm run ingest');
   }
-  store = { teams, players, schedule, meta, injuries, gameday, odds };
+  store = { teams, players, schedule, meta, injuries, gameday, odds, impactModel };
   clearCaches();
   modelCache = new Map();
   console.log(`数据已加载: ${teams.length} 队 / ${players.length} 人 / ${schedule.games.length} 场 (${meta.priorSeason} → ${meta.targetSeason})`);
@@ -205,6 +207,14 @@ app.get('/api/meta', wrap((req, res) => {
       games: Object.keys(store.odds?.games ?? {}).length,
       providers: store.odds?.providers ?? {},
     },
+    // 影响力指标的验证成绩。**连输的那两年一起给出去**——
+    // 只报好数字的指标不值得信，这一点在「对标盘口」那页已经证明过。
+    impact: store.impactModel ? {
+      target: store.impactModel.target,
+      seasons: store.impactModel.seasons,
+      validation: store.impactModel.validation,
+      distribution: store.impactModel.distribution,
+    } : null,
   });
 }));
 
