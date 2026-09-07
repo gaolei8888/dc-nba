@@ -38,10 +38,14 @@ for (const f of fs.readdirSync(HISTORY)) {
   if (m) stints[m[1]] = readIf(path.join(HISTORY, f));
 }
 const seasons = Object.keys(players).sort().filter((s) => lineups[s] && stints[s]);
-if (seasons.length < 2) {
-  console.error('需要至少 2 个赛季同时有 lineups_ 与 stints_。先跑 npm run pbp:fetch');
+if (!seasons.length) {
+  console.error('还没有 stints_*.json。先跑 npm run pbp:fetch');
   process.exit(1);
 }
+// 跨季判据要成对的赛季，单季只能跑主场优势和「对手调整改了谁」。
+// 抓取是分季进行的，中途想看一眼不该被拦住。
+const canPair = seasons.length >= 2;
+if (!canPair) console.log('（只有一个赛季，跨季判据跳过）');
 console.log(`\nAPM vs RAPM 对照  赛季：${seasons.join('、')}`);
 for (const s of seasons) {
   const g = Object.keys(stints[s].games).length;
@@ -81,9 +85,9 @@ function commonRows(s, minPoss = 1000) {
 }
 
 // ---- 判据 1：年度稳定性
-console.log('\n判据 1 · 年度稳定性（第 N 季的值 → 第 N+1 季同一指标）');
+if (canPair) console.log('\n判据 1 · 年度稳定性（第 N 季的值 → 第 N+1 季同一指标）');
 const stab = { APM: [], RAPM: [] };
-for (const s of seasons) {
+for (const s of canPair ? seasons : []) {
   const c = commonRows(s);
   if (!c) continue;
   const ids = c.rows.map((p) => p.playerId);
@@ -98,12 +102,13 @@ if (stab.APM.length) {
 }
 
 // ---- 判据 2：预测次季 on/off（独立尺子）
-console.log('\n判据 2 · 预测次季裸 on/off（独立尺子，缺陷来源与两者都不同）');
+if (canPair) console.log('\n判据 2 · 预测次季裸 on/off（独立尺子，缺陷来源与两者都不同）');
 const onoff = { APM: [], RAPM: [], SPM: [] };
-const spmFor = new Map(seasons.map((s) => [s,
+// SPM 训练要留出当季（防泄漏），只有一个赛季时训练集为空，跑不了
+const spmFor = canPair ? new Map(seasons.map((s) => [s,
   fit(buildSamples(seasons.filter((x) => x !== s).flatMap((x) => players[x]),
-    { apmBySeason: apmBy }), 3000)]));
-for (const s of seasons) {
+    { apmBySeason: apmBy }), 3000)])) : new Map();
+for (const s of canPair ? seasons : []) {
   const c = commonRows(s);
   if (!c) continue;
   const byId = new Map(players[c.nx].map((p) => [p.playerId, p]));
