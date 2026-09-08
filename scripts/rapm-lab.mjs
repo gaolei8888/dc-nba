@@ -92,6 +92,58 @@ function commonRows(s, minPoss = 1000) {
   return rows.length >= 50 ? { rows, nx } : null;
 }
 
+// ---- 3 季衰减：**一份缓存给下面所有小节共用**
+//
+// RAPM 的求解要几十秒（1100+ 列的高斯消元），下面有四个小节都要用同一批
+// 衰减结果。原来每个小节各建各的缓存，同一个解算被算了三遍。
+const SPAN = 3;
+const HALF = 1;
+
+/** 近 SPAN 季的五人组合，按半衰期加权（缩放回合数即可，效率不变） */
+const decayedLineups = (s) => {
+  const rows = []; const i = seasons.indexOf(s);
+  for (let k = 0; k < SPAN && i - k >= 0; k++) {
+    const w = 0.5 ** (k / HALF);
+    for (const l of lineups[seasons[i - k]]) rows.push({ ...l, poss: (l.poss ?? 0) * w });
+  }
+  return rows;
+};
+
+/** 近 SPAN 季的段，同样按半衰期缩放回合数与得分 */
+const decayedStints = (s) => {
+  const out = []; const i = seasons.indexOf(s);
+  for (let k = 0; k < SPAN && i - k >= 0; k++) {
+    const w = 0.5 ** (k / HALF);
+    for (const st of stintsOf(stints[seasons[i - k]])) {
+      out.push([...st.slice(0, 10), st[10] * w, st[11] * w, st[12] * w, st[13] * w, st[14]]);
+    }
+  }
+  return out;
+};
+
+const _decApm = new Map();
+const getDecApm = (s, lam = APM_LAMBDA) => {
+  const key = `${s}|${lam}`;
+  if (!_decApm.has(key)) {
+    _decApm.set(key, new Map([...computeApm(decayedLineups(s), { lambda: lam })]
+      .map(([k, v]) => [k, v.apm])));
+  }
+  return _decApm.get(key);
+};
+
+const _decRapm = new Map();
+const getDecRapm = (s, lam = 6000, prior = null) => {
+  const key = `${s}|${lam}|${prior ? 'prior' : 'plain'}`;
+  if (!_decRapm.has(key)) {
+    const r = computeRapm(decayedStints(s), {
+      lambda: lam, minPoss: 0.25, priorO: prior, priorD: prior,
+    });
+    r.delete('__hca');
+    _decRapm.set(key, new Map([...r].map(([k, v]) => [k, v.rapm])));
+  }
+  return _decRapm.get(key);
+};
+
 // ---- 判据 1：年度稳定性
 if (canPair) console.log('\n判据 1 · 年度稳定性（第 N 季的值 → 第 N+1 季同一指标）');
 const stab = { APM: [], RAPM: [] };
@@ -245,45 +297,6 @@ if (canPair) {
 // 只报对自己有利的那把尺子，等于自己给自己打分。
 
 if (canPair && seasons.length >= 3) {
-  const SPAN = 3; const HALF = 1;
-  const decayed = (make, upto, lambda) => {
-    const i = seasons.indexOf(upto);
-    const slice = [];
-    for (let k = SPAN - 1; k >= 0; k--) if (i - k >= 0) slice.push(seasons[i - k]);
-    return make(slice, lambda);
-  };
-  const decApm = new Map();
-  const decRapm = new Map();
-  const getDecApm = (s, lam = APM_LAMBDA) => {
-    const key = `${s}|${lam}`;
-    if (!decApm.has(key)) {
-      const rows = [];
-      const i = seasons.indexOf(s);
-      for (let k = 0; k < SPAN && i - k >= 0; k++) {
-        const w = 0.5 ** (k / HALF);
-        for (const l of lineups[seasons[i - k]]) rows.push({ ...l, poss: (l.poss ?? 0) * w });
-      }
-      decApm.set(key, new Map([...computeApm(rows, { lambda: lam })].map(([k, v]) => [k, v.apm])));
-    }
-    return decApm.get(key);
-  };
-  const getDecRapm = (s, lam) => {
-    const key = `${s}|${lam}`;
-    if (!decRapm.has(key)) {
-      const merged = [];
-      const i = seasons.indexOf(s);
-      for (let k = 0; k < SPAN && i - k >= 0; k++) {
-        const w = 0.5 ** (k / HALF);
-        for (const st of stintsOf(stints[seasons[i - k]])) {
-          merged.push([...st.slice(0, 10), st[10] * w, st[11] * w, st[12] * w, st[13] * w, st[14]]);
-        }
-      }
-      const r = computeRapm(merged, { lambda: lam, minPoss: 0.25 });
-      r.delete('__hca');
-      decRapm.set(key, new Map([...r].map(([k, v]) => [k, v.rapm])));
-    }
-    return decRapm.get(key);
-  };
 
   // 次季的三个目标
   const targets = {
@@ -350,29 +363,15 @@ if (canPair && seasons.length >= 3) {
 // 先验只有一个总值，按进攻/防守各一半分——粗糙，但混合后看的是两者之和。
 
 if (canPair && seasons.length >= 3) {
-  const SPAN = 3; const HALF = 1;
-  const decPrior = new Map();
+  // 先验只有一个总值（SPM），按进攻/防守各一半拆——粗糙，但最后看的是两者之和；
+  // EPM 会分别拟合攻防 SPM，我们的特征集做不到。
   const getPriorRapm = (s, lam) => {
-    const key = `${s}|${lam}`;
-    if (!decPrior.has(key)) {
-      const merged = [];
-      const i = seasons.indexOf(s);
-      for (let k = 0; k < SPAN && i - k >= 0; k++) {
-        const w = 0.5 ** (k / HALF);
-        for (const st of stintsOf(stints[seasons[i - k]])) {
-          merged.push([...st.slice(0, 10), st[10] * w, st[11] * w, st[12] * w, st[13] * w, st[14]]);
-        }
-      }
-      const half = new Map();
-      for (const p of players[s]) {
-        const v = apply(spmFor.get(s), p);
-        if (v != null) half.set(p.playerId, v / 2);
-      }
-      const r = computeRapm(merged, { lambda: lam, minPoss: 0.25, priorO: half, priorD: half });
-      r.delete('__hca');
-      decPrior.set(key, new Map([...r].map(([k, v]) => [k, v.rapm])));
+    const half = new Map();
+    for (const p of players[s]) {
+      const v = apply(spmFor.get(s), p);
+      if (v != null) half.set(p.playerId, v / 2);
     }
-    return decPrior.get(key);
+    return getDecRapm(s, lam, half);
   };
 
   const onoffTarget = (nx) => {
@@ -413,34 +412,8 @@ if (canPair && seasons.length >= 3) {
 // 值得试的配置，也是唯一还能让 play-by-play 这三小时回本的路。
 
 if (canPair && seasons.length >= 3) {
-  const SPAN = 3; const HALF = 1;
-  const cA = new Map(); const cR = new Map();
-  const dApm = (s) => {
-    if (!cA.has(s)) {
-      const rows = []; const i = seasons.indexOf(s);
-      for (let k = 0; k < SPAN && i - k >= 0; k++) {
-        const w = 0.5 ** (k / HALF);
-        for (const l of lineups[seasons[i - k]]) rows.push({ ...l, poss: (l.poss ?? 0) * w });
-      }
-      cA.set(s, new Map([...computeApm(rows, { lambda: APM_LAMBDA })].map(([k, v]) => [k, v.apm])));
-    }
-    return cA.get(s);
-  };
-  const dRapm = (s) => {
-    if (!cR.has(s)) {
-      const merged = []; const i = seasons.indexOf(s);
-      for (let k = 0; k < SPAN && i - k >= 0; k++) {
-        const w = 0.5 ** (k / HALF);
-        for (const st of stintsOf(stints[seasons[i - k]])) {
-          merged.push([...st.slice(0, 10), st[10] * w, st[11] * w, st[12] * w, st[13] * w, st[14]]);
-        }
-      }
-      const r = computeRapm(merged, { lambda: 6000, minPoss: 0.25 });
-      r.delete('__hca');
-      cR.set(s, new Map([...r].map(([k, v]) => [k, v.rapm])));
-    }
-    return cR.get(s);
-  };
+  const dApm = (s) => getDecApm(s);
+  const dRapm = (s) => getDecRapm(s, 6000);
   const evalOn2 = (valueOf) => {
     const rs = [];
     for (const s of seasons) {
@@ -478,4 +451,62 @@ if (canPair && seasons.length >= 3) {
   console.log('  对比 只用 APM w=0.30       0.3507');
   console.log('  对比 只用 RAPM w=0.30      0.3452');
   console.log('  对比 纯 SPM                0.3271');
+}
+
+// ---------------------------------------------------------------- 这个差显著吗
+//
+// 上面所有「A 比 B 高 0.005」的说法，不配上样本量都会被误读。
+// 只有 4 个赛季对，配对比较（同一批球员、同一个赛季对）才有意义。
+//
+// 这一节是补做的：最初只报了平均值，据此写了「每个权重上 APM 都赢」，
+// 补上检验之后发现 t 远不到显著，正确的说法是「打平」。
+
+if (canPair && seasons.length >= 3) {
+  const onoffOf = (nx) => {
+    const byId = new Map(players[nx].map((p) => [p.playerId, p]));
+    return (id) => {
+      const p = byId.get(id);
+      return p ? (p.onNet ?? 0) - (p.offNet ?? 0) : null;
+    };
+  };
+
+  console.log('\n配对显著性检验：IMP(APM) vs IMP(RAPM)，判据「预测次季 on/off」');
+  for (const w of [0.30, 0.35]) {
+    console.log(`\n  w=${w.toFixed(2)}`);
+    const ds = [];
+    for (const s of seasons) {
+      const c = commonRows(s);
+      if (!c) continue;
+      const target = onoffOf(c.nx);
+      const keep = c.rows.filter((p) => target(p.playerId) != null
+        && apply(spmFor.get(s), p) != null);
+      if (keep.length < 50) continue;
+      const y = keep.map((p) => target(p.playerId));
+      const mix = (get) => keep.map((p) => {
+        const sp = apply(spmFor.get(s), p);
+        const v = get(s).get(p.playerId);
+        return v == null ? sp : w * v + (1 - w) * sp;
+      });
+      const rA = corr(mix((x) => getDecApm(x)), y);
+      const rR = corr(mix((x) => getDecRapm(x, 6000)), y);
+      ds.push(rA - rR);
+      console.log(`    ${s}→${c.nx}  n=${String(keep.length).padStart(3)}`
+        + `   APM ${rA.toFixed(4)}   RAPM ${rR.toFixed(4)}`
+        + `   差 ${rA - rR >= 0 ? '+' : ''}${(rA - rR).toFixed(4)}`
+        + `  ${rA > rR ? 'APM 赢' : 'RAPM 赢'}`);
+    }
+    if (ds.length >= 2) {
+      const m = mean(ds);
+      const sd = Math.sqrt(ds.reduce((a, v) => a + (v - m) ** 2, 0) / (ds.length - 1));
+      const se = sd / Math.sqrt(ds.length);
+      const t = m / se;
+      // 双尾 t 检验的临界值，自由度 1~5
+      const CRIT = { 1: 12.71, 2: 4.30, 3: 3.18, 4: 2.78, 5: 2.57 };
+      const df = ds.length - 1;
+      const crit = CRIT[df] ?? 2.0;
+      console.log(`    平均差 ${m.toFixed(4)}   标准误 ${se.toFixed(4)}   t=${t.toFixed(2)}`
+        + `（自由度 ${df}，需 |t|>${crit} 才到 p<0.05）`
+        + `  ->  ${Math.abs(t) > crit ? '显著' : '**不显著，应当读作「打平」**'}`);
+    }
+  }
 }

@@ -464,8 +464,10 @@ RAPM 赢了 1 对。**所以正确的说法是「打平」，不是「APM 赢」
 站得住的支持理由；想换过去是完全合理的判断，只是当前没有数据强迫我们换。
 
 完整实验记录、七条「这个结论最可能错在哪」的自我质疑，以及复现步骤，
-见 **[docs/rapm-verdict.md](docs/rapm-verdict.md)**。
-`scripts/pbp-history.mjs` 与 `npm run rapm:lab` 都保留着，随时可以重跑。
+见 **[docs/rapm-verdict.md](docs/rapm-verdict.md)**；
+`npm run rapm:lab` 的**完整原始输出**存在
+**[docs/rapm-lab-output.txt](docs/rapm-lab-output.txt)**，
+所以不重抓那 17MB 数据也能核对本节每一个数字。
 
 #### 关于「年度稳定性」这把尺子的一个修正
 

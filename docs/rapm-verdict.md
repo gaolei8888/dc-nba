@@ -6,6 +6,11 @@
 日期：2026-09-07 · 代码：`server/pbp.mjs`、`server/stintRapm.mjs`、
 `scripts/pbp-history.mjs`、`scripts/rapm-lab.mjs` · 复现：`npm run rapm:lab`
 
+**下面每一张表都是从 [`rapm-lab-output.txt`](rapm-lab-output.txt) 抄来的，
+那是 `npm run rapm:lab` 的完整原始输出，一行没删。**
+`data/history/stints_*.json` 有 17MB，被 .gitignore 排除了，所以审阅者不重抓
+（约 3 小时）也能直接核对数字。
+
 ---
 
 ## 一句话结论
@@ -106,7 +111,7 @@ APM 0.589   →   RAPM 0.425
 
 ---
 
-## 五、但它预测不了未来
+## 五、但预测能力上测不出改善
 
 ### 验收标准
 
@@ -284,6 +289,9 @@ EPM 有 **550 万回合、22 个赛季**。同样的方法在他们那儿撑得�
 npm run pbp:fetch      # 抓 play-by-play 并还原阵容（约 3 小时，可断点续抓）
 npm run rapm:lab       # 上面所有表
 ```
+
+**不想重抓也能核对**：`docs/rapm-lab-output.txt` 是上面这条命令的完整原始输出
+（含生成时间与代码版本），本文所有数字都能在里面找到对应行。
 
 环境变量：`SEASONS` 指定赛季、`FORCE=1` 重抓、`RAPM_LAMBDA` / `APM_LAMBDA` 改正则强度、
 `NBA_CONCURRENCY` / `NBA_MIN_GAP_MS` 改抓取速率（默认 2 请求/秒，调高会被封）。
