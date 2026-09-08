@@ -465,9 +465,10 @@ RAPM 赢了 1 对。**所以正确的说法是「打平」，不是「APM 赢」
 
 完整实验记录、七条「这个结论最可能错在哪」的自我质疑，以及复现步骤，
 见 **[docs/rapm-verdict.md](docs/rapm-verdict.md)**；
-`npm run rapm:lab` 的**完整原始输出**存在
-**[docs/rapm-lab-output.txt](docs/rapm-lab-output.txt)**，
-所以不重抓那 17MB 数据也能核对本节每一个数字。
+`npm run rapm:lab` 的完整原始输出存在
+**[docs/rapm-lab-output.txt](docs/rapm-lab-output.txt)**。
+**还原出的段数据也在仓库里**（`data/history/stints_*.json.gz`，2.5MB），
+所以 `npm run rapm:lab` 克隆下来直接能跑，不必先花 3 小时重抓。
 
 #### 关于「年度稳定性」这把尺子的一个修正
 

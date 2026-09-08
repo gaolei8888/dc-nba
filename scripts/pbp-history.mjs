@@ -26,7 +26,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { nbaGet, statsUrl, DATA_DIR } from '../server/nbaClient.mjs';
+import { nbaGet, statsUrl, DATA_DIR, readJsonAuto, writeJsonGz } from '../server/nbaClient.mjs';
 import { readBox, buildStints, checkMinutes } from '../server/pbp.mjs';
 
 const HISTORY_DIR = path.join(DATA_DIR, 'history');
@@ -96,17 +96,19 @@ async function doSeason(season) {
   if (!fs.existsSync(gamelog)) { log(`${season} 缺少 gamelog，跳过`); return; }
   const gameIds = [...new Set(JSON.parse(fs.readFileSync(gamelog, 'utf8')).map((r) => r.GAME_ID))].sort();
 
-  const out = path.join(HISTORY_DIR, `stints_${season}.json`);
+  // 存 gzip：一季 3.4MB、五季 17MB，压完只有 2.4MB，压缩版才进得了仓库。
+  // 进了仓库审阅者才能自己改参数重跑，而不是只能核对我给的数字。
+  const out = path.join(HISTORY_DIR, `stints_${season}.json.gz`);
   let data = { season, games: {}, failed: {} };
-  if (fs.existsSync(out) && process.env.FORCE !== '1') {
-    data = JSON.parse(fs.readFileSync(out, 'utf8'));
-    data.failed ??= {};
+  if (process.env.FORCE !== '1') {
+    const prev = readJsonAuto(out);   // .json 与 .json.gz 都认，老文件能续上
+    if (prev) { data = prev; data.failed ??= {}; }
   }
   const todo = gameIds.filter((id) => !data.games[id] && !data.failed[id]);
   log(`${season}：共 ${gameIds.length} 场，已有 ${Object.keys(data.games).length} 场，本次要抓 ${todo.length} 场`);
   if (!todo.length) return;
 
-  const save = () => fs.writeFileSync(out, JSON.stringify(data));
+  const save = () => writeJsonGz(out, data);
   let sinceFlush = 0;
   let netFailStreak = 0;
   const t0 = Date.now();
@@ -153,7 +155,8 @@ async function doSeason(season) {
   const stintN = Object.values(data.games).reduce((a, g) => a + g[2].length, 0);
   const failN = Object.keys(data.failed).length;
   log(`${season} 完成：${okN} 场可用（${(100 * okN / gameIds.length).toFixed(1)}%），`
-    + `${stintN.toLocaleString()} 段，丢弃 ${failN} 场，文件 ${(fs.statSync(out).size / 1e6).toFixed(1)} MB`);
+    + `${stintN.toLocaleString()} 段，丢弃 ${failN} 场，`
+    + `文件 ${(fs.statSync(out).size / 1e6).toFixed(1)} MB（gzip）`);
   if (failN) {
     const why = Object.values(data.failed);
     const top = [...new Set(why.map((w) => w.split('：')[0]))].slice(0, 3);

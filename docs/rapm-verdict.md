@@ -8,8 +8,10 @@
 
 **下面每一张表都是从 [`rapm-lab-output.txt`](rapm-lab-output.txt) 抄来的，
 那是 `npm run rapm:lab` 的完整原始输出，一行没删。**
-`data/history/stints_*.json` 有 17MB，被 .gitignore 排除了，所以审阅者不重抓
-（约 3 小时）也能直接核对数字。
+
+而且**数据也在仓库里**：`data/history/stints_*.json.gz`（原始 17MB，gzip 后 2.5MB）。
+所以审阅者不用重抓那 3 小时，`npm run rapm:lab` 直接就能跑，
+也可以自己改 `RAPM_LAMBDA`、混合权重、判据重算，不必信我给的数字。
 
 ---
 
@@ -290,8 +292,11 @@ npm run pbp:fetch      # 抓 play-by-play 并还原阵容（约 3 小时，可�
 npm run rapm:lab       # 上面所有表
 ```
 
-**不想重抓也能核对**：`docs/rapm-lab-output.txt` 是上面这条命令的完整原始输出
-（含生成时间与代码版本），本文所有数字都能在里面找到对应行。
+**不用重抓**：`data/history/stints_*.json.gz` 已经在仓库里（2.5MB），
+`npm run rapm:lab` 克隆下来直接能跑。`docs/rapm-lab-output.txt` 是它的完整原始
+输出（含生成时间与代码版本），本文所有数字都能在里面找到对应行。
+
+只有想换赛季或重新验证还原过程时才需要 `npm run pbp:fetch`。
 
 环境变量：`SEASONS` 指定赛季、`FORCE=1` 重抓、`RAPM_LAMBDA` / `APM_LAMBDA` 改正则强度、
 `NBA_CONCURRENCY` / `NBA_MIN_GAP_MS` 改抓取速率（默认 2 请求/秒，调高会被封）。

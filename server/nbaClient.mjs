@@ -5,6 +5,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -129,4 +130,29 @@ export function writeJson(file, value) {
   fs.mkdirSync(path.dirname(p), { recursive: true });
   fs.writeFileSync(p, JSON.stringify(value));
   return p;
+}
+
+/**
+ * 读 JSON，`.json` 与 `.json.gz` 都认，给绝对路径或相对 data/ 的路径都行。
+ *
+ * 为什么要这个：play-by-play 还原出的段数据一季 3.4MB、五季 17MB，
+ * 但 gzip 后只有 2.4MB——压缩版才进得了仓库。而进了仓库，
+ * 审阅者才能自己改参数重跑 `npm run rapm:lab`，而不是只能核对我给的数字。
+ */
+export function readJsonAuto(file) {
+  const base = path.isAbsolute(file) ? file : path.join(DATA_DIR, file);
+  const plain = base.endsWith('.gz') ? base.slice(0, -3) : base;
+  const gz = `${plain}.gz`;
+  if (fs.existsSync(plain)) return JSON.parse(fs.readFileSync(plain, 'utf8'));
+  if (fs.existsSync(gz)) return JSON.parse(zlib.gunzipSync(fs.readFileSync(gz)).toString('utf8'));
+  return null;
+}
+
+/** 写 gzip 压缩的 JSON，文件名自动补 `.gz` */
+export function writeJsonGz(file, value) {
+  const base = path.isAbsolute(file) ? file : path.join(DATA_DIR, file);
+  const out = base.endsWith('.gz') ? base : `${base}.gz`;
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  fs.writeFileSync(out, zlib.gzipSync(Buffer.from(JSON.stringify(value)), { level: 9 }));
+  return out;
 }

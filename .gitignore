@@ -4,7 +4,13 @@ data/*.json
 data/*.db
 data/backups/
 data/*.db-*
-data/history/
+# 注意是 data/history/* 而不是 data/history/——git 不会重新纳入
+# 被排除**目录**里的文件，写成目录形式下面那条 ! 例外就不生效。
+data/history/*
+# 例外：play-by-play 还原出的段数据。原始 17MB，gzip 后 2.5MB。
+# 破例进仓库是因为它抓一次要 3 小时，不带上的话审阅者只能核对 docs 里的
+# 数字，没法自己改参数重跑 npm run rapm:lab。
+!data/history/stints_*.json.gz
 data/raw/
 .env
 *.log

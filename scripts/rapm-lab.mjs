@@ -18,7 +18,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { DATA_DIR } from '../server/nbaClient.mjs';
+import { DATA_DIR, readJsonAuto } from '../server/nbaClient.mjs';
 import { computeApm } from '../server/rapm.mjs';
 import { computeRapm, stintsOf } from '../server/stintRapm.mjs';
 import { corr, mean, apply, fit, buildSamples } from '../server/impact.mjs';
@@ -34,8 +34,8 @@ for (const f of fs.readdirSync(HISTORY)) {
   if (m) { players[m[1]] = readIf(path.join(HISTORY, f)).players.map((p) => ({ ...p, season: m[1] })); continue; }
   m = f.match(/^lineups_(\d{4}-\d{2})\.json$/);
   if (m) { lineups[m[1]] = readIf(path.join(HISTORY, f)).rows; continue; }
-  m = f.match(/^stints_(\d{4}-\d{2})\.json$/);
-  if (m) stints[m[1]] = readIf(path.join(HISTORY, f));
+  m = f.match(/^stints_(\d{4}-\d{2})\.json(\.gz)?$/);
+  if (m && !stints[m[1]]) stints[m[1]] = readJsonAuto(path.join(HISTORY, f));
 }
 // 抓到一半的赛季必须排除：半个赛季的 RAPM 噪声大得没法比，
 // 混进来会把整张表带偏，而且看不出是数据不全造成的。
