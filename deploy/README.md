@@ -51,6 +51,46 @@ git archive HEAD server scripts deploy web docs package.json package-lock.json  
 sh deploy/push-refresh.sh      # 顺带推一份新数据，并在服务器上重建、健康检查
 ```
 
+## 模拟投注（2026-10-28 起，见 `docs/superpowers/specs/2026-10-28-paper-betting-design.md`）
+
+两部分，上线方式不同：
+
+**历史回测**是一个静态文件 `data/paper-backtest.json`（gitignore，和其他快照一样）。
+在本机生成：`npm run books:fetch`（ESPN，≤1 请求/秒，约 7000 次、两小时，可中断续跑；
+缓存在 `data/history/books_<赛季>.json`）→ `npm run paper:backtest`。上线就是把它放进服务器的 `data/`：
+
+```bash
+scp data/paper-backtest.json dev@gpu.tzspace.cn:/home/dev/work/works/dc-nba/data/
+```
+
+之后每次刷新都会带着它：`refresh.sh` 把线上 `data/*.json` 整个拷进临时目录再拷回来，
+`push-refresh.sh` 推的是本机 `data/*.json`（本机有这个文件就一起推）。没有这个文件，页面只显示前向账本。
+
+**前向账本**是 SQLite 表 `paper_bets`，和排行榜同一个库（`DB_PATH`，线上是 `data-db/app.db` 卷），
+`CREATE TABLE IF NOT EXISTS`，不动已有的表。只追加由触发器保证：重复插入忽略（连 `INSERT OR REPLACE` 也是）、
+不能删、记录字段不能改、结算字段只写一次。
+
+谁来写：`refresh.sh` 在新容器健康之后 `docker exec dc-nba node scripts/ledger.mjs settle`、再 `capture`。
+**不能放在取数那一步**——那一步在 `mktemp` 临时目录里、用一次性的 node 容器跑，里面根本没有 `data-db/`，
+写进去的库会随临时目录一起删掉。只有运行中的 `dc-nba` 容器挂着持久的卷。
+（2026-10-27 本机验证：同样的 `docker run -v data-db:/app/data-db` + `docker exec … capture`，
+删掉容器重建后 12 行都在，新容器的 `/api/paper` 读得到。）
+
+- `capture`：记开赛前 **14 小时内**的比赛，DK 价来自本次刷新刚写进镜像的 `odds.json`，零额外请求。
+  所以由 22:00（北京）那次记录；14:30 那次离开赛 16 小时以上，不记。
+- `settle`：用 `schedule.json` 的比分结算；每场最多 1 个 ESPN 请求取 DK 收盘价算 CLV（每天约 8 次），
+  取不到就留空，三天内的下次刷新再补。
+- 账本失败只写 `refresh.log`，不影响刷新与回滚。
+- 开关：`ENABLE_LEDGER=0` 关掉页面读取（与 `ENABLE_LEADERBOARD` 无关；账本不含用户数据）。
+  服务器 compose 不需要改。
+
+**可选（需要高磊同意后再改 crontab）**：加一次北京 06:30（UTC 22:30，开赛前约半小时）的
+`refresh.sh --espn`，记录更接近收盘的价格。注意同一 (比赛, 规则, 博彩商) 只认第一次记录，
+要并存两个时点得给晚的那次另起规则名（如 `edge3-late`），这需要改 `server/ledger.mjs`。
+
+本地：`ENABLE_LEADERBOARD=0 node server/index.mjs` 也能看账本，库默认 `data/app.db`；
+`DB_PATH=/tmp/x.db node scripts/ledger.mjs capture|settle|show` 可在副本上演练。
+
 ## 怎么确认它真的在跑
 
 不要看 crontab，看结果：
