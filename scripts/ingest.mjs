@@ -641,6 +641,9 @@ async function main() {
   for (const t of teams) {
     t.eloEnd = r1(eloFinal[t.teamId]) ?? 1500;
     t.eloPreseason = r1(eloPreseason[t.teamId]) ?? 1500;
+    // 未舍入的开赛日评级：scripts/espn-refresh.mjs 从它起算本季 Elo，
+    // 用舍入值会和这里的结果差 0.1 分
+    t.eloPreseasonExact = eloPreseason[t.teamId] ?? 1500;
     t.elo = r1(eloStart[t.teamId]) ?? 1500;
     // 上赛季名单的轮换影响力基准；新名单一侧与阵容更迭修正由预测引擎按参数实时计算
     t.rotationPrior = rotationImpact(lastSeasonRoster.get(t.teamId) ?? [], { basis });

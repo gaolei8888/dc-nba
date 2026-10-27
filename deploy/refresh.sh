@@ -1,18 +1,25 @@
 #!/bin/sh
-# 线上数据定时刷新：抓数据 → 体检 → 换快照 → 重建镜像 → 健康检查，失败自动回滚。
+# 线上数据刷新：取数据 → 体检 → 换快照 → 重建镜像 → 健康检查，失败自动回滚。
 #
-# 放在服务器部署目录下（与 docker-compose.yml 同级的 deploy/ 里），由 cron 调用：
+# 数据从哪来，三选一（体检、切换、回滚都走同一套）：
 #
-#   0 18 * * * /home/dev/work/works/dc-nba/deploy/refresh.sh >> /home/dev/work/works/dc-nba/refresh.log 2>&1
+#   deploy/refresh.sh --espn       服务器自己用 ESPN 补比分/Elo/伤病/盘口（统计数据不动）。
+#                                  这台服务器的 IP 被 NBA 封了，只能走这条，由 cron 每天跑。
+#   deploy/refresh.sh --incoming   接收别处（本机 / GB10）推上来的全量数据：incoming/*.json。
+#                                  由 deploy/push-refresh.sh 远程调用，推完立刻跑。
+#   deploy/refresh.sh              在这里跑全量 ingest。要求能访问 stats.nba.com——
+#                                  2026-10-27 起这台服务器不行，保留给以后换了网络或配了代理。
+#   加 --fetch-only                只取数据、体检，不动线上。
 #
-#   deploy/refresh.sh --fetch-only   只抓取并体检，不动线上（首次部署先用它测网络）
+# cron（服务器时区 CST）：
+#   30 14 * * * /home/dev/work/works/dc-nba/deploy/refresh.sh --espn >> /home/dev/work/works/dc-nba/refresh.log 2>&1
+#   0 22 * * *  /home/dev/work/works/dc-nba/deploy/refresh.sh --espn >> /home/dev/work/works/dc-nba/refresh.log 2>&1
 #
 # 设计要点：
-#   1. 抓取在临时目录里进行，不碰线上 data/。stats.nba.com 被限流时是挂起而不是报错，
-#      抓到一半失败的话，线上快照必须原封不动。
-#   2. 体检不过就不换。check-data.mjs 防量纲错误，另外校验 30 队、赛程非空、meta 是刚写的。
+#   1. 取数据在临时目录里进行，不碰线上 data/。抓到一半失败，线上快照原封不动。
+#   2. 体检不过就不换。check-data.mjs 防量纲错误，另外校验 30 队、赛程非空、meta 是新写的。
 #   3. 换快照前留一份 data-prev/，新容器健康检查不过就换回去再建一次。
-#   4. flock 防止上一次还没跑完（比如在等限流解除）就叠上第二次。
+#   4. flock 串行化：cron 的 ESPN 刷新和别处推来的全量刷新不会撞在一起。
 set -eu
 
 DIR=$(cd "$(dirname "$0")/.." && pwd)
@@ -20,13 +27,27 @@ CONTAINER=dc-nba
 NODE_IMAGE=node:22-alpine
 # 正常 1 分钟内抓完；被限流时 nbaClient 会反复重试，给足但要有上限
 INGEST_TIMEOUT=1800
+MODE=ingest
 FETCH_ONLY=0
-[ "${1:-}" = "--fetch-only" ] && FETCH_ONLY=1
+for a in "$@"; do
+  case "$a" in
+    --espn) MODE=espn ;;
+    --incoming) MODE=incoming ;;
+    --fetch-only) FETCH_ONLY=1 ;;
+    *) echo "未知参数 $a"; exit 2 ;;
+  esac
+done
 
-log() { echo "[$(date '+%F %T')] $*"; }
+log() { echo "[$(date '+%F %T')] [$MODE] $*"; }
+node_in() {
+  docker run --rm --user "$(id -u):$(id -g)" -v "$STAGE:/app" -w /app "$NODE_IMAGE" "$@"
+}
 
 exec 9>"$DIR/.refresh.lock"
-if ! flock -n 9; then
+# 推送来的全量数据值得等一等；cron 的轻量刷新撞上了就跳过，下次再来
+if [ "$MODE" = incoming ]; then
+  flock -w 900 9 || { log "等锁超时，放弃"; exit 1; }
+elif ! flock -n 9; then
   log "上一次刷新还在跑，跳过"
   exit 0
 fi
@@ -35,29 +56,52 @@ STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 
 log "开始刷新（$DIR）"
-if [ ! -d "$DIR/data/history" ]; then
-  log "缺少 data/history/：IMP 会退化成纯统计栏、实验室数据集会被跳过。先同步一次 history 再跑"
-  exit 1
-fi
-
-# 只拷 ingest 需要的东西：代码 + 快照 + history。不拷 app.db、备份。
+# 只拷取数据需要的东西：代码 + 快照。不拷 app.db、备份。
 mkdir -p "$STAGE/data"
 cp -r "$DIR/server" "$DIR/scripts" "$DIR/package.json" "$STAGE/"
 cp "$DIR"/data/*.json "$STAGE/data/"
-cp -r "$DIR/data/history" "$STAGE/data/"
 
-# ingest 只依赖 node 内置模块，不需要 npm install
-log "抓取数据"
-if ! timeout "$INGEST_TIMEOUT" docker run --rm --user "$(id -u):$(id -g)" \
-    -v "$STAGE:/app" -w /app "$NODE_IMAGE" node scripts/ingest.mjs; then
-  log "抓取失败或超时，线上数据未改动"
-  exit 1
-fi
+case "$MODE" in
+  ingest)
+    if [ ! -d "$DIR/data/history" ]; then
+      log "缺少 data/history/：IMP 会退化成纯统计栏、实验室数据集会被跳过。先同步一次 history 再跑"
+      exit 1
+    fi
+    cp -r "$DIR/data/history" "$STAGE/data/"
+    log "抓取数据（stats.nba.com）"
+    # ingest 只依赖 node 内置模块，不需要 npm install
+    if ! timeout "$INGEST_TIMEOUT" docker run --rm --user "$(id -u):$(id -g)" \
+        -v "$STAGE:/app" -w /app "$NODE_IMAGE" node scripts/ingest.mjs; then
+      log "抓取失败或超时，线上数据未改动"
+      exit 1
+    fi
+    ;;
+  espn)
+    log "ESPN 补比分 / Elo / 伤病 / 盘口"
+    if ! timeout 600 docker run --rm --user "$(id -u):$(id -g)" \
+        -v "$STAGE:/app" -w /app "$NODE_IMAGE" node scripts/espn-refresh.mjs; then
+      log "ESPN 刷新失败，线上数据未改动"
+      exit 1
+    fi
+    ;;
+  incoming)
+    if ! ls "$DIR"/incoming/*.json >/dev/null 2>&1; then
+      log "incoming/ 里没有数据"
+      exit 1
+    fi
+    log "使用推送来的全量数据"
+    cp "$DIR"/incoming/*.json "$STAGE/data/"
+    # 推送的数据可能比线上已有的比分旧（抓取之后 ESPN 又补了几场），再补一次。
+    # 补不上不要紧，全量数据本身是完整的
+    timeout 600 docker run --rm --user "$(id -u):$(id -g)" \
+      -v "$STAGE:/app" -w /app "$NODE_IMAGE" node scripts/espn-refresh.mjs \
+      || log "ESPN 补比分失败，只用推送的数据"
+    ;;
+esac
 
 log "数据体检"
-docker run --rm --user "$(id -u):$(id -g)" -v "$STAGE:/app" -w /app "$NODE_IMAGE" \
-  node scripts/check-data.mjs
-docker run --rm --user "$(id -u):$(id -g)" -v "$STAGE:/app" -w /app "$NODE_IMAGE" node -e '
+node_in node scripts/check-data.mjs
+node_in node -e '
   const fs = require("fs");
   const j = (f) => JSON.parse(fs.readFileSync("data/" + f, "utf8"));
   const teams = j("teams.json"), sched = j("schedule.json"), meta = j("meta.json");
@@ -66,13 +110,15 @@ docker run --rm --user "$(id -u):$(id -g)" -v "$STAGE:/app" -w /app "$NODE_IMAGE
   const bad = [];
   if (teams.length !== 30) bad.push(`球队 ${teams.length} 支`);
   if (!games.length) bad.push("赛程为空");
-  if (!(age < 3600e3)) bad.push(`meta.fetchedAt=${meta.fetchedAt} 不是刚写的`);
+  // 推送的数据从抓取到这里要经过上传，给 3 小时余量
+  if (!(age < 3 * 3600e3)) bad.push(`meta.fetchedAt=${meta.fetchedAt} 不是新写的`);
   if (bad.length) { console.error("体检不过：" + bad.join("；")); process.exit(1); }
-  console.log(`  ${meta.targetSeason} 已吸收 ${meta.gamesPlayedCurrent} 场，截至 ${meta.lastResultDate}`);
+  console.log(`  ${meta.targetSeason} 已结束 ${meta.gamesPlayedCurrent} 场，截至 ${meta.lastResultDate}`
+    + `；统计数据 ${String(meta.statsFetchedAt ?? meta.fetchedAt).slice(0, 10)}`);
 '
 
 if [ "$FETCH_ONLY" = 1 ]; then
-  log "--fetch-only：抓取与体检通过，未部署"
+  log "--fetch-only：取数据与体检通过，未部署"
   exit 0
 fi
 
@@ -94,12 +140,13 @@ healthy() {
 }
 
 cd "$DIR"
-if docker compose build && docker compose up -d && healthy; then
+if docker compose build -q && docker compose up -d && healthy; then
+  [ "$MODE" = incoming ] && rm -f "$DIR"/incoming/*.json
   log "完成"
   exit 0
 fi
 
 log "新版本不健康，回滚到 data-prev/"
 cp "$DIR"/data-prev/*.json "$DIR/data/"
-docker compose build && docker compose up -d && healthy && log "已回滚" || log "回滚后仍不健康，需要人工处理"
+docker compose build -q && docker compose up -d && healthy && log "已回滚" || log "回滚后仍不健康，需要人工处理"
 exit 1

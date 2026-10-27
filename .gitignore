@@ -16,4 +16,5 @@ data/raw/
 *.log
 # deploy/refresh.sh 的回滚快照与锁
 data-prev/
+incoming/
 .refresh.lock
