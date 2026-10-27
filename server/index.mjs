@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { readJson, DATA_DIR } from './nbaClient.mjs';
 import * as db from './db.mjs';
 import * as lab from './lab.mjs';
+import { liveRosterRankings } from './liveRosterRankings.mjs';
 import {
   initPool, run as runInPool, poolAvailable, cached, clearCaches,
   cacheStats, pendingCount, sendCached,
@@ -444,8 +445,14 @@ app.post('/api/picks', requireAuth, rateLimit({ max: 30 }), wrap((req, res) => {
 app.get('/api/rankings', wrap(async (req, res) => {
   const params = pickParams(req.query);
   const out = outFromQuery(req);
-  const key = JSON.stringify([params, out]);
-  res.json(await cached('rankings', key, () => powerRankings(getModel(params), out).map(showRanking), { max: 40 }));
+  const roster = req.query.rankingModel === 'roster';
+  const availability = req.query.availability ?? 'reported';
+  if (roster && !['reported', 'healthy'].includes(availability)) return res.status(400).json({ error: '未知的阵容可用性模式' });
+  const key = JSON.stringify([params, out, roster, availability]);
+  res.json(await cached('rankings', key, () => {
+    const legacy = powerRankings(getModel(params), out).map(showRanking);
+    return roster ? liveRosterRankings(store, legacy, { out, availability }) : legacy;
+  }, { max: 40 }));
 }));
 
 app.post('/api/predict', wrap((req, res) => {

@@ -9,11 +9,18 @@ import {
   bjToday, bjDateOf, bjTimeOf, shiftDate,
 } from '../lib/format.js';
 
+const MINUTES_SOURCE_CN = { 'current+prior': '本季→上季收缩', 'current+population': '本季→均值收缩', 'prior-season': '上季轮换' };
+const IMPACT_SOURCE_CN = { 'current-blended': '本季混合', 'prior-season': '上季', 'estimated-shrunk-spm': '小样本收缩估计',
+  'estimated-rookie-prior': '新秀先验', 'estimated-population-prior': '低分钟人群先验', 'replacement-prior': '替补级先验' };
+
 export default function Dashboard() {
   const { meta, teamById, out, params, setAccent } = useApp();
   const [data, setData] = useState({ loading: true });
+  const [rankingModel, setRankingModel] = useState('roster');
+  const [availability, setAvailability] = useState('reported');
+  const [selectedTeam, setSelectedTeam] = useState(null);
   // 实力榜的分组方式：全联盟 / 东西部 / 六赛区
-  const [groupBy, setGroupBy] = useState('conference');
+  const [groupBy, setGroupBy] = useState('league');
 
   useEffect(() => { setAccent(null); }, [setAccent]);
 
@@ -21,26 +28,32 @@ export default function Dashboard() {
     let alive = true;
     setData((d) => ({ ...d, loading: true }));
     Promise.all([
-      api.rankings(withOut(params, out)),
+      api.rankings(withOut({ ...params, rankingModel, availability }, out)),
       // 今日比赛预览：从昨天（美东）起取一批，挑出北京时间今天或之后的第一个比赛日
       api.schedule(withOut({ ...params, type: 'all', from: shiftDate(bjToday(), -1), limit: 40 }, out)),
     ])
       .then(([rankings, schedule]) => alive && setData({ loading: false, rankings, schedule }))
       .catch((error) => alive && setData({ loading: false, error }));
     return () => { alive = false; };
-  }, [params, out, meta]);
+  }, [params, out, meta, rankingModel, availability]);
 
   if (data.loading) return <Loading />;
   if (data.error) return <ErrorBox error={data.error} />;
 
   const { rankings } = data;
+  // 按已加载的数据判断模式：切换开关后、重新请求完成前，rankings 仍是旧模式的行
+  const rosterMode = rankings[0]?.model === 'roster';
+  const detail = rosterMode ? rankings.find((r) => r.teamId === selectedTeam) : null;
+  const validRankings = rankings.filter((r) => r.total != null);
+  const selectTeam = (r) => rosterMode ? setSelectedTeam(r.teamId) : go(`team/${r.teamId}`);
   const upcomingGames = data.schedule.games
     .filter((g) => g.type !== 'preseason' && g.homeScore == null && bjDateOf(g.dateTimeUtc) >= bjToday());
   const nextDay = upcomingGames[0] ? bjDateOf(upcomingGames[0].dateTimeUtc) : null;
   const dayGames = upcomingGames.filter((g) => bjDateOf(g.dateTimeUtc) === nextDay);
-  const east = rankings.filter((t) => t.conference === 'East');
-  const west = rankings.filter((t) => t.conference === 'West');
-  const mostImproved = [...rankings].sort((a, b) => b.turnoverAdj - a.turnoverAdj)[0];
+  const east = validRankings.filter((t) => t.conference === 'East');
+  const west = validRankings.filter((t) => t.conference === 'West');
+  const improvementField = rosterMode ? 'modelDelta' : 'turnoverAdj';
+  const mostImproved = [...validRankings].sort((a, b) => b[improvementField] - a[improvementField])[0];
 
   const grouped = groupBy !== 'league';
 
@@ -48,12 +61,12 @@ export default function Dashboard() {
     {
       key: 'rank', label: '#', width: 38,
       // 分组时这一列是组内名次，联盟名次单独一列，方便跨组比较
-      render: (r) => <span className="dim">{grouped ? r.groupRank : r.rank}</span>,
+      render: (r) => <span className="dim">{(grouped ? r.groupRank : r.rank) ?? '—'}</span>,
       value: (r) => (grouped ? r.groupRank : r.rank),
     },
     {
       key: 'cn', label: '球队', align: 'left', width: 196,
-      render: (r) => <TeamCell team={teamById.get(r.teamId)} onClick={() => go(`team/${r.teamId}`)} />,
+      render: (r) => <TeamCell team={teamById.get(r.teamId)} onClick={() => selectTeam(r)} />,
     },
     ...(grouped
       ? [{
@@ -66,23 +79,28 @@ export default function Dashboard() {
         { key: 'division', label: '赛区', width: 62, render: (r) => <span className="dim">{DIV_CN[r.division] ?? r.division}</span> },
       ]),
     {
-      key: "total", label: <Th abbr="RTG" cn="综合实力" />, title: "综合实力 RTG — 相对联盟平均的每场净胜分预期", width: 92,
+      key: "total", label: <Th abbr="RTG" cn={rosterMode ? '阵容估计' : '综合实力'} />, title: rosterMode ? '当前阵容 IMP × 预计分钟；相对健康联盟平均的每场分差，实验估计' : '综合实力 RTG — 相对联盟平均的每场净胜分预期', width: 92,
       render: (r) => <b className={signClass(r.total)}>{signed(r.total, 2)}</b>,
     },
-    { key: "elo", label: <Th abbr="ELO" cn="评级" />, title: "Elo 评级", width: 66, render: (r) => <span className="mono">{num(r.elo, 0)}</span> },
+    ...(rosterMode ? [
+      { key: 'legacyRank', label: '旧名次', width: 64, title: '旧 Elo 综合模型的联盟名次，仅供对照', render: (r) => <span className="dim">{r.legacyRank}</span> },
+      { key: 'legacyTotal', label: <Th abbr="OLD" cn="旧模型分" />, width: 82, render: (r) => <span className="dim">{signed(r.legacyTotal, 2)}</span> },
+      { key: 'coverage', label: 'IMP 覆盖', width: 82, title: '预计240分钟中使用实测IMP（本季混合或上季）的占比；其余为样本收缩估计（未验证）', value: (r) => r.rosterProjection?.knownImpactPct,
+        render: (r) => r.rosterProjection?.error ? <span className="neg" title={r.rosterProjection.error}>数据不足</span> : <span className="dim">{num(r.rosterProjection.knownImpactPct * 100, 0)}%</span> },
+    ] : [{ key: "elo", label: <Th abbr="ELO" cn="评级" />, title: "Elo 评级", width: 66, render: (r) => <span className="mono">{num(r.elo, 0)}</span> }]),
     {
       key: "netRtg", label: <Th abbr="NET" cn="净效率" />, title: "净效率 NET — 本赛季至今百回合净效率", width: 82,
       render: (r) => <span className={signClass(r.netRtg)}>{signed(r.netRtg)}</span>,
     },
-    {
+    ...(!rosterMode ? [{
       key: "turnoverAdj", label: <Th abbr="ROS" cn="阵容更迭" />, width: 82,
       title: "阵容更迭 ROS — 转会、签约、离队带来的实力变化",
       render: (r) => <span className={signClass(r.turnoverAdj)}>{signed(r.turnoverAdj, 2)}</span>,
-    },
+    }] : []),
     {
-      key: "rosterAdj", label: <Th abbr="OUT" cn="缺阵修正" />, title: "缺阵修正 OUT — 勾掉的球员对实力的影响", width: 82,
+      key: "rosterAdj", label: <Th abbr="OUT" cn="缺阵修正" />, title: rosterMode ? '相对全员健康阵容的变化，缺阵分钟由队友顶上' : '缺阵修正 OUT — 勾掉的球员对实力的影响', width: 82,
       render: (r) => (r.rosterAdj
-        ? <span className="neg">{signed(r.rosterAdj, 2)}</span>
+        ? <span className={signClass(r.rosterAdj)}>{signed(r.rosterAdj, 2)}</span>
         : <span className="dim">—</span>),
     },
     { key: "offRtg", label: <Th abbr="ORtg" cn="进攻" />, title: "进攻效率 ORtg", width: 64, render: (r) => num(r.offRtg) },
@@ -99,22 +117,22 @@ export default function Dashboard() {
       <div className="page-head">
         <h1>{meta.targetSeason} 赛季总览</h1>
         <p>
-          以 {meta.priorSeason} 赛季 {meta.gamesPlayedPrior} 场比赛结果为基准建立的球队实力评级，
-          用于预测 {meta.targetSeason} 赛季 {meta.counts.games} 场赛程。
+          {rosterMode ? '按当前名单、球员 IMP 与预计上场分钟重算实力；下方可切换旧 Elo 模型对照。'
+            : `以 ${meta.priorSeason} 赛季比赛为基准，持续吸收本赛季赛果的 Elo 实力评级。`}
         </p>
       </div>
 
       <div className="grid cols-4" style={{ marginBottom: 14 }}>
-        <LeaderTile label="联盟最强" row={rankings[0]} teamById={teamById} />
+        <LeaderTile label={rosterMode ? '阵容估计最高' : '联盟最强'} row={validRankings[0]} teamById={teamById} />
         <LeaderTile label="东部领头" row={east[0]} teamById={teamById} />
         <LeaderTile label="西部领头" row={west[0]} teamById={teamById} />
-        <LeaderTile label="夏窗补强最多" row={mostImproved} teamById={teamById} field="turnoverAdj" />
+        <LeaderTile label={rosterMode ? '相对旧模型上调最多' : '夏窗补强最多'} row={mostImproved} teamById={teamById} field={improvementField} />
       </div>
 
       <div className="card">
         <h2>
           球队实力榜
-          <span className="sub">综合 Elo、净效率、阵容更迭与当前缺阵</span>
+          <span className="sub">{rosterMode ? '当前阵容 · 实验估计' : '旧 Elo 综合模型'}</span>
           <span style={{ marginLeft: 'auto' }}>
             <Segmented
               value={groupBy}
@@ -128,13 +146,29 @@ export default function Dashboard() {
           </span>
         </h2>
 
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+          <Segmented value={rankingModel} onChange={setRankingModel} options={[
+            { value: 'roster', label: '当前阵容（实验）' }, { value: 'elo', label: '旧 Elo 对照' },
+          ]} />
+          {rosterMode && <Segmented value={availability} onChange={setAvailability} options={[
+            { value: 'reported', label: '计入已报缺阵' }, { value: 'healthy', label: '忽略已报伤病' },
+          ]} />}
+        </div>
+        {rosterMode && <p className="note" style={{ marginBottom: 14 }}>
+          现役名单按本季场均分钟分配 240 分钟；尚未出场者沿用上季轮换分钟。IMP 缺失者用替补级 −0.5 先验，覆盖率见表。
+          球员 IMP 含历史信息，但球队旧 Elo 不参与本表评分。点击球队查看分钟与球员贡献。<br />
+          这是未经真实历史回测验证的阵容估计；比赛预测与赛季模拟仍使用原 Elo 模型。
+          手动缺阵始终保留。统计时间：{meta.statsFetchedAt ?? meta.fetchedAt}；伤病时间：{rankings[0]?.rosterProjection?.injuryFetchedAt ?? '未知'}。
+        </p>}
+
         {groupBy === 'league' ? (
           <DataTable
+            key={`${rankingModel}-${availability}`}
             columns={cols}
             rows={rankings}
             initialSort={{ key: 'total', dir: 'desc' }}
             rowKey={(r) => r.teamId}
-            onRowClick={(r) => go(`team/${r.teamId}`)}
+            onRowClick={selectTeam}
           />
         ) : (
           groupsOf(rankings, groupBy).map(([label, rows]) => (
@@ -144,16 +178,40 @@ export default function Dashboard() {
                 <span>{rows.length} 队 · 最强 {rows[0].cn} {signed(rows[0].total, 1)}</span>
               </div>
               <DataTable
+                key={`${rankingModel}-${availability}-${label}`}
                 columns={cols}
                 rows={rows}
                 initialSort={{ key: 'total', dir: 'desc' }}
                 rowKey={(r) => r.teamId}
-                onRowClick={(r) => go(`team/${r.teamId}`)}
+                onRowClick={selectTeam}
               />
             </div>
           ))
         )}
       </div>
+
+      {detail && <div className="card">
+        <h2>{detail.cn} · 预计轮换
+          <span className="sub">阵容 {signed(detail.total, 2)} · 旧模型 {signed(detail.legacyTotal, 2)} 分/场</span>
+          <button className="btn" style={{ marginLeft: 'auto' }} onClick={() => go(`team/${detail.teamId}`)}>球队详情 ›</button>
+        </h2>
+        {detail.rosterProjection.error ? <p className="note">{detail.rosterProjection.error}</p> : <>
+          <p className="note">IMP 来源（占预计分钟）：{Object.entries(detail.rosterProjection.impactSourceShares ?? {})
+            .map(([k, v]) => `${IMPACT_SOURCE_CN[k] ?? k} ${num(v * 100, 0)}%`).join('、')}。估计值未经回测验证。</p>
+          <p className="note">预计总分钟 240；{availability === 'reported' ? '已报缺阵和手动勾选' : '手动勾选'}球员的分钟由其余名单球员分担。
+            分钟是按现有角色归一化的估计，未加入新秀成长或阵容磨合假设。</p>
+          <DataTable rows={detail.rosterProjection.rotation} rowKey={(p) => p.playerId}
+            initialSort={{ key: 'minutes', dir: 'desc' }} maxHeight={360} columns={[
+              { key: 'name', label: '球员', align: 'left' },
+              { key: 'minutes', label: '预计分钟', render: (p) => num(p.minutes, 1) },
+              { key: 'impact', label: 'IMP', render: (p) => <span title={p.impactPrior?.source}>{signed(p.impact, 2)}{p.fromPrior ? '（估计）' : ''}</span> },
+              { key: 'contribution', label: '贡献 / 百回合', value: (p) => p.impact * p.minutes / 48,
+                render: (p) => signed(p.impact * p.minutes / 48, 2) },
+              { key: 'minutesSource', label: '分钟依据', render: (p) => p.availability === 0 ? '缺阵'
+                : MINUTES_SOURCE_CN[p.minutesSource] ?? '替补分配' },
+            ]} />
+        </>}
+      </div>}
 
       {dayGames.length > 0 && (
         <div className="card">
@@ -171,7 +229,7 @@ export default function Dashboard() {
       )}
 
       <div className="card plain">
-        <h2>模型说明</h2>
+        <h2>{rosterMode ? '旧 Elo 对照模型说明（比赛预测与模拟）' : '模型说明'}</h2>
         <p className="note">
           <b>综合实力</b> = Elo 折算分 × {num(meta.defaultParams.wElo, 2)} + 净效率折算分 × {num(meta.defaultParams.wNet, 2)}
           + 阵容更迭 + 缺阵修正，单位是相对联盟平均的每场净胜分。<br />
@@ -214,8 +272,8 @@ function groupsOf(rankings, mode) {
       k,
       map.get(k)
         .slice()
-        .sort((a, b) => b.total - a.total)
-        .map((t, i) => ({ ...t, groupRank: i + 1 })),
+        .sort((a, b) => (b.total ?? -Infinity) - (a.total ?? -Infinity))
+        .map((t, i) => ({ ...t, groupRank: t.total == null ? null : i + 1 })),
     ]);
 }
 

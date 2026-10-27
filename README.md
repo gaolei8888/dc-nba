@@ -879,7 +879,7 @@ data/                   抓取产物（已 gitignore）
 | `GET /api/players?teamId=&onRoster=1` | 球员数据，附 `outCostPts`（缺阵影响）与 `injury`（伤病状态） |
 | `GET /api/injuries` | ESPN 伤病名单快照 |
 | `GET /api/schedule?type=&teamId=&from=&to=&limit=` | 赛程（默认带预测，`predict=0` 关闭） |
-| `GET /api/rankings` | 实力榜 |
+| `GET /api/rankings` | 旧 Elo 实力榜；`rankingModel=roster` 返回实验阵容排名 |
 | `POST /api/predict` | 单场预测 `{homeId, awayId, gameId?, neutral?, out?, params?}` |
 | `POST /api/simulate` | 赛季模拟 `{sims?, out?, params?, seed?}` |
 | `POST /api/lab/market` | 模型 vs 博彩收盘盘口的对账结果 |
@@ -892,6 +892,12 @@ data/                   抓取产物（已 gitignore）
 
 GET 接口可用 `?out={"teamId":[playerId]}`（JSON 字符串）传入缺阵名单，
 以及 `?homeAdv=3&wElo=0.6&turnoverWeight=0&assumeHealthy=1` 等参数覆盖。
+
+本地总览默认展示「当前阵容（实验）」：只取现役名单，优先按本季场均分钟、否则按上季轮换分钟分配全队 240 分钟，
+再汇总球员 IMP，相对完整联盟的健康阵容均值计算评分。预计分钟 = 出场时场均 × 出场率，两部分分别收缩；本季 IMP 按 K=38 场收缩。
+缺失 IMP 的球员用统计栏 SPM 估计（新秀先验 −0.67），标为「未验证」；常数由 `node scripts/roster-shrinkage.mjs` 拟合。表中显示覆盖率；点击球队可核对分钟和贡献。
+`rankingModel=roster&availability=reported` 计入快照中确定缺阵球员，`availability=healthy` 忽略已报伤病；两种模式均保留手动缺阵。
+可切换「旧 Elo 对照」，比赛预测与模拟仍使用原模型。阵容排名尚未经真实历史回测验证，不能据此宣称预测更准。
 
 ## 数据更新
 
