@@ -49,10 +49,10 @@ export function expand(rows) {
     .map((g) => {
       const home = g.s.find((x) => x[2] === 1);
       const away = g.s.find((x) => x[2] === 0);
-      // 中立场两边都标客场，主客顺序仅为占位
-      const [a, b] = g.s;
-      const H = home ?? a;
-      const A = away ?? b;
+      // 中立场两边都标客场，主客顺序仅为占位；缺的一边取「另一行」，
+      // 否则 away 和 H 都会落到第一行，变成「同一队对自己」
+      const H = home ?? g.s.find((x) => x !== away);
+      const A = away ?? g.s.find((x) => x !== H);
       if (!H || !A) return null;
       // o = [主队让分, 总分, 主队美式赔率, 客队美式赔率]，抓过盘口才有
       const [spread, total, homeMl, awayMl] = g.o ?? [];

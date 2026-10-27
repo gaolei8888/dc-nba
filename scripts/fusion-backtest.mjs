@@ -38,8 +38,7 @@ const GRID = {
 const ALL = Object.values(GRID).flat();
 
 const dataset = JSON.parse(fs.readFileSync(new URL('../data/backtest.json', import.meta.url)));
-// backtest.json 在 2024-25、2025-26 各有几行「同一队对自己」的坏数据（中立场、平局、无盘口），不计分
-const rowsBy = Object.fromEntries(SEASONS.map((s) => [s, seasonRows(dataset, s, P, SPECS).filter((r) => r.homeId !== r.awayId)]));
+const rowsBy = Object.fromEntries(SEASONS.map((s) => [s, seasonRows(dataset, s, P, SPECS)]));
 const train = (held) => SEASONS.filter((s) => !held.includes(s)).flatMap((s) => rowsBy[s]);
 
 const fmt = (v, d = 4) => (v === undefined || Number.isNaN(v) ? '—' : v.toFixed(d));
