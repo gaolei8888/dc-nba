@@ -22,7 +22,9 @@ export default function Players() {
   const [q, setQ] = useState('');
   const [teamFilter, setTeamFilter] = useState('all');
   const [posFilter, setPosFilter] = useState('all');
-  const [minGp, setMinGp] = useState(20);
+  // 默认门槛随赛季进度：本季取出场最少球队的已赛场次（封顶 20），上季数据仍为 20；用户改过就以用户为准
+  const [userMinGp, setMinGp] = useState(null);
+  const minGp = userMinGp ?? (meta.displayCurrent ? Math.min(20, ...teams.map((t) => t.wins + t.losses)) : 20);
   const [rosterOnly, setRosterOnly] = useState(true);
 
   useEffect(() => { setAccent(null); }, [setAccent]);
