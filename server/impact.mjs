@@ -270,8 +270,12 @@ export function fit(samples, lambda) {
  * 拿去套一个打了 1 场 2.7 分钟的球员会得到 −42.67 分/百回合——
  * 那不是评价，那是线性外推的产物。训练门槛与使用门槛必须是同一个。
  */
-export function apply(model, p) {
-  if ((p.gp ?? 0) < MIN_GP || (p.min ?? 0) < MIN_MPG) return null;
+/**
+ * @param {number} opts.minGp 出场门槛。默认是训练门槛；本赛季的混合 IMP 会放宽它，
+ *   因为那时小样本的噪声由上赛季的先验兜底（见 ingest.mjs 的 currentImpact）。
+ */
+export function apply(model, p, { minGp = MIN_GP } = {}) {
+  if ((p.gp ?? 0) < minGp || (p.min ?? 0) < MIN_MPG) return null;
   const f = features(p);
   if (!f) return null;
   let s = model.intercept;

@@ -12,7 +12,7 @@ import { TEAM_META, POS_CN } from '../server/teamMeta.mjs';
 import { fetchInjuries } from '../server/espnClient.mjs';
 import { fetchUpcomingOdds } from '../server/oddsClient.mjs';
 import { buildBacktestDataset } from '../server/dataset.mjs';
-import { impactOf } from '../server/impact.mjs';
+import { impactOf, apply as spmOf, MIN_GP } from '../server/impact.mjs';
 import { decayedApm } from '../server/rapm.mjs';
 import { replaySeasonPicks } from '../server/replay.mjs';
 import {
@@ -515,11 +515,28 @@ const pick = (o, keys) => Object.fromEntries(keys.map((k) => [k, o[k]]));
  * 复用 buildTeams / buildPlayers 的字段映射，只取其中的数据部分——
  * 身份类字段（priorTeamId、onRoster）在这里没有意义，交给顶层那份。
  *
- * IMP 也按本赛季数据重算，但只用统计栏那一半：实测 APM 来自往季的阵容数据，
- * 混进来就不是「本赛季」了。训练门槛（≥20 场、场均 ≥10 分钟）照旧，
- * 所以赛季初几乎人人为空——这是对的，三五场的样本不该给分。
+ * IMP 是例外：它要历史数据，见 currentImpact。
  */
-async function fetchCurrentSeason(teams, rosters, tricodeById, impactModel) {
+/**
+ * 本赛季 IMP = 上赛季 IMP 作先验 + 本赛季统计栏模型，按出场数加权：
+ *
+ *   IMP = (K × 上赛季 IMP + 本季场数 × 本季 SPM) / (K + 本季场数)，K = 20 场
+ *
+ * 上赛季 IMP 本身含近 3 季衰减 APM，所以历史数据完整保留。K=20 的含义是
+ * 本季打满 20 场时两季各占一半——这个值**没有验证过**，是按训练门槛取的。
+ * 上赛季没有 IMP 的人（新秀等）没有先验兜底，仍要本季满 20 场才给分。
+ */
+const IMP_PRIOR_GAMES = 20;
+function currentImpact(model, c, prior) {
+  const gp = c.gp ?? 0;
+  const cur = spmOf(model, c, { minGp: prior === null ? MIN_GP : 1 });
+  if (prior === null) return cur;
+  if (cur === null) return prior;
+  return Math.round(((IMP_PRIOR_GAMES * prior + gp * cur) / (IMP_PRIOR_GAMES + gp)) * 100) / 100;
+}
+
+async function fetchCurrentSeason(teams, rosters, tricodeById, impactModel, priorPlayers) {
+  const priorImp = new Map(priorPlayers.map((p) => [p.playerId, p.impact ?? null]));
   const standings = await fetchStandings(TARGET_SEASON);
   const teamStats = await fetchTeamStats(TARGET_SEASON);
   const curTeams = new Map(buildTeams(teamStats, standings, tricodeById)
@@ -530,7 +547,7 @@ async function fetchCurrentSeason(teams, rosters, tricodeById, impactModel) {
   for (const p of buildPlayers(playerStats, rosters, teams)) {
     if (!(p.gp > 0)) continue;
     const c = pick(p, CUR_PLAYER_KEYS);
-    c.impact = impactModel ? impactOf(impactModel, c, null) : null;
+    c.impact = impactModel ? currentImpact(impactModel, c, priorImp.get(p.playerId) ?? null) : null;
     curPlayers.set(p.playerId, c);
   }
   return { teams: curTeams, players: curPlayers };
@@ -632,7 +649,7 @@ async function main() {
   // ---- 本赛季至今的数据：只给界面展示，挂在 t.cur / p.cur 上。
   // 上面那些顶层字段是上赛季的，预测引擎靠它们做基准，不能被覆盖——
   // 服务端在展示接口里用 cur 替换后再返回（server/index.mjs 的 showTeam / showPlayer）。
-  const cur = currentGames.length ? await fetchCurrentSeason(teams, rosters, tricodeById, impactModel) : null;
+  const cur = currentGames.length ? await fetchCurrentSeason(teams, rosters, tricodeById, impactModel, players) : null;
   if (cur) {
     for (const t of teams) t.cur = cur.teams.get(t.teamId) ?? null;
     for (const p of players) p.cur = cur.players.get(p.playerId) ?? null;
