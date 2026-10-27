@@ -143,6 +143,7 @@ export function replay(dataset, seasons, opts = {}) {
 
       records.push({
         season,
+        gameId: g.gameId,
         date: g.date,
         homeId: g.home.teamId,
         awayId: g.away.teamId,

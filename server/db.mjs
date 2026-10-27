@@ -61,6 +61,84 @@ CREATE INDEX IF NOT EXISTS idx_picks_mode   ON picks(mode);
 `;
 
 /**
+ * 模拟投注前向账本（见 server/ledger.mjs）。**只追加**，约束写在库里而不是只靠代码自觉：
+ *   - 同一 (game_id, rule, book) 再插入一律忽略——BEFORE INSERT 触发器 RAISE(IGNORE)，
+ *     连 INSERT OR REPLACE 也绕不过去（REPLACE 的隐式删除默认不触发 DELETE 触发器）；
+ *   - 不能删除；
+ *   - 记录时的字段（价格、概率、方向……）任何时候都不能改；
+ *   - 结算字段只能从空写成值一次；收盘价/CLV 同样只写一次（可以比比分晚到）。
+ */
+const FROZEN = ['game_id', 'rule', 'book', 'captured_at', 'event_id', 'game_date', 'tipoff_utc',
+  'home_id', 'away_id', 'model_p_home', 'home_elo', 'away_elo', 'home_ml', 'away_ml', 'price_at',
+  'open_home_ml', 'open_away_ml', 'book_p_home', 'edge', 'threshold', 'bet', 'side', 'bet_ml'];
+const changed = (cols) => cols.map((c) => `NEW.${c} IS NOT OLD.${c}`).join(' OR ');
+export const LEDGER_SCHEMA = `
+CREATE TABLE IF NOT EXISTS paper_bets (
+  game_id       TEXT NOT NULL,
+  rule          TEXT NOT NULL,
+  book          TEXT NOT NULL,
+  captured_at   TEXT NOT NULL,
+  event_id      TEXT,
+  game_date     TEXT NOT NULL,
+  tipoff_utc    TEXT,
+  home_id       INTEGER NOT NULL,
+  away_id       INTEGER NOT NULL,
+  model_p_home  REAL NOT NULL,
+  home_elo      REAL,
+  away_elo      REAL,
+  home_ml       INTEGER NOT NULL,
+  away_ml       INTEGER NOT NULL,
+  price_at      TEXT NOT NULL,
+  open_home_ml  INTEGER,
+  open_away_ml  INTEGER,
+  book_p_home   REAL NOT NULL,
+  edge          REAL NOT NULL,
+  threshold     REAL NOT NULL,
+  bet           INTEGER NOT NULL,
+  side          TEXT,
+  bet_ml        INTEGER,
+  home_score    INTEGER,
+  away_score    INTEGER,
+  won           INTEGER,
+  profit        REAL,
+  settled_at    TEXT,
+  close_home_ml INTEGER,
+  close_away_ml INTEGER,
+  clv           REAL,
+  PRIMARY KEY (game_id, rule, book)
+);
+CREATE TRIGGER IF NOT EXISTS paper_bets_dup BEFORE INSERT ON paper_bets
+WHEN EXISTS (SELECT 1 FROM paper_bets WHERE game_id = NEW.game_id AND rule = NEW.rule AND book = NEW.book)
+BEGIN SELECT RAISE(IGNORE); END;
+CREATE TRIGGER IF NOT EXISTS paper_bets_no_delete BEFORE DELETE ON paper_bets
+BEGIN SELECT RAISE(ABORT, 'paper_bets 只追加：不能删除'); END;
+CREATE TRIGGER IF NOT EXISTS paper_bets_frozen BEFORE UPDATE ON paper_bets
+WHEN ${changed(FROZEN)}
+  OR (OLD.settled_at IS NOT NULL AND (${changed(['home_score', 'away_score', 'won', 'profit', 'settled_at'])}))
+  OR (OLD.close_home_ml IS NOT NULL AND (${changed(['close_home_ml', 'close_away_ml', 'clv'])}))
+BEGIN SELECT RAISE(ABORT, 'paper_bets 只追加：已记录的字段不能改'); END;
+`;
+
+/**
+ * 只为账本打开同一个库文件（不建排行榜的表）。和排行榜开关无关：
+ * 本地 ENABLE_LEADERBOARD=0 时也能用，默认 data/app.db；线上是 data-db/ 卷里那份。
+ * 失败返回 null 并打印原因，调用方据此降级。
+ */
+export function openLedger(dbPath = DB_PATH) {
+  try {
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+    const h = new DatabaseSync(dbPath);
+    h.exec('PRAGMA journal_mode = WAL');
+    h.exec('PRAGMA busy_timeout = 4000');
+    h.exec(LEDGER_SCHEMA);
+    return h;
+  } catch (e) {
+    console.warn(`模拟投注账本不可用: ${describeFailure(e)}`);
+    return null;
+  }
+}
+
+/**
  * 打开数据库。任何失败都不抛，只记原因并让 isEnabled() 返回 false。
  */
 export function initDb() {

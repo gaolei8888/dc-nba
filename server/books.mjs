@@ -26,6 +26,11 @@ export const BOOK_NAMES = {
   unibet: 'Unibet', espnbet: 'ESPN BET', betfair: 'Betfair', pointsbet: 'PointsBet',
   westgate: 'Westgate', titanbets: 'Titanbets', hollandcasino: 'Holland Casino',
 };
+/**
+ * 「挑最优价」只在美国持牌博彩商之间挑：Betfair 是英国交易所，Titanbets / Holland Casino
+ * 不是美国站点，用户在美国下不了，拿它们的价算最优价会虚高。逐家结果仍全部报告。
+ */
+export const US_BOOKS = ['draftkings', 'caesars', 'betmgm', 'betrivers', 'unibet', 'espnbet', 'pointsbet', 'westgate'];
 const AGGREGATOR = /accuscore|consensus|teamrankings|numberfire/i;
 
 /** 博彩商 key；Live Odds 与聚合源返回 null（剔除） */

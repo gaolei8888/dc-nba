@@ -136,6 +136,9 @@ function parseOddsItem(item) {
       ?? numOrNull(item.total?.over?.close?.line),
     homeMl: numOrNull(h.moneyLine) ?? mlOf('home', 'close') ?? mlOf('home', 'current'),
     awayMl: numOrNull(a.moneyLine) ?? mlOf('away', 'close') ?? mlOf('away', 'current'),
+    // 开盘价：前向账本记下来备查（不参与下注决定）
+    homeMlOpen: mlOf('home', 'open'),
+    awayMlOpen: mlOf('away', 'open'),
     overOdds: numOrNull(item.overOdds),
     underOdds: numOrNull(item.underOdds),
   };
@@ -179,7 +182,6 @@ export async function fetchScoreboard(date, httpOpts) {
       completed: !!c.status?.type?.completed,
       neutral: !!c.neutralSite,
       odds: parseOddsItem(pickBook(c.odds)),
-      rawOdds: c.odds ?? [],                     // 账本要看全部条目（只取 DK）
     });
   }
   return out;
