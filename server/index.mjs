@@ -453,6 +453,11 @@ app.post('/api/predict', wrap((req, res) => {
   if (!homeId || !awayId) return res.status(400).json({ error: '需要 homeId 与 awayId' });
   if (Number(homeId) === Number(awayId)) return res.status(400).json({ error: '两队不能相同' });
   const model = getModel(pickParams(params));
+  // 指定的是一场已结束、且主客与赛程一致的比赛：和赛程页同一口径——
+  // 用赛前 Elo 重算、不套用当前缺阵勾选，否则评级已吸收了这场结果，胜率是事后诸葛亮
+  const g = gameId ? store.schedule.games.find((x) => x.gameId === gameId) : null;
+  const done = g && g.preElo && g.homeScore != null
+    && g.homeId === Number(homeId) && g.awayId === Number(awayId);
   const prediction = predictGame(model, {
     homeId: Number(homeId),
     awayId: Number(awayId),
@@ -460,9 +465,15 @@ app.post('/api/predict', wrap((req, res) => {
     neutral: !!neutral,
     restHome: restHome === undefined || restHome === null ? undefined : Number(restHome),
     restAway: restAway === undefined || restAway === null ? undefined : Number(restAway),
-    out: normalizeOut(out),
+    out: done ? {} : normalizeOut(out),
+    preElo: done ? g.preElo : null,
   });
-  res.json({ ...prediction, market: marketOf(gameId ?? null, prediction) });
+  const result = done ? {
+    pregame: true,
+    actual: { homeScore: g.homeScore, awayScore: g.awayScore },
+    hit: (prediction.homeWinProb >= 0.5) === (g.homeScore > g.awayScore),
+  } : {};
+  res.json({ ...prediction, ...result, market: marketOf(gameId ?? null, prediction) });
 }));
 
 app.post('/api/simulate', wrap(async (req, res) => {

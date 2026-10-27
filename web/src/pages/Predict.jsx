@@ -197,6 +197,17 @@ export default function Predict({ initial = [] }) {
               </div>
             </div>
 
+            {result.pregame && (
+              <div className="note" style={{ marginTop: 14, textAlign: 'center' }}>
+                <span className="chip">终</span>{' '}
+                实际 <b className="mono">{away.abbr} {result.actual.awayScore} - {result.actual.homeScore} {home.abbr}</b>
+                {' · '}
+                <span className={`chip ${result.hit ? 'hit' : 'miss'}`}>{result.hit ? '✓ 赛前预测猜对胜方' : '✗ 赛前预测猜错胜方'}</span>
+                <br />
+                这场已经打完。下面是用开打前的评级重算的赛前预测（与赛程页一致），不套用缺阵勾选。
+              </div>
+            )}
+
             <div style={{ marginTop: 18 }}>
               <div className="split-bar">
                 <div style={{ width: `${result.awayWinProb * 100}%`, background: away.color, color: inkOn(away.color) }}>
