@@ -620,7 +620,7 @@ async function main() {
   // 再吸收本赛季已完成的比赛。回测显示这一步能把胜负准确率
   // 从 61.4% 提到 66.3%（2022-23~2025-26 共 4920 场）
   const currentGames = buildGames(currentLogRows);
-  const { final: eloStart } = currentGames.length
+  const { final: eloStart, history: eloHistory = [] } = currentGames.length
     ? computeElo(currentGames, { initial: eloPreseason })
     : { final: eloPreseason };
 
@@ -658,6 +658,7 @@ async function main() {
 
   // 赛程里已结束的比赛补上比分（赛程接口本身只给 "Final"，不带分数）
   const scoreById = new Map(currentGames.map((g) => [g.gameId, g]));
+  const preEloById = new Map(eloHistory.map((h) => [h.gameId, h]));
   for (const g of schedule.games) {
     const r = scoreById.get(g.gameId);
     if (!r) continue;
@@ -665,6 +666,12 @@ async function main() {
     const awaySide = homeSide === r.home ? r.away : r.home;
     g.homeScore = homeSide.pts;
     g.awayScore = awaySide.pts;
+    // 赛前 Elo，供服务端还原赛前预测（预测与实际对比）
+    const h = preEloById.get(g.gameId);
+    if (h) {
+      const flip = r.home.teamId !== g.homeId;
+      g.preElo = { home: r1(flip ? h.awayEloPre : h.homeEloPre), away: r1(flip ? h.homeEloPre : h.awayEloPre) };
+    }
   }
 
   const meta = {

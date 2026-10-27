@@ -60,6 +60,8 @@ export default function Schedule() {
   const games = data.games ?? [];
   const dateRange = games.length ? `${games[0].date} ~ ${games[games.length - 1].date}` : '—';
   const closeGames = games.filter((g) => Math.abs(g.prediction.homeWinProb - 0.5) < 0.06).length;
+  const finished = games.filter((g) => g.hit !== undefined);
+  const hits = finished.filter((g) => g.hit).length;
 
   return (
     <>
@@ -98,8 +100,13 @@ export default function Schedule() {
         </div>
       </div>
 
-      <div className="grid cols-4" style={{ marginBottom: 14 }}>
+      <div className="grid cols-5" style={{ marginBottom: 14 }}>
         <StatTile label="比赛场次" value={games.length} unit=" 场" />
+        <StatTile
+          label="赛前预测命中"
+          value={finished.length ? `${((hits / finished.length) * 100).toFixed(1)}%` : '—'}
+          hint={finished.length ? `已结束 ${finished.length} 场，猜对胜方 ${hits} 场` : '还没有已结束的比赛'}
+        />
         <StatTile label="比赛日" value={byDate.length} unit=" 天" />
         <StatTile label="日期范围" value={dateRange} />
         <StatTile label="势均力敌" value={closeGames} unit=" 场" hint="双方胜率差距在 12 个百分点以内" />
@@ -110,7 +117,7 @@ export default function Schedule() {
           <h2>
             赛程列表
             <span className="sub">
-              胜率为主队获胜概率
+              胜率为主队获胜概率；已结束的比赛显示赛前预测（用开打前的评级重算）
               {oddsAge && ` · 盘口 ${oddsCount} 场，${oddsAge.text}`}
             </span>
           </h2>
@@ -128,7 +135,8 @@ export default function Schedule() {
                   <th className="left" style={{ width: 184 }}>主队</th>
                   <th style={{ width: 58 }}>休息</th>
                   <th style={{ width: 122 }}>主队胜率</th>
-                  <th style={{ width: 94 }} title="已结束的比赛显示真实比分，悬停可看赛前预测">比分</th>
+                  <th style={{ width: 84 }}>预测比分</th>
+                  <th style={{ width: 118 }} title="已结束比赛的真实比分，以及赛前预测的胜方是否猜对">实际 / 命中</th>
                   <th style={{ width: 62 }}>总分</th>
                   <th style={{ width: 96 }} title="博彩让分（主队），以及模型与它的分歧">盘口 / 分歧</th>
                   <th className="left" style={{ width: 170 }}>场馆 / 备注</th>
@@ -155,14 +163,16 @@ export default function Schedule() {
                         </b>
                       </span>
                     </td>
+                    <td className={g.homeScore != null ? 'mono dim' : 'mono'}>
+                      {g.prediction.awayScore.toFixed(0)} - {g.prediction.homeScore.toFixed(0)}
+                    </td>
                     <td className="mono">
                       {g.homeScore != null ? (
-                        <span title={`赛前预测 ${g.prediction.awayScore.toFixed(0)} - ${g.prediction.homeScore.toFixed(0)}`}>
-                          <b>{g.awayScore} - {g.homeScore}</b> <span className="chip">终</span>
-                        </span>
-                      ) : (
-                        <>{g.prediction.awayScore.toFixed(0)} - {g.prediction.homeScore.toFixed(0)}</>
-                      )}
+                        <>
+                          <b>{g.awayScore} - {g.homeScore}</b>{' '}
+                          <span className={`chip ${g.hit ? 'hit' : 'miss'}`}>{g.hit ? '✓ 命中' : '✗ 未中'}</span>
+                        </>
+                      ) : <span className="dim">—</span>}
                     </td>
                     <td className="mono dim">{num(g.prediction.total, 0)}</td>
                     <td className="mono" style={{ fontSize: 10.5 }}>

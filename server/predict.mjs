@@ -261,9 +261,21 @@ export function teamStrength(model, teamId, outIds = [], rosterIds = null) {
  * @param {object} opts { homeId, awayId, gameId?, restHome?, restAway?, out?, neutral? }
  */
 export function predictGame(model, opts) {
-  const { homeId, awayId, gameId, neutral = false, out = {} } = opts;
+  const { homeId, awayId, gameId, neutral = false, out = {}, preElo = null } = opts;
   const sHome = teamStrength(model, homeId, out[homeId]);
   const sAway = teamStrength(model, awayId, out[awayId]);
+
+  // 已结束的比赛：把 Elo 那一项换回赛前值，得到「开打前模型会怎么说」。
+  // 当前评级已经吸收了这场的结果，直接用它判断对错是事后诸葛亮。
+  // 只换 Elo——名单、参数还是现在的，所以这是「用赛前评级重算」，不是当时存档的预测。
+  if (preElo) {
+    const w = model.params.wElo / (model.params.wElo + model.params.wNet || 1);
+    for (const [s, v] of [[sHome, preElo.home], [sAway, preElo.away]]) {
+      const pre = (v - ELO_BASE) / ELO_PER_POINT;
+      s.total = round(s.total + (pre - s.eloPts) * w, 2);
+      s.eloPts = round(pre, 2);
+    }
+  }
 
   const restRow = gameId ? model.restByGame.get(gameId) : null;
   const restHome = opts.restHome ?? restRow?.home ?? null;
@@ -322,8 +334,13 @@ export function predictSchedule(model, games, out = {}) {
   return games
     .filter((g) => g.homeId && g.awayId)
     .map((g) => {
+      // 已结束的比赛用赛前评级、且不套用缺阵勾选——勾选的是「现在」的伤病，
+      // 套到过去的比赛上就不是赛前预测了
+      const done = g.preElo && g.homeScore != null;
       const p = predictGame(model, {
-        homeId: g.homeId, awayId: g.awayId, gameId: g.gameId, neutral: g.neutral, out,
+        homeId: g.homeId, awayId: g.awayId, gameId: g.gameId, neutral: g.neutral,
+        out: done ? {} : out,
+        preElo: done ? g.preElo : null,
       });
       return {
         ...g,
@@ -335,7 +352,10 @@ export function predictSchedule(model, games, out = {}) {
           awayScore: p.awayScore,
           restHome: p.restHome,
           restAway: p.restAway,
+          pregame: !!done,
         },
+        // 赛前预测的胜方与实际胜方是否一致
+        ...(done ? { hit: (p.homeWinProb >= 0.5) === (g.homeScore > g.awayScore) } : {}),
       };
     });
 }

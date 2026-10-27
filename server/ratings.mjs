@@ -69,6 +69,8 @@ export function computeElo(games, { k = 20, initial = null } = {}) {
       gameId: g.gameId, date: g.date,
       home: g.home.abbr, away: g.away.abbr,
       homeElo: eh + shift, awayElo: ea - shift,
+      // 赛前评级：用来还原「当时的预测」，判断模型赛前猜没猜对
+      homeEloPre: eh, awayEloPre: ea,
     });
   }
   return { final: Object.fromEntries(elo), history };

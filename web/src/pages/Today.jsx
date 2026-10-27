@@ -12,8 +12,9 @@ import {
  * 两个容易说错的地方，界面上都要讲清楚：
  *   1. 数据是快照。评级、伤病、盘口都停在最后一次抓取的时刻，
  *      今天打完的比赛要等下次刷新才有比分。
- *   2. 已结束比赛上显示的胜率**不是赛前预测**——评级已经吸收了这场的结果，
- *      拿它判断「模型猜对没有」等于事后诸葛亮。赛前判断的对错去人机对赌页看。
+ *   2. 已结束比赛的预测是用**赛前评级**重算的（服务端换回开打前的 Elo）。
+ *      当前评级已经吸收了这场的结果，直接拿它判断对错是事后诸葛亮。
+ *      名单和参数还是现在的，所以这是「用赛前评级重算」，不是当时存档的预测。
  */
 export default function Today({ initial = [] }) {
   const { meta, teamById, injuries, out, params, setAccent } = useApp();
@@ -139,8 +140,8 @@ export default function Today({ initial = [] }) {
 
       <p className="note" style={{ marginTop: 14 }}>
         胜率与比分只把你在侧栏或球队页勾选的缺阵球员计入；伤病名单里的人默认<b>不计入</b>，
-        可以用侧栏「一键套用确定缺阵」。已结束比赛上的胜率是赛后评级算的（已吸收这场结果），
-        不能拿来判断模型赛前猜没猜对——赛前判断的对错见「人机对赌」。
+        可以用侧栏「一键套用确定缺阵」。已结束比赛的预测用开打前的评级重算，且不套用缺阵勾选，
+        所以「猜对胜方」反映的是赛前判断；但名单和模型参数是现在的，并不是当时存档的那一份。
       </p>
     </>
   );
@@ -183,7 +184,12 @@ function TodayCard({ game: g, teamById, outByTeam, out }) {
 
       <div className="note" style={{ marginTop: 8, lineHeight: 1.7 }}>
         {final ? (
-          <><span className="chip">终</span> 真实比分；上面的胜率是赛后评级，不是赛前预测</>
+          <>
+            <span className="chip">终</span> 赛前预测{' '}
+            <b className="mono">{p.awayScore.toFixed(0)} - {p.homeScore.toFixed(0)}</b>
+            {' · '}实际 <b className="mono">{g.awayScore} - {g.homeScore}</b>{' '}
+            <span className={`chip ${g.hit ? 'hit' : 'miss'}`}>{g.hit ? '✓ 猜对胜方' : '✗ 猜错胜方'}</span>
+          </>
         ) : (
           <>
             {started && <><span className="chip injury-dtd">已开赛</span> 比分待数据刷新 · </>}

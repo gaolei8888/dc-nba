@@ -332,22 +332,23 @@ function TeamSchedule({ games, teamId, teamById }) {
           },
         },
         {
-          key: 'score', label: '比分', width: 90,
+          key: 'score', label: '比分 / 赛前预测', width: 132,
           value: (g) => (g.homeId === teamId ? g.prediction.margin : -g.prediction.margin),
           render: (g) => {
-            // 已结束的比赛显示真实比分与胜负，未开打的显示预测
-            if (g.homeScore != null) {
-              const own = g.homeId === teamId ? g.homeScore : g.awayScore;
-              const opp = g.homeId === teamId ? g.awayScore : g.homeScore;
-              return (
-                <span className="mono">
-                  <b className={own > opp ? 'pos' : 'neg'}>{own > opp ? '胜' : '负'}</b> {own} - {opp}
-                </span>
-              );
-            }
-            const own = g.homeId === teamId ? g.prediction.homeScore : g.prediction.awayScore;
-            const opp = g.homeId === teamId ? g.prediction.awayScore : g.prediction.homeScore;
-            return <span className="mono dim">{own.toFixed(0)} - {opp.toFixed(0)}</span>;
+            const pOwn = g.homeId === teamId ? g.prediction.homeScore : g.prediction.awayScore;
+            const pOpp = g.homeId === teamId ? g.prediction.awayScore : g.prediction.homeScore;
+            const predicted = <span className="dim">预测 {pOwn.toFixed(0)}-{pOpp.toFixed(0)}</span>;
+            if (g.homeScore == null) return <span className="mono">{predicted}</span>;
+            // 已结束：真实比分 + 赛前预测，以及预测的胜方猜没猜对
+            const own = g.homeId === teamId ? g.homeScore : g.awayScore;
+            const opp = g.homeId === teamId ? g.awayScore : g.homeScore;
+            return (
+              <span className="mono">
+                <b className={own > opp ? 'pos' : 'neg'}>{own > opp ? '胜' : '负'}</b> {own}-{opp}
+                <br />{predicted}{' '}
+                <span className={`chip ${g.hit ? 'hit' : 'miss'}`}>{g.hit ? '✓' : '✗'}</span>
+              </span>
+            );
           },
         },
         {
