@@ -220,7 +220,31 @@ app.get('/api/meta', wrap((req, res) => {
   });
 }));
 
-app.get('/api/teams', wrap((req, res) => res.json(store.teams)));
+// ---- 展示口径：本赛季至今
+// store 里的球队/球员顶层字段是上赛季的，预测引擎拿它们当基准，必须原样保留。
+// 界面要看的是本赛季，所以展示接口返回的是**副本**：数据字段换成 ingest 挂上的 cur。
+// 开赛前没有 cur（meta.displayCurrent=false），原样返回上赛季。
+const EMPTY_PLAYER_STATS = {
+  gp: 0, w: 0, l: 0, min: 0, base: {}, adv: {}, est: {}, hustle: {}, defend: {}, track: {}, misc: {},
+  pie: 0, totalMin: 0, impact: null,
+};
+const showTeam = (t) => (store.meta.displayCurrent && t.cur ? { ...t, ...t.cur, cur: undefined } : t);
+// 本赛季还没出场的人显示为空，而不是退回他上赛季的数字——那样会混着两个赛季
+const showPlayer = (p) => (store.meta.displayCurrent
+  ? { ...p, ...EMPTY_PLAYER_STATS, ...(p.cur ?? {}), cur: undefined }
+  : p);
+const showRanking = (r) => {
+  const t = store.teams.find((x) => x.teamId === r.teamId);
+  if (!store.meta.displayCurrent || !t?.cur) return r;
+  const c = t.cur;
+  return {
+    ...r,
+    record: `${c.wins}-${c.losses}`,
+    netRtg: c.adv.netRtg, offRtg: c.adv.offRtg, defRtg: c.adv.defRtg, pace: c.adv.pace,
+  };
+};
+
+app.get('/api/teams', wrap((req, res) => res.json(store.teams.map(showTeam))));
 
 /** 伤病名单（来自 ESPN，随 ingest 一起刷新） */
 app.get('/api/injuries', wrap((req, res) => res.json(store.injuries)));
@@ -270,10 +294,12 @@ app.get('/api/teams/:id', wrap((req, res) => {
   const out = outFromQuery(req);
   const roster = withCost(model, store.players
     .filter((p) => p.teamId === id && p.onRoster)
+    .map(showPlayer)
     .sort((a, b) => (b.min ?? 0) - (a.min ?? 0)));
 
   // 阵容更迭明细：新加盟的人 / 上赛季在队但已不在名单的人
-  const arrivals = roster
+  // 这是休赛期的变动，排序与估值都按上赛季整季口径，所以用 store 里的原始对象
+  const arrivals = withCost(model, store.players.filter((p) => p.teamId === id && p.onRoster))
     .filter((p) => p.priorTeamId !== id)
     .sort((a, b) => (b.totalMin ?? 0) - (a.totalMin ?? 0));
   // 转出球员按他上赛季在本队的边际贡献估值，而不是在新东家的
@@ -285,12 +311,12 @@ app.get('/api/teams/:id', wrap((req, res) => {
     (g) => (g.homeId === id || g.awayId === id) && g.type !== 'preseason',
   );
   res.json({
-    team,
+    team: showTeam(team),
     roster,
     arrivals,
     departures,
     schedule: predictSchedule(model, games, out),
-    ranking: powerRankings(model, out).find((r) => r.teamId === id),
+    ranking: showRanking(powerRankings(model, out).find((r) => r.teamId === id)),
   });
 }));
 
@@ -301,7 +327,7 @@ app.get('/api/players', wrap(async (req, res) => {
     let list = store.players;
     if (teamId) list = list.filter((p) => p.teamId === Number(teamId));
     if (onRoster === '1') list = list.filter((p) => p.onRoster);
-    return withCost(getModel(pickParams(req.query)), list);
+    return withCost(getModel(pickParams(req.query)), list.map(showPlayer));
   });
 }));
 
@@ -419,7 +445,7 @@ app.get('/api/rankings', wrap(async (req, res) => {
   const params = pickParams(req.query);
   const out = outFromQuery(req);
   const key = JSON.stringify([params, out]);
-  res.json(await cached('rankings', key, () => powerRankings(getModel(params), out), { max: 40 }));
+  res.json(await cached('rankings', key, () => powerRankings(getModel(params), out).map(showRanking), { max: 40 }));
 }));
 
 app.post('/api/predict', wrap((req, res) => {

@@ -128,7 +128,7 @@ export default function Schedule() {
                   <th className="left" style={{ width: 184 }}>主队</th>
                   <th style={{ width: 58 }}>休息</th>
                   <th style={{ width: 122 }}>主队胜率</th>
-                  <th style={{ width: 94 }}>预测比分</th>
+                  <th style={{ width: 94 }} title="已结束的比赛显示真实比分，悬停可看赛前预测">比分</th>
                   <th style={{ width: 62 }}>总分</th>
                   <th style={{ width: 96 }} title="博彩让分（主队），以及模型与它的分歧">盘口 / 分歧</th>
                   <th className="left" style={{ width: 170 }}>场馆 / 备注</th>
@@ -156,7 +156,13 @@ export default function Schedule() {
                       </span>
                     </td>
                     <td className="mono">
-                      {g.prediction.awayScore.toFixed(0)} - {g.prediction.homeScore.toFixed(0)}
+                      {g.homeScore != null ? (
+                        <span title={`赛前预测 ${g.prediction.awayScore.toFixed(0)} - ${g.prediction.homeScore.toFixed(0)}`}>
+                          <b>{g.awayScore} - {g.homeScore}</b> <span className="chip">终</span>
+                        </span>
+                      ) : (
+                        <>{g.prediction.awayScore.toFixed(0)} - {g.prediction.homeScore.toFixed(0)}</>
+                      )}
                     </td>
                     <td className="mono dim">{num(g.prediction.total, 0)}</td>
                     <td className="mono" style={{ fontSize: 10.5 }}>

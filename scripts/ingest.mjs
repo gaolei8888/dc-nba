@@ -195,8 +195,21 @@ function buildTeams(stats, standings, tricodeById) {
 
 // ---------------------------------------------------------------- 球员
 
-async function fetchPlayerStats(season) {
+/**
+ * @param {boolean} opts.optional 赛季初用：追踪、拼抢、对位这些辅助接口可能还没数据，
+ *   取不到就留空数组，不让整次抓取失败。基础与高阶数据仍然必须拿到。
+ */
+async function fetchPlayerStats(season, { optional = false } = {}) {
   const out = {};
+  const extra = async (url) => {
+    try {
+      return toRows(await nbaGet(url));
+    } catch (e) {
+      if (!optional) throw e;
+      console.warn(`  暂无数据，留空：${String(e.message).slice(0, 80)}`);
+      return [];
+    }
+  };
   for (const [key, measure] of [['base', 'Base'], ['advanced', 'Advanced'], ['misc', 'Misc']]) {
     log(`球员数据 ${measure} (${season})`);
     const payload = await nbaGet(statsUrl('leaguedashplayerstats', {
@@ -209,24 +222,24 @@ async function fetchPlayerStats(season) {
   // 和 Advanced 里的 OFF_RATING 不是一回事——那个是"在场时球队的效率"，
   // 受队友影响极大；这组是 NBA 自己按球员贡献估计的，出场少的球员稳定得多。
   log(`球员估计效率 (${season})`);
-  out.estimated = toRows(await nbaGet(statsUrl('playerestimatedmetrics', {
+  out.estimated = await extra(statsUrl('playerestimatedmetrics', {
     LeagueID: '00', Season: season, SeasonType: 'Regular Season',
-  })));
+  }));
 
   // 拼抢：干扰投篮、抢断偏转、造进攻犯规、掩护助攻、卡位、争抢球。
   // 这些是传统 box score 完全看不到的东西，也是现代影响力指标的重要输入。
   log(`球员拼抢数据 (${season})`);
-  out.hustle = toRows(await nbaGet(statsUrl('leaguehustlestatsplayer', {
+  out.hustle = await extra(statsUrl('leaguehustlestatsplayer', {
     LeagueID: '00', Season: season, SeasonType: 'Regular Season',
     PerMode: 'PerGame', PlayerOrTeam: 'Player',
-  })));
+  }));
 
   // 防守对位：被防投篮命中率 vs 对手的正常命中率。
   // 这是少数能真正衡量个人防守的公开数据——抢断盖帽只反映了防守的一小部分。
   log(`球员防守对位 (${season})`);
-  out.defend = toRows(await nbaGet(statsUrl('leaguedashptdefend', {
+  out.defend = await extra(statsUrl('leaguedashptdefend', {
     ...PT_BASE, Season: season, DefenseCategory: 'Overall',
-  })));
+  }));
 
   // 追踪数据。11 组里挑 7 组：其余（肘区/低位/油漆区触球）已被 Possessions 覆盖大半，
   // 每多一组就多一次请求、多一份体积，取用得上的即可。
@@ -236,10 +249,10 @@ async function fetchPlayerStats(season) {
     ['rebounding', 'Rebounding'], ['speed', 'SpeedDistance'],
   ]) {
     log(`球员追踪 ${measure} (${season})`);
-    out[key] = toRows(await nbaGet(statsUrl('leaguedashptstats', {
+    out[key] = await extra(statsUrl('leaguedashptstats', {
       ...PT_BASE, Season: season, PerMode: 'PerGame',
       PlayerOrTeam: 'Player', PtMeasureType: measure,
-    })));
+    }));
   }
 
   return out;
@@ -489,6 +502,40 @@ async function fetchGameLog(season, { optional = false } = {}) {
   }
 }
 
+// ---------------------------------------------------------------- 本赛季至今（展示用）
+
+/** 球员 cur 里带的字段：与顶层同名同形，PlayerTable 不用改就能直接显示 */
+const CUR_PLAYER_KEYS = ['gp', 'w', 'l', 'min', 'base', 'adv', 'est', 'hustle', 'defend', 'track', 'misc', 'pie', 'totalMin'];
+const CUR_TEAM_KEYS = ['wins', 'losses', 'winPct', 'confRank', 'homeRecord', 'roadRecord', 'last10', 'streak',
+  'base', 'adv', 'fourFactors', 'scoring'];
+const pick = (o, keys) => Object.fromEntries(keys.map((k) => [k, o[k]]));
+
+/**
+ * 抓目标赛季至今的球队/球员数据，按 id 返回只含展示字段的对象。
+ * 复用 buildTeams / buildPlayers 的字段映射，只取其中的数据部分——
+ * 身份类字段（priorTeamId、onRoster）在这里没有意义，交给顶层那份。
+ *
+ * IMP 也按本赛季数据重算，但只用统计栏那一半：实测 APM 来自往季的阵容数据，
+ * 混进来就不是「本赛季」了。训练门槛（≥20 场、场均 ≥10 分钟）照旧，
+ * 所以赛季初几乎人人为空——这是对的，三五场的样本不该给分。
+ */
+async function fetchCurrentSeason(teams, rosters, tricodeById, impactModel) {
+  const standings = await fetchStandings(TARGET_SEASON);
+  const teamStats = await fetchTeamStats(TARGET_SEASON);
+  const curTeams = new Map(buildTeams(teamStats, standings, tricodeById)
+    .map((t) => [t.teamId, pick(t, CUR_TEAM_KEYS)]));
+
+  const playerStats = await fetchPlayerStats(TARGET_SEASON, { optional: true });
+  const curPlayers = new Map();
+  for (const p of buildPlayers(playerStats, rosters, teams)) {
+    if (!(p.gp > 0)) continue;
+    const c = pick(p, CUR_PLAYER_KEYS);
+    c.impact = impactModel ? impactOf(impactModel, c, null) : null;
+    curPlayers.set(p.playerId, c);
+  }
+  return { teams: curTeams, players: curPlayers };
+}
+
 // ---------------------------------------------------------------- 主流程
 
 async function main() {
@@ -582,6 +629,27 @@ async function main() {
     t.rotationPrior = rotationImpact(lastSeasonRoster.get(t.teamId) ?? [], { basis });
   }
 
+  // ---- 本赛季至今的数据：只给界面展示，挂在 t.cur / p.cur 上。
+  // 上面那些顶层字段是上赛季的，预测引擎靠它们做基准，不能被覆盖——
+  // 服务端在展示接口里用 cur 替换后再返回（server/index.mjs 的 showTeam / showPlayer）。
+  const cur = currentGames.length ? await fetchCurrentSeason(teams, rosters, tricodeById, impactModel) : null;
+  if (cur) {
+    for (const t of teams) t.cur = cur.teams.get(t.teamId) ?? null;
+    for (const p of players) p.cur = cur.players.get(p.playerId) ?? null;
+    log(`  ${TARGET_SEASON} 至今：${cur.teams.size} 队、${cur.players.size} 名球员有出场数据`);
+  }
+
+  // 赛程里已结束的比赛补上比分（赛程接口本身只给 "Final"，不带分数）
+  const scoreById = new Map(currentGames.map((g) => [g.gameId, g]));
+  for (const g of schedule.games) {
+    const r = scoreById.get(g.gameId);
+    if (!r) continue;
+    const homeSide = r.home.teamId === g.homeId ? r.home : r.away;
+    const awaySide = homeSide === r.home ? r.away : r.home;
+    g.homeScore = homeSide.pts;
+    g.awayScore = awaySide.pts;
+  }
+
   const meta = {
     priorSeason: PRIOR_SEASON,
     targetSeason: TARGET_SEASON,
@@ -589,6 +657,8 @@ async function main() {
     gamesPlayedPrior: games.length,
     gamesPlayedCurrent: currentGames.length,
     lastResultDate: currentGames.length ? currentGames[currentGames.length - 1].date : null,
+    // 界面上的球队/球员数据是否已换成本赛季至今（开赛前为 false，展示上赛季）
+    displayCurrent: !!cur,
     impactFit,
     rotationBasis: basis.name,
     leagueAvg: {

@@ -37,7 +37,7 @@ export default function Teams() {
     <>
       <div className="page-head">
         <h1>球队</h1>
-        <p>30 支球队的 {meta.priorSeason} 赛季表现与 {meta.targetSeason} 实力评级，点击进入球队详情。</p>
+        <p>30 支球队的 {(meta.displayCurrent ? meta.targetSeason : meta.priorSeason)} 赛季表现与 {meta.targetSeason} 实力评级，点击进入球队详情。</p>
       </div>
 
       <div className="toolbar">
@@ -66,6 +66,7 @@ export default function Teams() {
 }
 
 function TeamCard({ team, rank, dark }) {
+  const { meta } = useApp();
   const p = teamPalette(team, dark);
   return (
     <div
@@ -77,7 +78,7 @@ function TeamCard({ team, rank, dark }) {
         <TeamLogo team={team} size={40} />
         <div style={{ minWidth: 0 }}>
           <div className="nm">{team.cn}</div>
-          <div className="sub">{team.full} · 上季 {team.wins}-{team.losses}</div>
+          <div className="sub">{team.full} · {meta.displayCurrent ? '本季' : '上季'} {team.wins}-{team.losses}</div>
         </div>
         <div className="val">
           <b className={signClass(rank?.total)}>{signed(rank?.total, 1)}</b>

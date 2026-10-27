@@ -66,8 +66,8 @@ export default function Dashboard() {
     },
     { key: "elo", label: <Th abbr="ELO" cn="评级" />, title: "Elo 评级", width: 66, render: (r) => <span className="mono">{num(r.elo, 0)}</span> },
     {
-      key: "netPts", label: <Th abbr="NET" cn="净效率分" />, title: "净效率分 NET — 上赛季百回合净效率折算到每场", width: 82,
-      render: (r) => <span className={signClass(r.netPts)}>{signed(r.netPts)}</span>,
+      key: "netRtg", label: <Th abbr="NET" cn="净效率" />, title: "净效率 NET — 本赛季至今百回合净效率", width: 82,
+      render: (r) => <span className={signClass(r.netRtg)}>{signed(r.netRtg)}</span>,
     },
     {
       key: "turnoverAdj", label: <Th abbr="ROS" cn="阵容更迭" />, width: 82,
@@ -84,8 +84,8 @@ export default function Dashboard() {
     { key: "defRtg", label: <Th abbr="DRtg" cn="防守" />, title: "防守效率 DRtg", width: 64, render: (r) => num(r.defRtg) },
     { key: "pace", label: <Th abbr="PACE" cn="节奏" />, title: "节奏 PACE", width: 64, render: (r) => num(r.pace) },
     {
-      key: 'priorRecord', label: `${meta.priorSeason} 战绩`, width: 90,
-      render: (r) => <span className="mono dim">{r.priorRecord}</span>,
+      key: 'record', label: `${(meta.displayCurrent ? meta.targetSeason : meta.priorSeason)} 战绩`, width: 90,
+      render: (r) => <span className="mono dim">{r.record ?? r.priorRecord}</span>,
     },
   ];
 

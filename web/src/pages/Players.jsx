@@ -62,7 +62,7 @@ export default function Players() {
       <div className="page-head">
         <h1>球员数据</h1>
         <p>
-          {meta.priorSeason} 赛季场均基础数据与高阶数据，共 {all.length} 人；
+          {(meta.displayCurrent ? meta.targetSeason : meta.priorSeason)} 赛季场均基础数据与高阶数据，共 {all.length} 人；
           名单归属已按 {meta.targetSeason} 最新阵容更新。
         </p>
       </div>

@@ -67,7 +67,7 @@ export default function TeamDetail({ teamId }) {
         <div>
           <h1>{t.cn}</h1>
           <div className="en">
-            {t.full} · {t.conference === 'East' ? '东部' : '西部'} {t.division} · {meta.priorSeason} {t.wins}-{t.losses}（分区第 {t.confRank}）
+            {t.full} · {t.conference === 'East' ? '东部' : '西部'} {t.division} · {(meta.displayCurrent ? meta.targetSeason : meta.priorSeason)} {t.wins}-{t.losses}（分区第 {t.confRank}）
           </div>
         </div>
         <div className="right">
@@ -91,7 +91,7 @@ export default function TeamDetail({ teamId }) {
 
       <div className="grid cols-2">
         <div className="card">
-          <h2>球队数据 <span className="sub">{meta.priorSeason} 场均</span></h2>
+          <h2>球队数据 <span className="sub">{(meta.displayCurrent ? meta.targetSeason : meta.priorSeason)} 场均</span></h2>
           <div className="grid cols-3">
             <StatTile abbr="PTS" label="得分" value={num(t.base.pts)} />
             <StatTile abbr="REB" label="篮板" value={num(t.base.reb)} />
@@ -153,7 +153,7 @@ export default function TeamDetail({ teamId }) {
                 <span style={{ opacity: outIds.includes(p.playerId) ? 0.42 : 1 }}>
                   {p.name}
                   <InjuryBadge injury={p.injury} />
-                  {p.noPriorData && <span className="chip" style={{ marginLeft: 6 }}>无上季数据</span>}
+                  {p.noPriorData && !meta.displayCurrent && <span className="chip" style={{ marginLeft: 6 }}>无上季数据</span>}
                 </span>
               </span>
             ),
@@ -332,12 +332,22 @@ function TeamSchedule({ games, teamId, teamById }) {
           },
         },
         {
-          key: 'score', label: '预测比分', width: 90,
+          key: 'score', label: '比分', width: 90,
           value: (g) => (g.homeId === teamId ? g.prediction.margin : -g.prediction.margin),
           render: (g) => {
+            // 已结束的比赛显示真实比分与胜负，未开打的显示预测
+            if (g.homeScore != null) {
+              const own = g.homeId === teamId ? g.homeScore : g.awayScore;
+              const opp = g.homeId === teamId ? g.awayScore : g.homeScore;
+              return (
+                <span className="mono">
+                  <b className={own > opp ? 'pos' : 'neg'}>{own > opp ? '胜' : '负'}</b> {own} - {opp}
+                </span>
+              );
+            }
             const own = g.homeId === teamId ? g.prediction.homeScore : g.prediction.awayScore;
             const opp = g.homeId === teamId ? g.prediction.awayScore : g.prediction.homeScore;
-            return <span className="mono">{own.toFixed(0)} - {opp.toFixed(0)}</span>;
+            return <span className="mono dim">{own.toFixed(0)} - {opp.toFixed(0)}</span>;
           },
         },
         {
