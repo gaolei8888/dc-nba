@@ -18,10 +18,10 @@ const erf = (x) => {
     - 0.284496736) * t + 0.254829592) * t * Math.exp(-a * a);
   return s * y;
 };
-const normalCdf = (x, sd) => 0.5 * (1 + erf(x / (sd * Math.SQRT2)));
+export const normalCdf = (x, sd) => 0.5 * (1 + erf(x / (sd * Math.SQRT2)));
 
 const REST_ADJ = { 0: -1.1, 1: 0, 2: 0.35, 3: 0.5 };
-const restAdjust = (d) => (d === null ? 0 : REST_ADJ[Math.min(d, 3)] ?? 0.5);
+export const restAdjust = (d) => (d === null ? 0 : REST_ADJ[Math.min(d, 3)] ?? 0.5);
 
 /** 美式赔率 -> 隐含概率（含抽水） */
 const mlProb = (ml) => (ml === null || ml === undefined
@@ -36,7 +36,7 @@ const mlProb = (ml) => (ml === null || ml === undefined
  * 没有钱线时退回让分——用与模型同一个 spreadSd 把让分折成概率，
  * 这样两边是同一把尺子，比较才公平。
  */
-function marketProb(odds, spreadSd) {
+export function marketProb(odds, spreadSd) {
   const h = mlProb(odds.homeMl);
   const a = mlProb(odds.awayMl);
   if (h !== null && a !== null && h + a > 0) return h / (h + a);
@@ -44,7 +44,7 @@ function marketProb(odds, spreadSd) {
 }
 
 /** 紧凑格式 -> buildGames 那种结构 */
-function expand(rows) {
+export function expand(rows) {
   return rows
     .map((g) => {
       const home = g.s.find((x) => x[2] === 1);
