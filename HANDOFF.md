@@ -2,6 +2,14 @@
 
 接手前先读 [deploy/README.md](deploy/README.md)「自动刷新是怎么搭起来的」。这份只写**现状、没做完的事、怎么做完**。
 
+## 换电脑接手先看这里
+
+- `git clone git@github.com:gaolei8888/dc-nba.git`，读这份文件即可接上。原电脑上的 Claude 记忆不会跟过来，要点都已写在这里和 deploy/README.md。
+- **新电脑的 SSH 公钥要先加到服务器**才能部署：在一台已能登录的机器上把它追加到 `dev@gpu.tzspace.cn:~/.ssh/authorized_keys`。
+- **连 GB10 要在办公室局域网里**（`192.168.1.49`），同样要先把新电脑的公钥加进 GB10 的 `~/.ssh/authorized_keys`。
+- `data/history/` 大部分不在 git 里（只有 `stints_*.json.gz`）。新电脑只做部署、装 GB10 的话**不需要它**——GB10 上已经有一份。要在新电脑上跑 ingest，从 GB10 的 `~/dc-nba-refresh/data/history` 拷。
+- 原电脑上的计划任务「dc-nba 全量刷新」只要那台开机就会继续跑。GB10 装好后记得在原电脑上删掉它（第 4 步）。
+
 ## 一句话现状
 
 线上（https://ai.tzspace.cn/works/dc-nba/）已是最新数据，自动刷新两条线在跑；
