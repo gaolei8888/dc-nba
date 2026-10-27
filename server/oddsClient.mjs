@@ -54,9 +54,11 @@ const nbaId = (espnId) => ESPN_TO_NBA.get(Number(espnId)) ?? null;
 
 // ---------------------------------------------------------------- HTTP
 
-async function get(url, { tries = 3, timeoutMs = 20000 } = {}) {
+/** before：每次尝试（含重试）前 await 一下，给调用方做全局限速用 */
+async function get(url, { tries = 3, timeoutMs = 20000, before } = {}) {
   let lastErr;
   for (let i = 0; i < tries; i++) {
+    await before?.();
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
@@ -139,11 +141,17 @@ function parseOddsItem(item) {
   };
 }
 
-/** 多个博彩商时优先取 DraftKings，其次按 ESPN 给的 priority */
-function pickBook(items) {
+/**
+ * 多个博彩商时优先取 DraftKings，其次按 ESPN 给的 priority（跳过 in-game Live Odds）。
+ * DraftKings 在 ESPN 有新旧两个 id：2025-26 起是 '100'，之前是 '40'。
+ * 以前只认 '100'，旧赛季全部回退到 priority 都为 0 的第一条，结果记成了 Betfair。
+ */
+export function pickBook(items) {
   if (!Array.isArray(items) || !items.length) return null;
-  return items.find((i) => i.provider?.id === '100')
-    ?? [...items].sort((x, y) => (x.provider?.priority ?? 99) - (y.provider?.priority ?? 99))[0];
+  const pre = items.filter((i) => !/live odds/i.test(i.provider?.name ?? ''));
+  return pre.find((i) => i.provider?.id === '100' || i.provider?.id === '40')
+    ?? [...(pre.length ? pre : items)]
+      .sort((x, y) => (x.provider?.priority ?? 99) - (y.provider?.priority ?? 99))[0];
 }
 
 // ---------------------------------------------------------------- 接口
@@ -152,8 +160,8 @@ function pickBook(items) {
  * 抓某一天的赛程（含未开赛比赛的盘口）。
  * @param {string} date YYYY-MM-DD 或 YYYYMMDD
  */
-export async function fetchScoreboard(date) {
-  const payload = await get(`${SITE}/scoreboard?dates=${compactDate(date)}&limit=100`);
+export async function fetchScoreboard(date, httpOpts) {
+  const payload = await get(`${SITE}/scoreboard?dates=${compactDate(date)}&limit=100`, httpOpts);
   const out = [];
   for (const e of payload?.events ?? []) {
     const c = e.competitions?.[0];
@@ -171,6 +179,7 @@ export async function fetchScoreboard(date) {
       completed: !!c.status?.type?.completed,
       neutral: !!c.neutralSite,
       odds: parseOddsItem(pickBook(c.odds)),
+      rawOdds: c.odds ?? [],                     // 账本要看全部条目（只取 DK）
     });
   }
   return out;
@@ -180,8 +189,13 @@ export async function fetchScoreboard(date) {
  * 抓单场比赛的盘口（历史比赛也有）。找不到返回 null。
  */
 export async function fetchEventOdds(eventId) {
-  const payload = await get(`${CORE}/events/${eventId}/competitions/${eventId}/odds`);
-  return parseOddsItem(pickBook(payload?.items));
+  return parseOddsItem(pickBook(await fetchEventOddsItems(eventId)));
+}
+
+/** 单场全部博彩商的原始 items（多家回测与账本结算用）。没有记录返回 [] */
+export async function fetchEventOddsItems(eventId, httpOpts) {
+  const payload = await get(`${CORE}/events/${eventId}/competitions/${eventId}/odds`, httpOpts);
+  return payload?.items ?? [];
 }
 
 /** 极简并发池：保持 n 个任务在飞 */
