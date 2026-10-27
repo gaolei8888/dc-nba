@@ -910,6 +910,10 @@ npm run dataset       # 并进 data/backtest.json
 > 外呼只发生在 `deploy/refresh.sh` 的抓取阶段，在临时目录里进行，
 > 体检不过或新容器不健康都不会换掉线上快照。安装与回滚见 [deploy/README.md](deploy/README.md)。
 >
+> **更新（同日）：第一条风险成真了。** 服务器和海外机房的 IP 都被 NBA 封了，只有宽带能抓。
+> 现在的做法是服务器每天用 ESPN 补比分/Elo/伤病/盘口，全量统计由本机推送，
+> 架构与验证见 [deploy/README.md](deploy/README.md)「自动刷新是怎么搭起来的」。
+>
 > **这个决定最可能错在哪：** 一是服务器 IP 可能根本连不上 stats.nba.com（很多云主机被拒），
 > 那样 cron 会每天静默失败、线上停在旧数据——所以安装第一步是 `--fetch-only` 实测；
 > 二是每天固定时间抓取可能触发限流（被封时是挂起不是 429），脚本有 30 分钟超时和 `flock`，

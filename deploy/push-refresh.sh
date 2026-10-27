@@ -15,6 +15,8 @@ set -eu
 
 REMOTE=${DC_NBA_REMOTE:-dev@gpu.tzspace.cn}
 RDIR=${DC_NBA_REMOTE_DIR:-/home/dev/work/works/dc-nba}
+# 专用密钥（GB10 上用它自己的一把，不动 ~/.ssh 里的默认钥匙）
+SSH="ssh -o BatchMode=yes -o ConnectTimeout=20${DC_NBA_SSH_KEY:+ -i $DC_NBA_SSH_KEY}"
 cd "$(dirname "$0")/.."
 
 log() { echo "[$(date '+%F %T')] [push] $*"; }
@@ -37,12 +39,12 @@ log "本地体检"
 node scripts/check-data.mjs > /dev/null || { node scripts/check-data.mjs; log "体检不过，不推送"; exit 1; }
 
 log "上传"
-tar -c data/*.json | gzip -1 | ssh -o BatchMode=yes -o ConnectTimeout=20 "$REMOTE" \
+tar -c data/*.json | gzip -1 | $SSH "$REMOTE" \
   "mkdir -p '$RDIR/incoming' && rm -f '$RDIR'/incoming/*.json && gunzip | tar -x -m -C '$RDIR/incoming' --strip-components=1"
 
 log "远程部署"
 # 管道会吞掉 refresh.sh 的退出码，所以先写日志、再单独取状态
-ssh -o BatchMode=yes -o ConnectTimeout=20 "$REMOTE" \
+$SSH "$REMOTE" \
   "cd '$RDIR' && n=\$(wc -l < refresh.log 2>/dev/null || echo 0); sh deploy/refresh.sh --incoming >> refresh.log 2>&1; s=\$?; tail -n +\$((n + 1)) refresh.log | grep '^\['; exit \$s" \
   || { log "服务器部署失败（线上已回滚或未改动，详见服务器 refresh.log）"; exit 1; }
 log "完成"
