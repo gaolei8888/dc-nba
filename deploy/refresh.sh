@@ -20,6 +20,11 @@
 #   2. 体检不过就不换。check-data.mjs 防量纲错误，另外校验 30 队、赛程非空、meta 是新写的。
 #   3. 换快照前留一份 data-prev/，新容器健康检查不过就换回去再建一次。
 #   4. flock 串行化：cron 的 ESPN 刷新和别处推来的全量刷新不会撞在一起。
+#   5. 模拟投注账本（scripts/ledger.mjs）在新容器健康之后用 docker exec 跑：
+#      取数据的临时目录和 node 容器里没有 data-db/，只有运行中的 dc-nba 挂着那份持久的 SQLite，
+#      在别处写只会写进一份随即丢弃的副本。先结算（每场最多 1 个 ESPN 请求取 DK 收盘价），
+#      再记录开赛前 14 小时内的比赛（用镜像里刚烤进去的 odds.json，零额外请求）。
+#      账本失败只记日志，不影响刷新结果。
 set -eu
 
 DIR=$(cd "$(dirname "$0")/.." && pwd)
@@ -140,8 +145,15 @@ healthy() {
 }
 
 cd "$DIR"
+ledger() {
+  for c in settle capture; do
+    docker exec -e NODE_NO_WARNINGS=1 "$CONTAINER" node scripts/ledger.mjs "$c" || log "模拟投注账本 $c 失败（不影响线上）"
+  done
+}
+
 if docker compose build -q && docker compose up -d && healthy; then
   [ "$MODE" = incoming ] && rm -f "$DIR"/incoming/*.json
+  ledger
   log "完成"
   exit 0
 fi

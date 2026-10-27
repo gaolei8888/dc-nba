@@ -13,7 +13,7 @@ import * as db from './db.mjs';
 import * as lab from './lab.mjs';
 import { liveRosterRankings } from './liveRosterRankings.mjs';
 import { buildBoard } from './predictionBoard.mjs';
-import { bettingEvidence } from './bettingEvidence.mjs';
+import { ledgerRows, ledgerReport } from './ledger.mjs';
 import {
   initPool, run as runInPool, poolAvailable, cached, clearCaches,
   cacheStats, pendingCount, sendCached,
@@ -41,10 +41,12 @@ function loadStore() {
   const odds = readJson('odds.json') ?? { source: 'ESPN', fetchedAt: null, games: {}, matched: 0 };
   // 影响力指标的模型与验证成绩，界面上要把它的弱点一并显示
   const impactModel = readJson('impact-model.json');
+  // 模拟投注历史回测（scripts/paper-backtest.mjs 离线生成）；没有就只显示前向账本
+  const paper = readJson('paper-backtest.json');
   if (!teams || !players || !schedule || !meta) {
     throw new Error('数据缺失，请先运行  npm run ingest');
   }
-  store = { teams, players, schedule, meta, injuries, gameday, odds, impactModel };
+  store = { teams, players, schedule, meta, injuries, gameday, odds, impactModel, paper };
   clearCaches();
   modelCache = new Map();
   console.log(`数据已加载: ${teams.length} 队 / ${players.length} 人 / ${schedule.games.length} 场 (${meta.priorSeason} → ${meta.targetSeason})`);
@@ -371,8 +373,6 @@ app.get('/api/predictions/summary', wrap(async (req, res) => {
   const games = store.schedule.games.filter((g) => g.type === 'regular');
   const cn = new Map(store.teams.map((t) => [t.teamId, t.cn]));
   await sendCached(res, req, `predBoard|${JSON.stringify([params, out])}`, async () => {
-    // 历史投注证据只依赖离线数据集与生产参数，整个进程算一次
-    const betting = await cached('labBetting', 'v1', () => runLab('labBetting', {}), { max: 1 });
     const board = buildBoard(predictSchedule(getModel(params), games, out).map((g) => {
       const market = marketOf(g.gameId, g.prediction);
       return market ? { ...g, market } : g;
@@ -381,10 +381,24 @@ app.get('/api/predictions/summary', wrap(async (req, res) => {
       seasonYear: store.schedule.seasonYear,
       oddsFetchedAt: store.odds?.fetchedAt ?? null,
       ...board,
-      // 总结里也要直说历史证据的结论，不能只藏在下面的小节里
-      summary: [...board.summary, betting.summary[0], betting.summary.at(-1)],
-      betting,
+      // 总结里也要直说投注回测的结论，不能只藏在「模拟投注」那一栏
+      summary: store.paper?.headline?.verdict
+        ? [...board.summary, `模拟投注（DraftKings、edge ≥ 3% 平注）${store.paper.headline.verdict}`]
+        : board.summary,
     };
+  });
+}));
+
+/**
+ * 模拟投注：历史回测（静态文件）+ 前向账本（SQLite，只读）。
+ * 账本由 scripts/ledger.mjs 写；服务端只读，不缓存——每天就变两次，查询很轻。
+ */
+app.get('/api/paper', wrap((req, res) => {
+  res.json({
+    backtest: store.paper ?? null,
+    ledger: ledgerDb
+      ? { available: true, ...ledgerReport(ledgerRows(ledgerDb), { B: 1000 }) }
+      : { available: false, reason: LEDGER_OFF ? 'ENABLE_LEDGER=0' : '账本数据库打不开，见服务端日志' },
   });
 }));
 
@@ -581,7 +595,6 @@ const runLab = async (type, payload) => {
   if (type === 'labMarket') {
     return lab.market(lab.replay(labData, seasons, params));
   }
-  if (type === 'labBetting') return bettingEvidence(labData);
   if (type === 'labMeasure') {
     return {
       homeAdvantage: lab.homeAdvantageBySeason(labData, seasons, params),
@@ -735,6 +748,9 @@ if (fs.existsSync(dist)) {
 const LEADERBOARD_ON = process.env.ENABLE_LEADERBOARD !== '0';
 if (LEADERBOARD_ON) db.initDb();
 else console.log('排行榜已通过 ENABLE_LEADERBOARD=0 关闭，服务端不写任何用户数据');
+// 模拟投注账本与排行榜无关、不含用户数据，单独开关；同一个库文件（DB_PATH，本地默认 data/app.db）
+const LEDGER_OFF = process.env.ENABLE_LEDGER === '0';
+const ledgerDb = LEDGER_OFF ? null : db.openLedger();
 initPool();
 
 try {

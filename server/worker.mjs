@@ -12,7 +12,6 @@ import { parentPort } from 'node:worker_threads';
 import { readJson } from './nbaClient.mjs';
 import { buildModel, simulateSeason, powerRankings, predictSchedule } from './predict.mjs';
 import * as lab from './lab.mjs';
-import { bettingEvidence } from './bettingEvidence.mjs';
 
 // 每个 worker 自己加载一份快照。数据约 1MB，几个 worker 的内存开销可以接受，
 // 换来的是完全不需要跨线程传数据。
@@ -66,12 +65,6 @@ const HANDLERS = {
   labCounterfactual({ seasons, teamId, deltaPts, params }) {
     if (!labData) throw new Error('缺少 data/backtest.json');
     return lab.counterfactual(labData, seasons, teamId, deltaPts, params);
-  },
-
-  /** 投注参考：历史收盘盘口对比 + 平注回测（生产参数，数据静态） */
-  labBetting() {
-    if (!labData) throw new Error('缺少 data/backtest.json');
-    return bettingEvidence(labData);
   },
 
   simulate({ params, out, sims, seed }) {

@@ -38,6 +38,8 @@ COPY --chown=app:nodejs data ./data
 # backup-db.mjs 只依赖 node 内置模块，单独拷进来即可 docker exec 调用：
 #   docker exec dc-nba node scripts/backup-db.mjs
 COPY --chown=app:nodejs scripts/backup-db.mjs ./scripts/backup-db.mjs
+# 模拟投注账本：deploy/refresh.sh 在容器健康后 docker exec 调它写 data-db/ 里的库
+COPY --chown=app:nodejs scripts/ledger.mjs ./scripts/ledger.mjs
 COPY --from=builder --chown=app:nodejs /app/web/dist ./web/dist
 
 USER app

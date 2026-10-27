@@ -4,13 +4,13 @@ import { api, withOut } from '../lib/api.js';
 import {
   TeamCell, Loading, ErrorBox, ProbBar, StatTile, Segmented, DataTable,
 } from '../components/common.jsx';
-import { fmtDate, fmtDateShort, probColor, pct, num, signed, snapshotAge } from '../lib/format.js';
+import { fmtDate, fmtDateShort, probColor, pct, num, signed } from '../lib/format.js';
 
 const TABS = [
   { value: 'stats', label: '统计' },
   { value: 'done', label: '已结束比赛' },
   { value: 'next', label: '接下来' },
-  { value: 'bet', label: '投注参考' },
+  { value: 'bet', label: '模拟投注' },
 ];
 
 const ci = (c) => (c?.lo == null ? '—' : `${pct(c.lo, 0)} – ${pct(c.hi, 0)}`);
@@ -203,75 +203,198 @@ function Stats({ d, teamById }) {
   );
 }
 
-function Betting({ d, teamById }) {
-  const b = d.betting;
-  const withOdds = d.upcoming.filter((g) => g.market?.homeProb != null);
-  const age = snapshotAge(d.oddsFetchedAt);
+/** 累计盈亏曲线（单位：注）。横轴按下注顺序，纵轴自适应并画出 0 线 */
+function Curve({ points, label }) {
+  if (points.length < 2) return <div className="empty">还没有足够的已结算注单画曲线</div>;
+  const W = 600; const H = 150; const P = 8;
+  const ys = points.map((p) => p.units);
+  const lo = Math.min(0, ...ys); const hi = Math.max(0, ...ys);
+  const x = (i) => P + (i * (W - 2 * P)) / (points.length - 1);
+  const y = (v) => P + ((hi - v) / (hi - lo || 1)) * (H - 2 * P);
+  const last = ys.at(-1);
+  return (
+    <>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={label}
+        style={{ width: '100%', height: H, display: 'block' }}>
+        <line x1={0} x2={W} y1={y(0)} y2={y(0)} stroke="var(--text-faint)" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
+        <polyline fill="none" stroke={last >= 0 ? 'var(--good)' : 'var(--bad)'} strokeWidth="2" vectorEffect="non-scaling-stroke"
+          points={points.map((p, i) => `${x(i).toFixed(1)},${y(p.units).toFixed(1)}`).join(' ')} />
+      </svg>
+      <div className="note" style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+        <span>{fmtDateShort(points[0].date)} → {fmtDateShort(points.at(-1).date)}</span>
+        <span>最高 {signed(hi)} · 最低 {signed(lo)} · 最终 <b className={last >= 0 ? 'pos' : 'neg'}>{signed(last)} 注</b></span>
+      </div>
+    </>
+  );
+}
+
+const thr = (t) => `≥ ${pct(t, 0)}`;
+const ciRoi = (c) => (c?.lo == null ? '—' : `${roi(c.lo)} ~ ${roi(c.hi)}`);
+const MIN_LEDGER = 100;
+
+function PaperBetting({ teamById }) {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState(null);
+  const [season, setSeason] = useState('all');
+  useEffect(() => { api.paper().then(setD).catch(setErr); }, []);
+  if (err) return <ErrorBox error={err} />;
+  if (!d) return <Loading />;
+  const { backtest: bt, ledger: lg } = d;
+  const name = (k) => bt?.bookNames?.[k] ?? k;
+  const team = (id) => teamById.get(id)?.cn ?? id;
+  const main = lg.available ? lg.rules.find((r) => r.threshold === bt?.rules?.primary) ?? lg.rules[1] : null;
+
+  const seasons = bt ? Object.keys(bt.coverage) : [];
+  const books = bt ? [...new Set(bt.table.map((r) => r.book))].sort((a, b) => (a === 'draftkings' ? -1 : b === 'draftkings' ? 1 : a === 'best' ? 1 : b === 'best' ? -1 : 0)) : [];
+  const rowsFor = (book) => bt.table.filter((r) => r.book === book
+    && (season === 'all' ? (r.season === 'all' || !bt.table.some((x) => x.book === book && x.season === 'all')) : r.season === season));
+  const tableRows = books.flatMap(rowsFor);
+
   return (
     <>
       <div className="warn-box">
-        {b.summary.map((s) => <p key={s} style={{ margin: '2px 0' }}>{s}</p>)}
-      </div>
-      <div className="card">
-        <h2>概率准不准：模型 vs 收盘盘口<span className="sub">同一批比赛；市场胜率已按比例去掉抽水；越低越好</span></h2>
-        <Mini
-          rowKey={(r) => r.season}
-          rows={[{ season: '合计', n: b.n, model: b.model, market: b.market }, ...b.bySeason]}
-          cols={[
-            ['赛季', (r) => r.season, true],
-            ['场数', (r) => r.n],
-            ['模型 对数损失', (r) => num(r.model.logloss, 3)],
-            ['盘口 对数损失', (r) => num(r.market.logloss, 3)],
-            ['模型 Brier', (r) => num(r.model.brier, 3)],
-            ['盘口 Brier', (r) => num(r.market.brier, 3)],
-            ['模型 / 盘口 猜对', (r) => `${pct(r.model.accuracy)} / ${pct(r.market.accuracy)}`],
-          ]}
-        />
-        <p className="note">
-          单场对数损失差（模型 − 盘口）{num(b.logLossDiff?.mean, 4)}，按场 bootstrap 95% 区间 {num(b.logLossDiff?.lo, 4)} ~ {num(b.logLossDiff?.hi, 4)}
-          （整体大于 0 = 模型更差）。用的是生产参数，不随侧栏开关变化。
+        <p style={{ margin: '2px 0' }}><b>{bt ? bt.headline.verdict : '历史回测还没生成（node scripts/paper-backtest.mjs）。'}</b></p>
+        <p style={{ margin: '2px 0' }}>
+          这是模拟，不是建议。规则事先固定：模型胜率比 DraftKings 去水胜率高 3 个百分点以上就押那一边 1 注，按真实（含水）赔率结算；
+          0% / 6% 门槛、挑最优价、各家逐一回测都一起列出，不挑最好的报。
         </p>
       </div>
-      <div className="card">
-        <h2>照分歧平注的回测<span className="sub">模型胜率比去抽水市场胜率高出门槛就押那一边 1 注，按收盘钱线（含抽水）结算</span></h2>
-        <Mini
-          rowKey={(r) => r.threshold}
-          rows={b.strategies}
-          cols={[
-            ['门槛', (r) => `> ${pct(r.threshold, 0)}`, true],
-            ['注数', (r) => r.bets],
-            ['胜率', (r) => pct(r.winRate)],
-            ['打平所需', (r) => pct(r.breakEven)],
-            ['回报率', (r) => <b className={r.roi > 0 ? 'pos' : 'neg'}>{roi(r.roi)}</b>],
-            ['95% 区间', (r) => `${roi(r.ci.lo)} ~ ${roi(r.ci.hi)}`],
-            ...b.seasons.map((s) => [s, (r) => roi(r.bySeason.find((x) => x.season === s)?.roi)]),
-          ]}
-        />
-        <p className="note">
-          胜率远低于 50% 是因为分歧大多落在冷门一边（模型比市场更看好弱队），所以要和「打平所需」比，不能和 50% 比。
-          收盘钱线平均抽水 {pct(b.overround)}；标准 -110 盘口打平要赢 {pct(b.breakEven)}。
-        </p>
+
+      {bt && (
+        <div className="grid cols-5" style={{ margin: '14px 0' }}>
+          <StatTile label="历史注数（DK, ≥3%）" value={bt.headline.bets} hint={bt.headline.seasons.join(' / ')} />
+          <StatTile label="ROI" value={roi(bt.headline.roi)} hint={`95% 区间 ${ciRoi(bt.headline.ci)}`} />
+          <StatTile label="胜率 / 保本胜率" value={`${pct(bt.headline.winRate)} / ${pct(bt.headline.breakEven)}`} hint="胜率要高过保本线才不亏" />
+          <StatTile label="累计盈亏" value={signed(bt.headline.units)} unit=" 注" hint="每注 1 单位" />
+          <StatTile label="最大回撤" value={num(bt.headline.maxDrawdown)} unit=" 注" hint="从累计高点回落的最大幅度" />
+        </div>
+      )}
+
+      <div className="grid cols-2">
+        <div className="card">
+          <h2>累计盈亏 · 历史回测<span className="sub">DraftKings、edge ≥ 3%，按下注顺序</span></h2>
+          {bt ? <Curve points={bt.headline.curve} label="历史回测累计盈亏" /> : <div className="empty">没有历史回测</div>}
+        </div>
+        <div className="card">
+          <h2>累计盈亏 · 本季账本<span className="sub">开赛前记录、赛后结算，记录后不可改</span></h2>
+          {main ? <Curve points={main.curve} label="本季账本累计盈亏" /> : <div className="empty">{lg.reason}</div>}
+          {main && (
+            <p className="note">
+              已结算 <b>{main.bets}</b> 注、待结算 {main.pending} 注，自 {lg.firstDate ?? '—'} 起共记录 {lg.captured} 场。
+              {main.bets < MIN_LEDGER
+                ? ` 样本只有 ${main.bets} 注，太小，不下结论。`
+                : ` ROI ${roi(main.roi)}（95% 区间 ${ciRoi(main.ci)}）。`}
+            </p>
+          )}
+        </div>
       </div>
+
       <div className="card">
-        <h2>本赛季<span className="sub">{age ? `盘口快照${age.text}` : '没有盘口快照'}</span></h2>
-        <p className="note">
-          已结束的比赛里有盘口记录的 <b>{d.market.n}</b> 场——样本不足，无法评估模型本季相对市场的表现。
-          未开打且有盘口的 {withOdds.length} 场列在下面，只是对照，按上面的历史证据不构成投注优势。
-        </p>
-        {withOdds.length > 0 && (
+        <h2>今晚模拟下注<span className="sub">模拟，不是建议 · 账本里已记录、尚未结算的 edge ≥ 3% 选择</span></h2>
+        {main && lg.open.length ? (
           <Mini
-            rowKey={(r) => r.gameId}
-            rows={withOdds}
+            rowKey={(r) => r.game_id}
+            rows={lg.open}
             cols={[
-              ['日期', (r) => fmtDate(r.date), true],
-              ['对阵', (r) => `${teamById.get(r.awayId)?.cn} @ ${teamById.get(r.homeId)?.cn}`, true],
-              ['模型主队胜率', (r) => pct(r.prediction.homeWinProb, 0)],
-              ['盘口主队胜率', (r) => pct(r.market.homeProb, 0)],
-              ['差', (r) => `${signed((r.prediction.homeWinProb - r.market.homeProb) * 100, 0)} 个百分点`],
+              ['日期', (r) => fmtDate(r.game_date), true],
+              ['对阵', (r) => `${team(r.away_id)} @ ${team(r.home_id)}`, true],
+              ['模拟押', (r) => <b>{team(r.side === 'home' ? r.home_id : r.away_id)}</b>, true],
+              ['DK 赔率', (r) => (r.bet_ml > 0 ? `+${r.bet_ml}` : r.bet_ml)],
+              ['模型 / DK 去水', (r) => {
+                const s = r.side === 'home' ? 1 : -1;
+                return `${pct(r.side === 'home' ? r.model_p_home : 1 - r.model_p_home, 0)} / ${pct(r.side === 'home' ? r.book_p_home : 1 - r.book_p_home, 0)}`
+                  + ` (${signed(s * r.edge * 100, 1)})`;
+              }],
             ]}
           />
-        )}
+        ) : <div className="empty">今天账本里没有达到门槛的选择（或还没到记录时间：开赛前 14 小时内）</div>}
       </div>
+
+      {bt && (
+        <div className="card">
+          <h2>博彩商 × 门槛<span className="sub">ROI 区间为按场 bootstrap 95%；门槛只允许在 {bt.rules.tuningSeason} 上看，之后各季只报告</span></h2>
+          <div style={{ marginBottom: 10 }}>
+            <Segmented value={season} onChange={setSeason}
+              options={[{ value: 'all', label: '合计' }, ...seasons.map((s) => ({ value: s, label: s }))]} />
+          </div>
+          <Mini
+            rowKey={(r) => `${r.book}|${r.season}|${r.threshold}`}
+            rows={tableRows}
+            cols={[
+              ['博彩商', (r) => (r.threshold === tableRows.find((x) => x.book === r.book)?.threshold ? <b>{name(r.book)}</b> : ''), true],
+              ['赛季', (r) => (r.season === 'all' ? `${r.seasons.length} 季` : r.season), true],
+              ['门槛', (r) => thr(r.threshold)],
+              ['注数', (r) => r.bets],
+              ['胜率', (r) => pct(r.winRate)],
+              ['保本', (r) => pct(r.breakEven)],
+              ['ROI', (r) => <b className={r.roi > 0 ? 'pos' : 'neg'}>{roi(r.roi)}</b>],
+              ['95% 区间', (r) => ciRoi(r.ci)],
+              ['回撤', (r) => num(r.maxDrawdown)],
+            ]}
+          />
+          <p className="note">
+            「挑最优价」= 用各家去水胜率的中位数判断，每一边取美国持牌各家里最高的赔率结算（Betfair 等非美国站点不参与挑价）。
+            FanDuel 在 ESPN 的任何赛季都没有数据；2024-25 只有 ESPN BET，2025-26 起只有 DraftKings。
+          </p>
+        </div>
+      )}
+
+      {bt && (
+        <div className="grid cols-2">
+          <div className="card">
+            <h2>收盘线价值（CLV）<span className="sub">按开盘价下注（同样 ≥3%），收盘价往我们押的一边走多少</span></h2>
+            {bt.clv.length ? (
+              <Mini
+                rowKey={(r) => `${r.book}|${r.season}`}
+                rows={bt.clv}
+                cols={[
+                  ['博彩商', (r) => name(r.book), true],
+                  ['赛季', (r) => r.season, true],
+                  ['注数', (r) => r.bets],
+                  ['平均 CLV', (r) => `${signed(r.clv.mean * 100, 2)} 个百分点`],
+                  ['好于收盘', (r) => pct(r.clv.beatClose, 0)],
+                  ['ROI', (r) => roi(r.roi)],
+                ]}
+              />
+            ) : <div className="empty">没有同时带开盘与收盘价的赛季</div>}
+            <p className="note">长期赢盘口的下注者通常 CLV 为正；区间与 ROI 一样含 0 就是没证据。</p>
+          </div>
+          <div className="card">
+            <h2>为什么赚/亏：概率准不准<span className="sub">模型 vs 该家去水概率，同一批比赛，越低越好</span></h2>
+            <Mini
+              rowKey={(r) => `${r.book}|${r.season}`}
+              rows={bt.accuracy}
+              cols={[
+                ['博彩商', (r) => name(r.book), true],
+                ['赛季', (r) => r.season, true],
+                ['场数', (r) => r.n],
+                ['对数损失 模型 / 盘口', (r) => `${num(r.model.logloss, 3)} / ${num(r.market.logloss, 3)}`],
+                ['Brier 模型 / 盘口', (r) => `${num(r.model.brier, 3)} / ${num(r.market.brier, 3)}`],
+              ]}
+            />
+          </div>
+        </div>
+      )}
+
+      {bt && (
+        <div className="card">
+          <h2>数据来源<span className="sub">ESPN 公开接口，生成于 {fmtDate(bt.builtAt.slice(0, 10))}</span></h2>
+          <Mini
+            rowKey={(r) => r[0]}
+            rows={Object.entries(bt.coverage)}
+            cols={[
+              ['赛季', (r) => r[0], true],
+              ['有价 / 全部', (r) => `${r[1].priced} / ${r[1].games}`],
+              ['博彩商（≥200 场）', (r) => Object.entries(r[1].books).filter(([, n]) => n >= bt.rules.minGames).map(([k]) => name(k)).join('、') || '—', true],
+              ['时点', (r) => Object.entries(r[1].at).map(([k, n]) => `${k === 'close' ? '收盘' : '当前'} ${n}`).join(' · '), true],
+            ]}
+          />
+          <p className="note">
+            模型概率是生产参数的逐场赛前 Elo 重放（2021-22 只作预热）。每家每场取最接近收盘的价：有 close 用 close，否则用 current（2021-22、2022-23 多数只有 current），
+            从不用开盘价冒充收盘。已剔除 in-game Live Odds、聚合源与离当场中位让分超过 3 分的离谱线；Caesars 各州 id 合并为一家。
+          </p>
+        </div>
+      )}
     </>
   );
 }
@@ -368,7 +491,7 @@ export default function Board() {
         </>
       )}
 
-      {tab === 'bet' && <Betting d={d} teamById={teamById} />}
+      {tab === 'bet' && <PaperBetting teamById={teamById} />}
     </>
   );
 }
