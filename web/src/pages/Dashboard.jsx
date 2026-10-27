@@ -6,6 +6,7 @@ import {
 } from '../components/common.jsx';
 import {
   num, signed, signClass, fmtDate, probColor, CONF_CN, DIV_CN, DIV_ORDER,
+  bjToday, bjDateOf, bjTimeOf, shiftDate,
 } from '../lib/format.js';
 
 export default function Dashboard() {
@@ -21,7 +22,8 @@ export default function Dashboard() {
     setData((d) => ({ ...d, loading: true }));
     Promise.all([
       api.rankings(withOut(params, out)),
-      api.schedule(withOut({ ...params, type: 'regular', limit: 12 }, out)),
+      // 今日比赛预览：从昨天（美东）起取一批，挑出北京时间今天或之后的第一个比赛日
+      api.schedule(withOut({ ...params, type: 'all', from: shiftDate(bjToday(), -1), limit: 40 }, out)),
     ])
       .then(([rankings, schedule]) => alive && setData({ loading: false, rankings, schedule }))
       .catch((error) => alive && setData({ loading: false, error }));
@@ -32,7 +34,10 @@ export default function Dashboard() {
   if (data.error) return <ErrorBox error={data.error} />;
 
   const { rankings } = data;
-  const opening = data.schedule.games;
+  const upcomingGames = data.schedule.games
+    .filter((g) => g.type !== 'preseason' && g.homeScore == null && bjDateOf(g.dateTimeUtc) >= bjToday());
+  const nextDay = upcomingGames[0] ? bjDateOf(upcomingGames[0].dateTimeUtc) : null;
+  const dayGames = upcomingGames.filter((g) => bjDateOf(g.dateTimeUtc) === nextDay);
   const east = rankings.filter((t) => t.conference === 'East');
   const west = rankings.filter((t) => t.conference === 'West');
   const mostImproved = [...rankings].sort((a, b) => b.turnoverAdj - a.turnoverAdj)[0];
@@ -150,15 +155,20 @@ export default function Dashboard() {
         )}
       </div>
 
-      <div className="card">
-        <h2>
-          揭幕战预测
-          <span className="sub">{opening[0] ? fmtDate(opening[0].date) : ''} 起</span>
-        </h2>
-        <div className="grid cols-3">
-          {opening.map((g) => <GameCard key={g.gameId} game={g} teamById={teamById} />)}
+      {dayGames.length > 0 && (
+        <div className="card">
+          <h2>
+            {nextDay === bjToday() ? '今日比赛预测' : '下一个比赛日'}
+            <span className="sub">{fmtDate(nextDay)} · 北京时间 · {dayGames.length} 场</span>
+            <button className="btn" style={{ marginLeft: 'auto' }} onClick={() => go(`today/${nextDay}`)}>
+              全部详情 ›
+            </button>
+          </h2>
+          <div className="grid cols-3">
+            {dayGames.slice(0, 6).map((g) => <GameCard key={g.gameId} game={g} teamById={teamById} />)}
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="card plain">
         <h2>模型说明</h2>
@@ -242,7 +252,7 @@ function GameCard({ game, teamById }) {
       onClick={() => go(`predict/${game.awayId}/${game.homeId}/${game.gameId}`)}
     >
       <div className="top">
-        <span>{fmtDate(game.date)}</span>
+        <span>{bjTimeOf(game.dateTimeUtc)} 开打</span>
         <span>{game.national?.join(' / ') || game.arena}</span>
       </div>
       <Side team={away} score={p.awayScore} bold={!homeFav} />

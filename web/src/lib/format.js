@@ -81,6 +81,26 @@ export const fmtDate = (iso) => {
   return `${m}月${d}日 ${wd}`;
 };
 
+// ---- 北京时间
+// 赛程的 date 是美东日期（NBA 官方口径），但这个站的读者在国内：
+// 美东 10 月 27 日晚上的比赛，北京时间是 10 月 28 日上午。「今日比赛」按北京时间算。
+const BJ_OFFSET_MS = 8 * 3600e3;
+
+/** 当前北京日期 "YYYY-MM-DD" */
+export const bjToday = () => new Date(Date.now() + BJ_OFFSET_MS).toISOString().slice(0, 10);
+
+/** 比赛开打时刻（UTC 字符串）-> 北京日期 */
+export const bjDateOf = (utc) => (utc ? new Date(Date.parse(utc) + BJ_OFFSET_MS).toISOString().slice(0, 10) : null);
+
+/** 比赛开打时刻 -> 北京时间 "09:30" */
+export const bjTimeOf = (utc) => (utc ? new Date(Date.parse(utc) + BJ_OFFSET_MS).toISOString().slice(11, 16) : '');
+
+/** "YYYY-MM-DD" 加减天数 */
+export const shiftDate = (iso, days) => {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+};
+
 export const fmtDateShort = (iso) => {
   if (!iso) return '';
   const [, m, d] = iso.split('-').map(Number);
