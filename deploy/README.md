@@ -13,6 +13,19 @@
 
 `data-db/` 是线上排行榜的 SQLite 卷，同样不能动。
 
+## ⚠ 当前状态：这台服务器连不上 stats.nba.com，cron 未安装
+
+2026-10-27 实测：NBA 的 WAF 封了这台服务器的 IP。不带浏览器头直接 `403 Access Denied`，
+带浏览器头返回 200 但内容是 nba.com 首页 HTML（**状态码 200 不代表通了，要看返回的是不是 JSON**）。
+所以 `refresh.sh` 在这里第一步就失败（失败时线上不动，这条保护是生效的）。
+
+要让它在服务器上跑，需要一个海外代理给 ingest 用——这一步还没做。在那之前，
+更新数据的做法是：本机 `npm run ingest`，把 `data/*.json` 传上去，在服务器上
+`docker compose build && docker compose up -d`。
+
+另一个坑：服务器的 Docker 镜像源拉 `node:22-alpine` 会挂住。已经从本机
+`docker save | ssh docker load` 传上去一份，只要不 `docker image prune -a` 就一直在。
+
 ## 首次安装定时刷新
 
 在本机（仓库根目录）：
