@@ -14,3 +14,6 @@ data/history/*
 data/raw/
 .env
 *.log
+# deploy/refresh.sh 的回滚快照与锁
+data-prev/
+.refresh.lock

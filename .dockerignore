@@ -4,3 +4,11 @@ web/dist
 *.log
 data/raw
 data/history
+# 用户数据不进镜像：本地 SQLite、它的备份、线上排行榜的卷
+data/app.db*
+data/backups
+data-db
+backups
+# deploy/refresh.sh 的回滚快照与锁
+data-prev
+.refresh.lock
