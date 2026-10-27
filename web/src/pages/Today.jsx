@@ -88,8 +88,17 @@ export default function Today({ initial = [] }) {
   const split = upcoming.filter((g) => g.market).sort((a, b) => Math.abs(b.market.edge) - Math.abs(a.market.edge))[0];
   const age = snapshotAge(meta.fetchedAt, { staleDays: 1 });
   const isToday = date === bjToday();
-  // 当天比赛全打完了，「最有把握」这类赛前指标没有对象，说清楚而不是显示一排横杠
-  const none = games.length && !upcoming.length ? '已全部结束' : '—';
+  // 当天比赛全打完了：赛前指标没有对象，换成这一天的预测复盘
+  const finished = games.filter((g) => g.hit !== undefined);
+  const review = finished.length > 0 && upcoming.length === 0;
+  const hits = finished.filter((g) => g.hit).length;
+  // 最大冷门：赢球一方的赛前胜率最低的那场
+  const winProb = (g) => (g.homeScore > g.awayScore ? g.prediction.homeWinProb : 1 - g.prediction.homeWinProb);
+  const upset = [...finished].sort((a, b) => winProb(a) - winProb(b))[0];
+  // 比分预测最准：预测分差与实际分差最接近
+  const marginErr = (g) => Math.abs(g.prediction.margin - (g.homeScore - g.awayScore));
+  const sharpest = [...finished].sort((a, b) => marginErr(a) - marginErr(b))[0];
+  const matchup = (g) => `${teamById.get(g.awayId)?.abbr} @ ${teamById.get(g.homeId)?.abbr}`;
 
   return (
     <>
@@ -119,14 +128,27 @@ export default function Today({ initial = [] }) {
         </div>
       )}
 
-      <div className="grid cols-4" style={{ marginBottom: 14 }}>
-        <StatTile label="比赛场次" value={games.length} unit=" 场" hint={upcoming.length < games.length ? `其中 ${games.length - upcoming.length} 场已结束` : undefined} />
-        <StatTile label="最有把握" value={sure ? `${favorite(sure, teamById).cn} ${(conf(sure) * 100).toFixed(0)}%` : none} />
-        <StatTile label="最胶着" value={close ? `${teamById.get(close.awayId)?.abbr} @ ${teamById.get(close.homeId)?.abbr}` : none}
-          hint={close ? `主队胜率 ${(close.prediction.homeWinProb * 100).toFixed(0)}%` : undefined} />
-        <StatTile label="与盘口分歧最大" value={split ? `${teamById.get(split.awayId)?.abbr} @ ${teamById.get(split.homeId)?.abbr}` : none}
-          hint={split ? `模型比盘口${split.market.edge > 0 ? '更看好主队' : '更看好客队'} ${Math.abs(split.market.edge)} 分` : upcoming.length ? '暂无盘口' : undefined} />
-      </div>
+      {review ? (
+        <div className="grid cols-4" style={{ marginBottom: 14 }}>
+          <StatTile label="比赛场次" value={games.length} unit=" 场" hint="已全部结束" />
+          <StatTile label="赛前预测猜对胜方" value={`${hits} / ${finished.length}`}
+            hint={`命中率 ${((hits / finished.length) * 100).toFixed(0)}%，单日样本很小`} />
+          <StatTile label="最大冷门" value={matchup(upset)}
+            hint={`赢球一方赛前胜率只有 ${(winProb(upset) * 100).toFixed(0)}%`} />
+          <StatTile label="分差预测最准" value={matchup(sharpest)}
+            hint={`预测与实际分差只差 ${marginErr(sharpest).toFixed(1)} 分`} />
+        </div>
+      ) : (
+        <div className="grid cols-4" style={{ marginBottom: 14 }}>
+          <StatTile label="比赛场次" value={games.length} unit=" 场"
+            hint={finished.length ? `其中 ${finished.length} 场已结束，猜对 ${hits} 场` : undefined} />
+          <StatTile label="最有把握" value={sure ? `${favorite(sure, teamById).cn} ${(conf(sure) * 100).toFixed(0)}%` : '—'} />
+          <StatTile label="最胶着" value={close ? matchup(close) : '—'}
+            hint={close ? `主队胜率 ${(close.prediction.homeWinProb * 100).toFixed(0)}%` : undefined} />
+          <StatTile label="与盘口分歧最大" value={split ? matchup(split) : '—'}
+            hint={split ? `模型比盘口${split.market.edge > 0 ? '更看好主队' : '更看好客队'} ${Math.abs(split.market.edge)} 分` : '暂无盘口'} />
+        </div>
+      )}
 
       {data.loading || !date ? <Loading /> : games.length === 0 ? (
         <div className="card"><div className="empty">这一天没有比赛</div></div>
