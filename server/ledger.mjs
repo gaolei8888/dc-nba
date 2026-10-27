@@ -25,7 +25,7 @@ const DK = /draft ?kings/i;
  * slate: [{ gameId, date, tipoff, homeId, awayId, pHome, homeElo, awayElo,
  *           odds: { provider, homeMl, awayMl, homeMlOpen, awayMlOpen, eventId } }]
  */
-export function captureRows(slate, { now = Date.now(), windowH = WINDOW_H } = {}) {
+export function captureRows(slate, { now = Date.now(), windowH = WINDOW_H, oddsFetchedAt = null } = {}) {
   const at = new Date(now).toISOString();
   const rows = [];
   for (const g of slate) {
@@ -46,6 +46,8 @@ export function captureRows(slate, { now = Date.now(), windowH = WINDOW_H } = {}
         // 比赛没开打就不存在收盘价，这里如实记 current
         price_at: 'current',
         open_home_ml: o.homeMlOpen ?? null, open_away_ml: o.awayMlOpen ?? null,
+        // 价格是 odds.json 抓的那一刻的，不一定是本次运行时（刷新失败时用的是上一份快照）
+        odds_fetched_at: oddsFetchedAt,
         book_p_home: pBook, edge: g.pHome - pBook, threshold,
         bet: d ? 1 : 0, side: d?.side ?? null, bet_ml: d ? (d.side === 'home' ? o.homeMl : o.awayMl) : null,
       });
@@ -56,7 +58,7 @@ export function captureRows(slate, { now = Date.now(), windowH = WINDOW_H } = {}
 
 const COLS = ['game_id', 'rule', 'book', 'captured_at', 'event_id', 'game_date', 'tipoff_utc',
   'home_id', 'away_id', 'model_p_home', 'home_elo', 'away_elo', 'home_ml', 'away_ml', 'price_at',
-  'open_home_ml', 'open_away_ml', 'book_p_home', 'edge', 'threshold', 'bet', 'side', 'bet_ml'];
+  'open_home_ml', 'open_away_ml', 'odds_fetched_at', 'book_p_home', 'edge', 'threshold', 'bet', 'side', 'bet_ml'];
 
 /** 插入；已存在的 (game_id, rule, book) 由触发器忽略。返回新插入的行数 */
 export function insertBets(db, rows) {
@@ -119,7 +121,7 @@ export function settleBets(db, results, at = new Date().toISOString()) {
 export const ledgerRows = (db) => db.prepare('SELECT * FROM paper_bets ORDER BY game_date, game_id, rule').all();
 
 /** 页面用的账本汇总：每条规则已结算注单的指标 + 还没结算的已下注行 */
-export function ledgerReport(rows, { B } = {}) {
+export function ledgerReport(rows, { B, now = Date.now() } = {}) {
   const asBet = (r) => ({ date: r.game_date, ml: r.bet_ml, won: !!r.won, profit: r.profit, clv: r.clv });
   return {
     captured: new Set(rows.map((r) => r.game_id)).size,
@@ -132,6 +134,8 @@ export function ledgerReport(rows, { B } = {}) {
         ...summarize(mine.filter((r) => r.settled_at != null).map(asBet), { B }),
       };
     }),
-    open: rows.filter((r) => r.rule === PRIMARY_RULE && r.bet && r.settled_at == null),
+    // 今晚：未结算、且开赛不早于 12 小时前（延期或漏结算的旧单不混进来）
+    open: rows.filter((r) => r.rule === PRIMARY_RULE && r.bet && r.settled_at == null
+      && !(Date.parse(r.tipoff_utc) < now - 12 * 3600e3)),
   };
 }

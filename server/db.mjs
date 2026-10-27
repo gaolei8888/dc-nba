@@ -66,11 +66,14 @@ CREATE INDEX IF NOT EXISTS idx_picks_mode   ON picks(mode);
  *     连 INSERT OR REPLACE 也绕不过去（REPLACE 的隐式删除默认不触发 DELETE 触发器）；
  *   - 不能删除；
  *   - 记录时的字段（价格、概率、方向……）任何时候都不能改；
- *   - 结算字段只能从空写成值一次；收盘价/CLV 同样只写一次（可以比比分晚到）。
+ *   - 结算字段只能和 settled_at 一起、从空写成值一次；收盘价/CLV 同样（可以比比分晚到）。
+ *   注意：SQLite 挡不住 DROP TRIGGER 之后再改——这防的是程序 bug 和手滑，不防有意篡改。
  */
 const FROZEN = ['game_id', 'rule', 'book', 'captured_at', 'event_id', 'game_date', 'tipoff_utc',
   'home_id', 'away_id', 'model_p_home', 'home_elo', 'away_elo', 'home_ml', 'away_ml', 'price_at',
-  'open_home_ml', 'open_away_ml', 'book_p_home', 'edge', 'threshold', 'bet', 'side', 'bet_ml'];
+  'open_home_ml', 'open_away_ml', 'odds_fetched_at', 'book_p_home', 'edge', 'threshold', 'bet', 'side', 'bet_ml'];
+const SCORE = ['home_score', 'away_score', 'won', 'profit', 'settled_at'];
+const CLOSE = ['close_home_ml', 'close_away_ml', 'clv'];
 const changed = (cols) => cols.map((c) => `NEW.${c} IS NOT OLD.${c}`).join(' OR ');
 export const LEDGER_SCHEMA = `
 CREATE TABLE IF NOT EXISTS paper_bets (
@@ -91,6 +94,7 @@ CREATE TABLE IF NOT EXISTS paper_bets (
   price_at      TEXT NOT NULL,
   open_home_ml  INTEGER,
   open_away_ml  INTEGER,
+  odds_fetched_at TEXT,
   book_p_home   REAL NOT NULL,
   edge          REAL NOT NULL,
   threshold     REAL NOT NULL,
@@ -114,8 +118,10 @@ CREATE TRIGGER IF NOT EXISTS paper_bets_no_delete BEFORE DELETE ON paper_bets
 BEGIN SELECT RAISE(ABORT, 'paper_bets 只追加：不能删除'); END;
 CREATE TRIGGER IF NOT EXISTS paper_bets_frozen BEFORE UPDATE ON paper_bets
 WHEN ${changed(FROZEN)}
-  OR (OLD.settled_at IS NOT NULL AND (${changed(['home_score', 'away_score', 'won', 'profit', 'settled_at'])}))
-  OR (OLD.close_home_ml IS NOT NULL AND (${changed(['close_home_ml', 'close_away_ml', 'clv'])}))
+  OR (OLD.settled_at IS NOT NULL AND (${changed(SCORE)}))
+  OR (NEW.settled_at IS NULL AND (${changed(SCORE)}))
+  OR (OLD.close_home_ml IS NOT NULL AND (${changed(CLOSE)}))
+  OR (NEW.close_home_ml IS NULL AND (${changed(CLOSE)}))
 BEGIN SELECT RAISE(ABORT, 'paper_bets 只追加：已记录的字段不能改'); END;
 `;
 

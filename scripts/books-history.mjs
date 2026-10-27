@@ -47,12 +47,10 @@ const pairKey = (date, a, b) => `${date}|${Math.min(a, b)}|${Math.max(a, b)}`;
 export const cachePath = (season) => path.join(HISTORY_DIR, `books_${season}.json`);
 
 function loadCache(season) {
-  try {
-    const c = JSON.parse(fs.readFileSync(cachePath(season), 'utf8'));
-    return { season, scanned: c.scanned ?? [], events: c.events ?? {}, games: c.games ?? {} };
-  } catch {
-    return { season, scanned: [], events: {}, games: {} };
-  }
+  // 只有「文件不存在」才从空开始；读坏了要停下，否则下一次落盘会覆盖掉已抓的进度
+  if (!fs.existsSync(cachePath(season))) return { season, scanned: [], events: {}, games: {} };
+  const c = JSON.parse(fs.readFileSync(cachePath(season), 'utf8'));
+  return { season, scanned: c.scanned ?? [], events: c.events ?? {}, games: c.games ?? {} };
 }
 
 function saveCache(c) {
@@ -116,7 +114,22 @@ async function doSeason(season, games) {
   return r;
 }
 
+/** 同时只跑一份：两份并行会互相覆盖缓存、请求速率也翻倍。锁里记 pid，进程不在了就当失效 */
+function lock() {
+  const p = path.join(HISTORY_DIR, '.books-history.lock');
+  fs.mkdirSync(HISTORY_DIR, { recursive: true });
+  try {
+    const pid = Number(fs.readFileSync(p, 'utf8'));
+    process.kill(pid, 0);
+    console.error(`已有一份在跑（pid ${pid}），退出`);
+    process.exit(1);
+  } catch { /* 没有锁或持锁进程已不在 */ }
+  fs.writeFileSync(p, String(process.pid));
+  process.on('exit', () => { try { fs.unlinkSync(p); } catch { /* 已删 */ } });
+}
+
 async function main() {
+  lock();
   const bt = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'backtest.json'), 'utf8'));
   const only = (process.env.SEASONS || '').split(',').map((s) => s.trim()).filter(Boolean);
   const seasons = (only.length ? only : ORDER).filter((s) => bt.seasons[s]);

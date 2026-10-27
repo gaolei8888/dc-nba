@@ -24,7 +24,9 @@
 #      取数据的临时目录和 node 容器里没有 data-db/，只有运行中的 dc-nba 挂着那份持久的 SQLite，
 #      在别处写只会写进一份随即丢弃的副本。先结算（每场最多 1 个 ESPN 请求取 DK 收盘价），
 #      再记录开赛前 14 小时内的比赛（用镜像里刚烤进去的 odds.json，零额外请求）。
-#      账本失败只记日志，不影响刷新结果。
+#      放在 EXIT trap 里：取数失败、体检不过、回滚时也照跑（运行中的容器里还是上一份 odds.json，
+#      账本会记下那份快照的时间）——否则 22:00 那次一失败，当晚的比赛就永远没记。
+#      账本失败只记日志，不影响刷新结果；整个账本步骤限时 5 分钟，不会一直占着锁。
 set -eu
 
 DIR=$(cd "$(dirname "$0")/.." && pwd)
@@ -57,8 +59,16 @@ elif ! flock -n 9; then
   exit 0
 fi
 
+ledger() {
+  for c in settle capture; do
+    timeout 300 docker exec -e NODE_NO_WARNINGS=1 "$CONTAINER" node scripts/ledger.mjs "$c" \
+      || log "模拟投注账本 $c 失败（不影响线上）"
+  done
+}
+
 STAGE=$(mktemp -d)
-trap 'rm -rf "$STAGE"' EXIT
+# --fetch-only 不碰线上，账本也不跑
+trap '[ "$FETCH_ONLY" = 1 ] || ledger; rm -rf "$STAGE"' EXIT
 
 log "开始刷新（$DIR）"
 # 只拷取数据需要的东西：代码 + 快照。不拷 app.db、备份。
@@ -145,15 +155,8 @@ healthy() {
 }
 
 cd "$DIR"
-ledger() {
-  for c in settle capture; do
-    docker exec -e NODE_NO_WARNINGS=1 "$CONTAINER" node scripts/ledger.mjs "$c" || log "模拟投注账本 $c 失败（不影响线上）"
-  done
-}
-
 if docker compose build -q && docker compose up -d && healthy; then
   [ "$MODE" = incoming ] && rm -f "$DIR"/incoming/*.json
-  ledger
   log "完成"
   exit 0
 fi

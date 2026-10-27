@@ -88,8 +88,9 @@ for (const season of seasons) {
   }
 }
 
-// ---- 页面顶部那一句：主规则 × DraftKings（前向账本也只有 DK），跨全部有 DK 的赛季
-const dkSeasons = seasons.filter((s) => booksOf(s).includes('draftkings'));
+// ---- 页面顶部那一句：主规则 × DraftKings（前向账本也只有 DK），只用样本外赛季——
+// 2022-23 是唯一允许看门槛的赛季，放进结论就等于拿调参季给自己作证。含它的合计仍在表里。
+const dkSeasons = seasons.filter((s) => s > TUNING_SEASON && booksOf(s).includes('draftkings'));
 const head = summarize(placeBets(games.filter((g) => dkSeasons.includes(g.season)), { book: 'draftkings', threshold: PRIMARY }), { B });
 const report = {
   builtAt: new Date().toISOString(),
@@ -99,7 +100,7 @@ const report = {
   coverage,
   headline: {
     book: 'draftkings', threshold: PRIMARY, seasons: dkSeasons, ...head,
-    verdict: verdictOf(head, { seasons: dkSeasons.length }),
+    verdict: `样本外（${TUNING_SEASON} 之后）${verdictOf(head, { seasons: dkSeasons.length })}`,
   },
   table, clv, accuracy,
 };

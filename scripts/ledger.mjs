@@ -33,7 +33,8 @@ function capture() {
     teams: readJson('teams.json'), players: readJson('players.json'),
     schedule: readJson('schedule.json'), meta: readJson('meta.json'),
   };
-  const odds = readJson('odds.json')?.games ?? {};
+  const snap = readJson('odds.json');
+  const odds = snap?.games ?? {};
   const elo = new Map(store.teams.map((t) => [t.teamId, t.elo]));
   const upcoming = store.schedule.games.filter((g) => g.type === 'regular' && g.homeScore == null && odds[g.gameId]);
   // 生产默认参数、不套任何缺阵勾选——账本记的是线上默认预测
@@ -42,14 +43,27 @@ function capture() {
     pHome: g.prediction.homeWinProb, homeElo: elo.get(g.homeId), awayElo: elo.get(g.awayId),
     odds: odds[g.gameId],
   }));
-  const rows = captureRows(slate);
+  const rows = captureRows(slate, { oddsFetchedAt: snap?.fetchedAt ?? null });
   const n = insertBets(db, rows);
-  console.log(`· 账本记录：窗口内 ${new Set(rows.map((r) => r.game_id)).size} 场，新插入 ${n} 行（已记过的忽略）`);
+  // 窗口内却没有 DK 价的比赛（还没出线、或中立场 ESPN 主客与赛程相反没对上）记一笔，不默默漏掉
+  const now = Date.now();
+  const missed = store.schedule.games.filter((g) => g.type === 'regular' && g.homeScore == null
+    && Date.parse(g.dateTimeUtc) > now && Date.parse(g.dateTimeUtc) - now < 14 * 3600e3
+    && !rows.some((r) => r.game_id === g.gameId)).map((g) => g.gameId);
+  console.log(`· 账本记录：窗口内 ${new Set(rows.map((r) => r.game_id)).size} 场，新插入 ${n} 行（已记过的忽略）`
+    + `；赔率快照 ${snap?.fetchedAt ?? '—'}${missed.length ? `；窗口内无 DK 价未记 ${missed.length} 场：${missed.join(',')}` : ''}`);
 }
 
+let lastStart = 0;
+/** 每次尝试（含 get 内部重试）之间至少隔 GAP_MS */
+const throttle = async () => {
+  const wait = lastStart + GAP_MS - Date.now();
+  if (wait > 0) await new Promise((r) => { setTimeout(r, wait); });
+  lastStart = Date.now();
+};
+
 async function dkClose(eventId) {
-  await new Promise((r) => { setTimeout(r, GAP_MS); });
-  const dk = (await fetchEventOddsItems(eventId)).map(trimItem).find((it) => it && bookOf(it) === 'draftkings');
+  const dk = (await fetchEventOddsItems(eventId, { before: throttle })).map(trimItem).find((it) => it && bookOf(it) === 'draftkings');
   return dk?.close ?? null;   // 只认真正的 close，没有就留空
 }
 

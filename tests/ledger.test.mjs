@@ -104,3 +104,20 @@ test('ledgerReport：按规则汇总已结算注单，今晚列表只含未结�
   assert.deepEqual(rep.open.map((r) => r.game_id), ['g2']);
   assert.equal(rep.captured, 2);
 });
+
+test('结算前也不能偷偷填/改结果：比分与盈亏只能和 settled_at 一起写；收盘价只能和 close_home_ml 一起写', () => {
+  const db = fresh();
+  insertBets(db, captureRows([slateGame('g1', 0.66, 10)], { now: NOW }));
+  assert.throws(() => db.exec("UPDATE paper_bets SET home_score = 1, won = 1, profit = 99 WHERE game_id = 'g1'"), /只追加/);
+  assert.throws(() => db.exec("UPDATE paper_bets SET clv = 0.7, close_away_ml = 100 WHERE game_id = 'g1'"), /只追加/);
+  assert.equal(ledgerRows(db).every((r) => r.profit == null && r.clv == null), true);
+});
+
+test('captureRows 记下赔率快照时间；ledgerReport 的今晚列表不含已过开赛 12 小时以上的旧单', () => {
+  const rows = captureRows([slateGame('g1', 0.66, 10)], { now: NOW, oddsFetchedAt: '2026-10-28T13:55:00Z' });
+  assert.equal(rows[0].odds_fetched_at, '2026-10-28T13:55:00Z');
+  const db = fresh();
+  insertBets(db, rows);
+  assert.equal(ledgerReport(ledgerRows(db), { B: 50, now: NOW }).open.length, 1);
+  assert.equal(ledgerReport(ledgerRows(db), { B: 50, now: NOW + 30 * 3600e3 }).open.length, 0, '延期/漏结算的旧单不算今晚');
+});

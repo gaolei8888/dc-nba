@@ -262,7 +262,7 @@ function PaperBetting({ teamById }) {
 
       {bt && (
         <div className="grid cols-5" style={{ margin: '14px 0' }}>
-          <StatTile label="历史注数（DK, ≥3%）" value={bt.headline.bets} hint={bt.headline.seasons.join(' / ')} />
+          <StatTile label="样本外注数（DK, ≥3%）" value={bt.headline.bets} hint={bt.headline.seasons.join(' / ') || '—'} />
           <StatTile label="ROI" value={roi(bt.headline.roi)} hint={`95% 区间 ${ciRoi(bt.headline.ci)}`} />
           <StatTile label="胜率 / 保本胜率" value={`${pct(bt.headline.winRate)} / ${pct(bt.headline.breakEven)}`} hint="胜率要高过保本线才不亏" />
           <StatTile label="累计盈亏" value={signed(bt.headline.units)} unit=" 注" hint="每注 1 单位" />
@@ -272,7 +272,7 @@ function PaperBetting({ teamById }) {
 
       <div className="grid cols-2">
         <div className="card">
-          <h2>累计盈亏 · 历史回测<span className="sub">DraftKings、edge ≥ 3%，按下注顺序</span></h2>
+          <h2>累计盈亏 · 历史回测<span className="sub">DraftKings、edge ≥ 3%、样本外赛季，按下注顺序</span></h2>
           {bt ? <Curve points={bt.headline.curve} label="历史回测累计盈亏" /> : <div className="empty">没有历史回测</div>}
         </div>
         <div className="card">
@@ -313,7 +313,8 @@ function PaperBetting({ teamById }) {
       {bt && (
         <div className="card">
           <h2>博彩商 × 门槛<span className="sub">ROI 区间为按场 bootstrap 95%；门槛只允许在 {bt.rules.tuningSeason} 上看，之后各季只报告</span></h2>
-          <div style={{ marginBottom: 10 }}>
+          {/* 5 个按钮在手机上比内容区宽：放进可横向滚动的容器，页面本身不横滚 */}
+          <div style={{ marginBottom: 10, maxWidth: '100%', overflowX: 'auto' }}>
             <Segmented value={season} onChange={setSeason}
               options={[{ value: 'all', label: '合计' }, ...seasons.map((s) => ({ value: s, label: s }))]} />
           </div>
@@ -352,6 +353,7 @@ function PaperBetting({ teamById }) {
                   ['赛季', (r) => r.season, true],
                   ['注数', (r) => r.bets],
                   ['平均 CLV', (r) => `${signed(r.clv.mean * 100, 2)} 个百分点`],
+                  ['95% 区间', (r) => `${signed(r.clv.lo * 100, 2)} ~ ${signed(r.clv.hi * 100, 2)}`],
                   ['好于收盘', (r) => pct(r.clv.beatClose, 0)],
                   ['ROI', (r) => roi(r.roi)],
                 ]}
