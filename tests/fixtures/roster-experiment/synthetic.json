@@ -1,0 +1,977 @@
+{
+  "schemaVersion": 1,
+  "kind": "synthetic",
+  "rosterMode": "opening",
+  "trainingSeasons": [
+    "2023-24"
+  ],
+  "blendGrid": [
+    0,
+    0.25,
+    0.5,
+    0.75,
+    1
+  ],
+  "highTurnoverThreshold": 0.3,
+  "seasons": [
+    {
+      "season": "2023-24",
+      "openingAt": "2023-10-20T12:00:00Z",
+      "complete": true,
+      "expectedGames": 12,
+      "source": "synthetic full schedule for a two-team test league",
+      "teams": [
+        {
+          "teamId": 1,
+          "prior": {
+            "availableAt": "2023-10-20T12:00:00Z",
+            "source": "synthetic prior data",
+            "eloStart": 1540,
+            "pace": 100,
+            "turnoverAdj": 0.2,
+            "players": [
+              {
+                "playerId": 11,
+                "minutes": 3280
+              },
+              {
+                "playerId": 12,
+                "minutes": 3280
+              },
+              {
+                "playerId": 13,
+                "minutes": 3280
+              },
+              {
+                "playerId": 14,
+                "minutes": 3280
+              },
+              {
+                "playerId": 19,
+                "minutes": 3280
+              },
+              {
+                "playerId": 20,
+                "minutes": 3280
+              }
+            ]
+          }
+        },
+        {
+          "teamId": 2,
+          "prior": {
+            "availableAt": "2023-10-20T12:00:00Z",
+            "source": "synthetic prior data",
+            "eloStart": 1460,
+            "pace": 100,
+            "turnoverAdj": -0.2,
+            "players": [
+              {
+                "playerId": 21,
+                "minutes": 3280
+              },
+              {
+                "playerId": 22,
+                "minutes": 3280
+              },
+              {
+                "playerId": 23,
+                "minutes": 3280
+              },
+              {
+                "playerId": 24,
+                "minutes": 3280
+              },
+              {
+                "playerId": 25,
+                "minutes": 3280
+              },
+              {
+                "playerId": 26,
+                "minutes": 3280
+              }
+            ]
+          }
+        }
+      ],
+      "snapshots": [
+        {
+          "teamId": 1,
+          "effectiveAt": "2023-10-20T12:00:00Z",
+          "availableAt": "2023-10-20T12:00:00Z",
+          "source": "invented depth chart; not NBA observations",
+          "players": [
+            {
+              "playerId": 11,
+              "availableAt": "2023-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 1
+            },
+            {
+              "playerId": 12,
+              "availableAt": "2023-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 1
+            },
+            {
+              "playerId": 13,
+              "availableAt": "2023-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 1
+            },
+            {
+              "playerId": 14,
+              "availableAt": "2023-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 1
+            },
+            {
+              "playerId": 15,
+              "availableAt": "2023-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 1
+            },
+            {
+              "playerId": 16,
+              "availableAt": "2023-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 1
+            }
+          ]
+        },
+        {
+          "teamId": 2,
+          "effectiveAt": "2023-10-20T12:00:00Z",
+          "availableAt": "2023-10-20T12:00:00Z",
+          "source": "invented depth chart; not NBA observations",
+          "players": [
+            {
+              "playerId": 21,
+              "availableAt": "2023-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 0
+            },
+            {
+              "playerId": 22,
+              "availableAt": "2023-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 0
+            },
+            {
+              "playerId": 23,
+              "availableAt": "2023-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 0
+            },
+            {
+              "playerId": 24,
+              "availableAt": "2023-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 0
+            },
+            {
+              "playerId": 25,
+              "availableAt": "2023-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 0
+            },
+            {
+              "playerId": 26,
+              "availableAt": "2023-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 0
+            }
+          ]
+        }
+      ],
+      "games": [
+        {
+          "gameId": "2023-01",
+          "date": "2023-10-21",
+          "predictionAt": "2023-10-21T18:00:00Z",
+          "resultAt": "2023-10-21T21:00:00Z",
+          "homeId": 1,
+          "awayId": 2,
+          "homeScore": 110,
+          "awayScore": 100,
+          "neutral": false
+        },
+        {
+          "gameId": "2023-02",
+          "date": "2023-10-22",
+          "predictionAt": "2023-10-22T18:00:00Z",
+          "resultAt": "2023-10-22T21:00:00Z",
+          "homeId": 2,
+          "awayId": 1,
+          "homeScore": 100,
+          "awayScore": 110,
+          "neutral": false
+        },
+        {
+          "gameId": "2023-03",
+          "date": "2023-10-23",
+          "predictionAt": "2023-10-23T18:00:00Z",
+          "resultAt": "2023-10-23T21:00:00Z",
+          "homeId": 1,
+          "awayId": 2,
+          "homeScore": 110,
+          "awayScore": 100,
+          "neutral": false
+        },
+        {
+          "gameId": "2023-04",
+          "date": "2023-10-24",
+          "predictionAt": "2023-10-24T18:00:00Z",
+          "resultAt": "2023-10-24T21:00:00Z",
+          "homeId": 2,
+          "awayId": 1,
+          "homeScore": 100,
+          "awayScore": 110,
+          "neutral": false
+        },
+        {
+          "gameId": "2023-05",
+          "date": "2023-10-25",
+          "predictionAt": "2023-10-25T18:00:00Z",
+          "resultAt": "2023-10-25T21:00:00Z",
+          "homeId": 1,
+          "awayId": 2,
+          "homeScore": 110,
+          "awayScore": 100,
+          "neutral": false
+        },
+        {
+          "gameId": "2023-06",
+          "date": "2023-10-26",
+          "predictionAt": "2023-10-26T18:00:00Z",
+          "resultAt": "2023-10-26T21:00:00Z",
+          "homeId": 2,
+          "awayId": 1,
+          "homeScore": 100,
+          "awayScore": 110,
+          "neutral": false
+        },
+        {
+          "gameId": "2023-07",
+          "date": "2023-10-27",
+          "predictionAt": "2023-10-27T18:00:00Z",
+          "resultAt": "2023-10-27T21:00:00Z",
+          "homeId": 1,
+          "awayId": 2,
+          "homeScore": 110,
+          "awayScore": 100,
+          "neutral": false
+        },
+        {
+          "gameId": "2023-08",
+          "date": "2023-10-28",
+          "predictionAt": "2023-10-28T18:00:00Z",
+          "resultAt": "2023-10-28T21:00:00Z",
+          "homeId": 2,
+          "awayId": 1,
+          "homeScore": 100,
+          "awayScore": 110,
+          "neutral": false
+        },
+        {
+          "gameId": "2023-09",
+          "date": "2023-10-29",
+          "predictionAt": "2023-10-29T18:00:00Z",
+          "resultAt": "2023-10-29T21:00:00Z",
+          "homeId": 1,
+          "awayId": 2,
+          "homeScore": 110,
+          "awayScore": 100,
+          "neutral": false
+        },
+        {
+          "gameId": "2023-10",
+          "date": "2023-10-30",
+          "predictionAt": "2023-10-30T18:00:00Z",
+          "resultAt": "2023-10-30T21:00:00Z",
+          "homeId": 2,
+          "awayId": 1,
+          "homeScore": 100,
+          "awayScore": 110,
+          "neutral": false
+        },
+        {
+          "gameId": "2023-11",
+          "date": "2023-10-31",
+          "predictionAt": "2023-10-31T18:00:00Z",
+          "resultAt": "2023-10-31T21:00:00Z",
+          "homeId": 1,
+          "awayId": 2,
+          "homeScore": 110,
+          "awayScore": 100,
+          "neutral": false
+        },
+        {
+          "gameId": "2023-12",
+          "date": "2023-11-01",
+          "predictionAt": "2023-11-01T18:00:00Z",
+          "resultAt": "2023-11-01T21:00:00Z",
+          "homeId": 2,
+          "awayId": 1,
+          "homeScore": 100,
+          "awayScore": 110,
+          "neutral": false
+        }
+      ]
+    },
+    {
+      "season": "2024-25",
+      "openingAt": "2024-10-20T12:00:00Z",
+      "complete": true,
+      "expectedGames": 12,
+      "source": "synthetic full schedule for a two-team test league",
+      "teams": [
+        {
+          "teamId": 1,
+          "prior": {
+            "availableAt": "2024-10-20T12:00:00Z",
+            "source": "synthetic prior data",
+            "eloStart": 1540,
+            "pace": 100,
+            "turnoverAdj": 0.2,
+            "players": [
+              {
+                "playerId": 11,
+                "minutes": 3280
+              },
+              {
+                "playerId": 12,
+                "minutes": 3280
+              },
+              {
+                "playerId": 13,
+                "minutes": 3280
+              },
+              {
+                "playerId": 14,
+                "minutes": 3280
+              },
+              {
+                "playerId": 19,
+                "minutes": 3280
+              },
+              {
+                "playerId": 20,
+                "minutes": 3280
+              }
+            ]
+          }
+        },
+        {
+          "teamId": 2,
+          "prior": {
+            "availableAt": "2024-10-20T12:00:00Z",
+            "source": "synthetic prior data",
+            "eloStart": 1460,
+            "pace": 100,
+            "turnoverAdj": -0.2,
+            "players": [
+              {
+                "playerId": 21,
+                "minutes": 3280
+              },
+              {
+                "playerId": 22,
+                "minutes": 3280
+              },
+              {
+                "playerId": 23,
+                "minutes": 3280
+              },
+              {
+                "playerId": 24,
+                "minutes": 3280
+              },
+              {
+                "playerId": 25,
+                "minutes": 3280
+              },
+              {
+                "playerId": 26,
+                "minutes": 3280
+              }
+            ]
+          }
+        }
+      ],
+      "snapshots": [
+        {
+          "teamId": 1,
+          "effectiveAt": "2024-10-20T12:00:00Z",
+          "availableAt": "2024-10-20T12:00:00Z",
+          "source": "invented depth chart; not NBA observations",
+          "players": [
+            {
+              "playerId": 11,
+              "availableAt": "2024-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 1
+            },
+            {
+              "playerId": 12,
+              "availableAt": "2024-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 1
+            },
+            {
+              "playerId": 13,
+              "availableAt": "2024-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 1
+            },
+            {
+              "playerId": 14,
+              "availableAt": "2024-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 1
+            },
+            {
+              "playerId": 15,
+              "availableAt": "2024-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 1
+            },
+            {
+              "playerId": 16,
+              "availableAt": "2024-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 1
+            }
+          ]
+        },
+        {
+          "teamId": 2,
+          "effectiveAt": "2024-10-20T12:00:00Z",
+          "availableAt": "2024-10-20T12:00:00Z",
+          "source": "invented depth chart; not NBA observations",
+          "players": [
+            {
+              "playerId": 21,
+              "availableAt": "2024-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 0
+            },
+            {
+              "playerId": 22,
+              "availableAt": "2024-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 0
+            },
+            {
+              "playerId": 23,
+              "availableAt": "2024-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 0
+            },
+            {
+              "playerId": 24,
+              "availableAt": "2024-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 0
+            },
+            {
+              "playerId": 25,
+              "availableAt": "2024-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 0
+            },
+            {
+              "playerId": 26,
+              "availableAt": "2024-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 0
+            }
+          ]
+        }
+      ],
+      "games": [
+        {
+          "gameId": "2024-01",
+          "date": "2024-10-21",
+          "predictionAt": "2024-10-21T18:00:00Z",
+          "resultAt": "2024-10-21T21:00:00Z",
+          "homeId": 1,
+          "awayId": 2,
+          "homeScore": 110,
+          "awayScore": 100,
+          "neutral": false
+        },
+        {
+          "gameId": "2024-02",
+          "date": "2024-10-22",
+          "predictionAt": "2024-10-22T18:00:00Z",
+          "resultAt": "2024-10-22T21:00:00Z",
+          "homeId": 2,
+          "awayId": 1,
+          "homeScore": 100,
+          "awayScore": 110,
+          "neutral": false
+        },
+        {
+          "gameId": "2024-03",
+          "date": "2024-10-23",
+          "predictionAt": "2024-10-23T18:00:00Z",
+          "resultAt": "2024-10-23T21:00:00Z",
+          "homeId": 1,
+          "awayId": 2,
+          "homeScore": 110,
+          "awayScore": 100,
+          "neutral": false
+        },
+        {
+          "gameId": "2024-04",
+          "date": "2024-10-24",
+          "predictionAt": "2024-10-24T18:00:00Z",
+          "resultAt": "2024-10-24T21:00:00Z",
+          "homeId": 2,
+          "awayId": 1,
+          "homeScore": 100,
+          "awayScore": 110,
+          "neutral": false
+        },
+        {
+          "gameId": "2024-05",
+          "date": "2024-10-25",
+          "predictionAt": "2024-10-25T18:00:00Z",
+          "resultAt": "2024-10-25T21:00:00Z",
+          "homeId": 1,
+          "awayId": 2,
+          "homeScore": 110,
+          "awayScore": 100,
+          "neutral": false
+        },
+        {
+          "gameId": "2024-06",
+          "date": "2024-10-26",
+          "predictionAt": "2024-10-26T18:00:00Z",
+          "resultAt": "2024-10-26T21:00:00Z",
+          "homeId": 2,
+          "awayId": 1,
+          "homeScore": 100,
+          "awayScore": 110,
+          "neutral": false
+        },
+        {
+          "gameId": "2024-07",
+          "date": "2024-10-27",
+          "predictionAt": "2024-10-27T18:00:00Z",
+          "resultAt": "2024-10-27T21:00:00Z",
+          "homeId": 1,
+          "awayId": 2,
+          "homeScore": 110,
+          "awayScore": 100,
+          "neutral": false
+        },
+        {
+          "gameId": "2024-08",
+          "date": "2024-10-28",
+          "predictionAt": "2024-10-28T18:00:00Z",
+          "resultAt": "2024-10-28T21:00:00Z",
+          "homeId": 2,
+          "awayId": 1,
+          "homeScore": 100,
+          "awayScore": 110,
+          "neutral": false
+        },
+        {
+          "gameId": "2024-09",
+          "date": "2024-10-29",
+          "predictionAt": "2024-10-29T18:00:00Z",
+          "resultAt": "2024-10-29T21:00:00Z",
+          "homeId": 1,
+          "awayId": 2,
+          "homeScore": 110,
+          "awayScore": 100,
+          "neutral": false
+        },
+        {
+          "gameId": "2024-10",
+          "date": "2024-10-30",
+          "predictionAt": "2024-10-30T18:00:00Z",
+          "resultAt": "2024-10-30T21:00:00Z",
+          "homeId": 2,
+          "awayId": 1,
+          "homeScore": 100,
+          "awayScore": 110,
+          "neutral": false
+        },
+        {
+          "gameId": "2024-11",
+          "date": "2024-10-31",
+          "predictionAt": "2024-10-31T18:00:00Z",
+          "resultAt": "2024-10-31T21:00:00Z",
+          "homeId": 1,
+          "awayId": 2,
+          "homeScore": 110,
+          "awayScore": 100,
+          "neutral": false
+        },
+        {
+          "gameId": "2024-12",
+          "date": "2024-11-01",
+          "predictionAt": "2024-11-01T18:00:00Z",
+          "resultAt": "2024-11-01T21:00:00Z",
+          "homeId": 2,
+          "awayId": 1,
+          "homeScore": 100,
+          "awayScore": 110,
+          "neutral": false
+        }
+      ]
+    },
+    {
+      "season": "2025-26",
+      "openingAt": "2025-10-20T12:00:00Z",
+      "complete": true,
+      "expectedGames": 12,
+      "source": "synthetic full schedule for a two-team test league",
+      "teams": [
+        {
+          "teamId": 1,
+          "prior": {
+            "availableAt": "2025-10-20T12:00:00Z",
+            "source": "synthetic prior data",
+            "eloStart": 1540,
+            "pace": 100,
+            "turnoverAdj": 0.2,
+            "players": [
+              {
+                "playerId": 11,
+                "minutes": 3280
+              },
+              {
+                "playerId": 12,
+                "minutes": 3280
+              },
+              {
+                "playerId": 13,
+                "minutes": 3280
+              },
+              {
+                "playerId": 14,
+                "minutes": 3280
+              },
+              {
+                "playerId": 19,
+                "minutes": 3280
+              },
+              {
+                "playerId": 20,
+                "minutes": 3280
+              }
+            ]
+          }
+        },
+        {
+          "teamId": 2,
+          "prior": {
+            "availableAt": "2025-10-20T12:00:00Z",
+            "source": "synthetic prior data",
+            "eloStart": 1460,
+            "pace": 100,
+            "turnoverAdj": -0.2,
+            "players": [
+              {
+                "playerId": 21,
+                "minutes": 3280
+              },
+              {
+                "playerId": 22,
+                "minutes": 3280
+              },
+              {
+                "playerId": 23,
+                "minutes": 3280
+              },
+              {
+                "playerId": 24,
+                "minutes": 3280
+              },
+              {
+                "playerId": 25,
+                "minutes": 3280
+              },
+              {
+                "playerId": 26,
+                "minutes": 3280
+              }
+            ]
+          }
+        }
+      ],
+      "snapshots": [
+        {
+          "teamId": 1,
+          "effectiveAt": "2025-10-20T12:00:00Z",
+          "availableAt": "2025-10-20T12:00:00Z",
+          "source": "invented depth chart; not NBA observations",
+          "players": [
+            {
+              "playerId": 11,
+              "availableAt": "2025-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 1
+            },
+            {
+              "playerId": 12,
+              "availableAt": "2025-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 1
+            },
+            {
+              "playerId": 13,
+              "availableAt": "2025-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 1
+            },
+            {
+              "playerId": 14,
+              "availableAt": "2025-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 1
+            },
+            {
+              "playerId": 15,
+              "availableAt": "2025-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 1
+            },
+            {
+              "playerId": 16,
+              "availableAt": "2025-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 1
+            }
+          ]
+        },
+        {
+          "teamId": 2,
+          "effectiveAt": "2025-10-20T12:00:00Z",
+          "availableAt": "2025-10-20T12:00:00Z",
+          "source": "invented depth chart; not NBA observations",
+          "players": [
+            {
+              "playerId": 21,
+              "availableAt": "2025-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 0
+            },
+            {
+              "playerId": 22,
+              "availableAt": "2025-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 0
+            },
+            {
+              "playerId": 23,
+              "availableAt": "2025-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 0
+            },
+            {
+              "playerId": 24,
+              "availableAt": "2025-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 0
+            },
+            {
+              "playerId": 25,
+              "availableAt": "2025-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 0
+            },
+            {
+              "playerId": 26,
+              "availableAt": "2025-10-20T12:00:00Z",
+              "projectedMinutes": 40,
+              "availability": 1,
+              "impact": 0
+            }
+          ]
+        }
+      ],
+      "games": [
+        {
+          "gameId": "2025-01",
+          "date": "2025-10-21",
+          "predictionAt": "2025-10-21T18:00:00Z",
+          "resultAt": "2025-10-21T21:00:00Z",
+          "homeId": 1,
+          "awayId": 2,
+          "homeScore": 110,
+          "awayScore": 100,
+          "neutral": false
+        },
+        {
+          "gameId": "2025-02",
+          "date": "2025-10-22",
+          "predictionAt": "2025-10-22T18:00:00Z",
+          "resultAt": "2025-10-22T21:00:00Z",
+          "homeId": 2,
+          "awayId": 1,
+          "homeScore": 100,
+          "awayScore": 110,
+          "neutral": false
+        },
+        {
+          "gameId": "2025-03",
+          "date": "2025-10-23",
+          "predictionAt": "2025-10-23T18:00:00Z",
+          "resultAt": "2025-10-23T21:00:00Z",
+          "homeId": 1,
+          "awayId": 2,
+          "homeScore": 110,
+          "awayScore": 100,
+          "neutral": false
+        },
+        {
+          "gameId": "2025-04",
+          "date": "2025-10-24",
+          "predictionAt": "2025-10-24T18:00:00Z",
+          "resultAt": "2025-10-24T21:00:00Z",
+          "homeId": 2,
+          "awayId": 1,
+          "homeScore": 100,
+          "awayScore": 110,
+          "neutral": false
+        },
+        {
+          "gameId": "2025-05",
+          "date": "2025-10-25",
+          "predictionAt": "2025-10-25T18:00:00Z",
+          "resultAt": "2025-10-25T21:00:00Z",
+          "homeId": 1,
+          "awayId": 2,
+          "homeScore": 110,
+          "awayScore": 100,
+          "neutral": false
+        },
+        {
+          "gameId": "2025-06",
+          "date": "2025-10-26",
+          "predictionAt": "2025-10-26T18:00:00Z",
+          "resultAt": "2025-10-26T21:00:00Z",
+          "homeId": 2,
+          "awayId": 1,
+          "homeScore": 100,
+          "awayScore": 110,
+          "neutral": false
+        },
+        {
+          "gameId": "2025-07",
+          "date": "2025-10-27",
+          "predictionAt": "2025-10-27T18:00:00Z",
+          "resultAt": "2025-10-27T21:00:00Z",
+          "homeId": 1,
+          "awayId": 2,
+          "homeScore": 110,
+          "awayScore": 100,
+          "neutral": false
+        },
+        {
+          "gameId": "2025-08",
+          "date": "2025-10-28",
+          "predictionAt": "2025-10-28T18:00:00Z",
+          "resultAt": "2025-10-28T21:00:00Z",
+          "homeId": 2,
+          "awayId": 1,
+          "homeScore": 100,
+          "awayScore": 110,
+          "neutral": false
+        },
+        {
+          "gameId": "2025-09",
+          "date": "2025-10-29",
+          "predictionAt": "2025-10-29T18:00:00Z",
+          "resultAt": "2025-10-29T21:00:00Z",
+          "homeId": 1,
+          "awayId": 2,
+          "homeScore": 110,
+          "awayScore": 100,
+          "neutral": false
+        },
+        {
+          "gameId": "2025-10",
+          "date": "2025-10-30",
+          "predictionAt": "2025-10-30T18:00:00Z",
+          "resultAt": "2025-10-30T21:00:00Z",
+          "homeId": 2,
+          "awayId": 1,
+          "homeScore": 100,
+          "awayScore": 110,
+          "neutral": false
+        },
+        {
+          "gameId": "2025-11",
+          "date": "2025-10-31",
+          "predictionAt": "2025-10-31T18:00:00Z",
+          "resultAt": "2025-10-31T21:00:00Z",
+          "homeId": 1,
+          "awayId": 2,
+          "homeScore": 110,
+          "awayScore": 100,
+          "neutral": false
+        },
+        {
+          "gameId": "2025-12",
+          "date": "2025-11-01",
+          "predictionAt": "2025-11-01T18:00:00Z",
+          "resultAt": "2025-11-01T21:00:00Z",
+          "homeId": 2,
+          "awayId": 1,
+          "homeScore": 100,
+          "awayScore": 110,
+          "neutral": false
+        }
+      ]
+    }
+  ],
+  "parameters": {
+    "availableAt": "2023-10-19T00:00:00Z",
+    "source": "fixed synthetic test settings; not fitted to NBA holdout outcomes",
+    "k": 20,
+    "homeAdv": 1.6,
+    "restWeight": 1.8,
+    "spreadSd": 12
+  }
+}
