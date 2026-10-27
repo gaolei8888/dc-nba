@@ -9,8 +9,27 @@
  * 实测归一化后 75/75 全部命中。
  */
 
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-  + '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+import { chromeHeaders, createPoliteClient } from './politeFetch.mjs';
+
+const env = (k, d) => (process.env[k] === undefined || process.env[k] === '' ? d : Number(process.env[k]));
+
+/**
+ * 所有 ESPN 请求（伤病、比分、盘口）共用一个客户端：一个队列、一个 cookie 罐、一个熔断。
+ * 像从 www.espn.com 页面里发出的 fetch。ESPN 比 NBA 宽松，间隔短一些；
+ * 但几千个请求的历史盘口脚本照样要排队、照样会被上限和熔断拦住。
+ */
+export const espnHttp = createPoliteClient({
+  name: 'espn',
+  headers: chromeHeaders({ referer: 'https://www.espn.com/', origin: 'https://www.espn.com' }),
+  gapMs: [env('ESPN_MIN_GAP_MS', 300), env('ESPN_MAX_GAP_MS', 800)],
+  pauseEvery: [20, 40],
+  pauseMs: [2000, 6000],
+  concurrency: Math.max(1, env('ESPN_CONCURRENCY', 1)),
+  maxPerRun: env('ESPN_MAX_REQUESTS', 3000),
+  maxPerDay: env('ESPN_MAX_PER_DAY', 12000),
+  timeoutMs: 20000,
+  backoffBaseMs: 10 * 60000,
+});
 
 const INJURIES_URL = 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries';
 
@@ -27,27 +46,7 @@ export const normalizeName = (s) => String(s ?? '')
   .trim()
   .toLowerCase();
 
-async function get(url, { tries = 3, timeoutMs = 20000 } = {}) {
-  let lastErr;
-  for (let i = 0; i < tries; i++) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-    try {
-      const res = await fetch(url, {
-        headers: { 'User-Agent': UA, Accept: 'application/json' },
-        signal: ctrl.signal,
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return await res.json();
-    } catch (e) {
-      lastErr = e;
-      await new Promise((r) => { setTimeout(r, 1200 * (i + 1)); });
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  throw new Error(`ESPN 请求失败 ${url}: ${lastErr?.message}`);
-}
+const get = (url) => espnHttp.get(url);
 
 /** ESPN 的状态文案 -> 我们的三档 */
 function normalizeStatus(raw) {

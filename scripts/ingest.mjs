@@ -7,7 +7,7 @@
  */
 import fsNode from 'node:fs';
 import pathNode from 'node:path';
-import { nbaGet, statsUrl, toRows, writeJson, DATA_DIR } from '../server/nbaClient.mjs';
+import { nbaGet as nbaGetRaw, statsUrl, toRows, writeJson, DATA_DIR } from '../server/nbaClient.mjs';
 import { TEAM_META, POS_CN } from '../server/teamMeta.mjs';
 import { fetchInjuries } from '../server/espnClient.mjs';
 import { fetchUpcomingOdds } from '../server/oddsClient.mjs';
@@ -33,6 +33,9 @@ const PRIOR_SEASON = process.env.PRIOR_SEASON || d.prior;
 const TARGET_SEASON = process.env.TARGET_SEASON || d.target;
 
 const log = (...a) => console.log('·', ...a);
+
+/** ingest 的请求都走 data/raw/nba/ 缓存：往季接口不会变，永不重抓；本季 1 小时内重跑也不重抓 */
+const nbaGet = (url, opts) => nbaGetRaw(url, { cache: true, ...opts });
 
 const DASH_BASE = {
   Conference: '', DateFrom: '', DateTo: '', Division: '', GameScope: '', GameSegment: '',

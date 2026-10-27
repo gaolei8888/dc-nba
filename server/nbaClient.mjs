@@ -1,103 +1,93 @@
 /**
  * stats.nba.com 客户端。
- * 该站点对非浏览器请求非常敏感：必须带完整的浏览器请求头，
- * 并且需要串行 + 限速 + 重试，否则连接会直接被挂起（curl 表现为 http=000）。
+ * 该站点对非浏览器请求非常敏感（Akamai 反爬）：请求头不像浏览器、发得太密，
+ * 连接就会被挂起（curl 表现为 http=000）或直接 403。被拦的是「像机器人的请求」，不是 IP——
+ * 同一台机器上用户自己的 Chrome 照常能打开统计页。
  */
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
+import { chromeHeaders, createPoliteClient, nodeTransport } from './politeFetch.mjs';
+import { chromeTransport } from './chromeTransport.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const DATA_DIR = path.join(ROOT, 'data');
 export const RAW_DIR = path.join(DATA_DIR, 'raw');
 
-const UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-  '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
-
-const HEADERS = {
-  'User-Agent': UA,
-  Referer: 'https://www.nba.com/',
-  Origin: 'https://www.nba.com',
-  Accept: 'application/json, text/plain, */*',
-  'Accept-Language': 'en-US,en;q=0.9',
-  'Accept-Encoding': 'gzip, deflate, br',
-  'x-nba-stats-origin': 'stats',
-  'x-nba-stats-token': 'true',
-  Connection: 'keep-alive',
-};
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-// 全局限流：最多 N 个请求在飞，且两次发起至少隔 MIN_GAP_MS，避免被限流。
-//
-// 默认仍是「串行 + 900ms」，跟以前完全一样——日常 ingest 只有几百个请求，
-// 慢一点无所谓，稳定更重要。只有 play-by-play 那种上万请求的批量任务才
-// 用 NBA_CONCURRENCY / NBA_MIN_GAP_MS 放宽，脚本里自己承担被限流的风险。
-const MIN_GAP_MS = Number(process.env.NBA_MIN_GAP_MS ?? 900);
-const MAX_INFLIGHT = Math.max(1, Number(process.env.NBA_CONCURRENCY ?? 1));
-
-let inflight = 0;
-let lastStart = 0;
-const waiting = [];
-
-function pump() {
-  if (!waiting.length || inflight >= MAX_INFLIGHT) return;
-  const gap = MIN_GAP_MS - (Date.now() - lastStart);
-  if (gap > 0) { setTimeout(pump, gap); return; }
-  const task = waiting.shift();
-  inflight++;
-  lastStart = Date.now();
-  task.fn().then(task.resolve, task.reject).finally(() => {
-    inflight--;
-    pump();
-  });
-  pump();
+/**
+ * 请求头、节奏、cookie、上限、熔断都在 politeFetch.mjs，这里只给 stats.nba.com 的参数。
+ * 一天一次 ingest 大约 70 个请求，上限按这个量级留余量；上万请求的 play-by-play 批量任务
+ * 要自己用 NBA_MAX_REQUESTS / NBA_MAX_PER_DAY 放开，并承担被拦的风险。
+ *
+ * NBA_TRANSPORT=chrome：改走真浏览器（chromeTransport.mjs），先 sh scripts/nba-chrome.sh。
+ */
+export function selectTransport(env = process.env) {
+  if (!env.NBA_TRANSPORT || env.NBA_TRANSPORT === 'node') return nodeTransport;
+  if (env.NBA_TRANSPORT === 'chrome') return chromeTransport();
+  throw new Error(`NBA_TRANSPORT 只能是 node 或 chrome，收到 ${env.NBA_TRANSPORT}`);
 }
 
-function enqueue(fn) {
-  return new Promise((resolve, reject) => {
-    waiting.push({ fn, resolve, reject });
-    pump();
-  });
+const env = (k, d) => (process.env[k] === undefined || process.env[k] === '' ? d : Number(process.env[k]));
+const MIN_GAP_MS = env('NBA_MIN_GAP_MS', 900);
+
+export const nbaHeaders = chromeHeaders({
+  referer: 'https://www.nba.com/',
+  origin: 'https://www.nba.com',
+  extra: { 'x-nba-stats-origin': 'stats', 'x-nba-stats-token': 'true' },
+});
+
+const nba = createPoliteClient({
+  name: 'stats.nba.com',
+  headers: nbaHeaders,
+  transport: () => selectTransport(),
+  gapMs: [MIN_GAP_MS, env('NBA_MAX_GAP_MS', MIN_GAP_MS * 2)],
+  concurrency: Math.max(1, env('NBA_CONCURRENCY', 1)),
+  maxPerRun: env('NBA_MAX_REQUESTS', 200),
+  maxPerDay: env('NBA_MAX_PER_DAY', 500),
+  tries: env('NBA_TRIES', 3),
+  timeoutMs: env('NBA_TIMEOUT_MS', 40000),
+});
+
+// ---------------------------------------------------------------- 原始响应缓存（data/raw/nba/）
+
+const CACHE_DIR = path.join(RAW_DIR, 'nba');
+const CACHE_TTL_MS = env('NBA_CACHE_TTL_MIN', 60) * 60000;
+
+/** 已经结束的赛季（开赛年早于当前赛季）数据不会再变，缓存永久有效。7 月起算新赛季，与 ingest 一致 */
+export function seasonIsFinal(url, now = new Date()) {
+  const m = /[?&]Season=(\d{4})-\d{2}/.exec(url);
+  const cur = now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1;
+  return !!m && Number(m[1]) < cur;
 }
 
-async function rawFetch(url, timeoutMs) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, { headers: HEADERS, signal: ctrl.signal });
-    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-    return await res.json();
-  } finally {
-    clearTimeout(timer);
-  }
-}
+/** 缓存够不够新：往季永远够；本季在 NBA_CACHE_TTL_MIN（默认 60 分钟）内够——失败重跑不必全抓一遍 */
+export const cacheFresh = (entry, url, nowMs = Date.now()) => !!entry
+  && (seasonIsFinal(url, new Date(nowMs)) || nowMs - entry.fetchedAt < CACHE_TTL_MS);
 
-const DEFAULT_TRIES = Number(process.env.NBA_TRIES ?? 5);
-const DEFAULT_TIMEOUT_MS = Number(process.env.NBA_TIMEOUT_MS ?? 40000);
+const cacheFile = (url) => path.join(CACHE_DIR, `${crypto.createHash('sha1').update(url).digest('hex')}.json`);
 
 /**
- * 带重试的 GET。stats.nba.com 偶发挂起，重试基本都能成功。
+ * GET 一个 stats.nba.com 接口。cache: true 时先看 data/raw/nba/ 有没有够新的同 URL 响应。
+ * 默认不缓存：play-by-play 之类批量脚本有自己的 data/history 缓存，再存一份原始响应只是占盘。
  *
- * 但**被限流时重试是有害的**：那时每个请求都会一直挂到超时，
- * 5 次重试 × 40 秒 = 一场卡三分钟。批量任务应该用 NBA_TRIES / NBA_TIMEOUT_MS
- * 调小，让它快点失败、快点熔断。
+ * 失败不再连着重试：挂起、403、非 JSON 都直接熔断整次运行（见 politeFetch.mjs），
+ * 只有连接被重置、5xx 才缓几秒再试。
  */
-export function nbaGet(url, { tries = DEFAULT_TRIES, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
-  return enqueue(async () => {
-    let lastErr;
-    for (let i = 0; i < tries; i++) {
-      try {
-        return await rawFetch(url, timeoutMs);
-      } catch (err) {
-        lastErr = err;
-        if (i < tries - 1) await sleep(1500 * (i + 1));
-      }
-    }
-    throw new Error(`请求失败 ${url}\n  ${lastErr?.message ?? lastErr}`);
-  });
+export async function nbaGet(url, { cache = false, ...opts } = {}) {
+  const file = cacheFile(url);
+  if (cache) {
+    let hit = null;
+    try { hit = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* 没有缓存 */ }
+    if (cacheFresh(hit, url)) return hit.payload;
+  }
+  const payload = await nba.get(url, opts);
+  if (cache) {
+    fs.mkdirSync(CACHE_DIR, { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ url, fetchedAt: Date.now(), payload }));
+  }
+  return payload;
 }
 
 /** stats.nba.com 的 resultSets 是列式的，转成对象数组。 */

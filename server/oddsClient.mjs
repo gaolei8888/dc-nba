@@ -26,8 +26,7 @@
  * 不同博彩商的让分通常差 0.5 以内。我们把 provider 一起记下来，不假装是同一个源。
  */
 
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-  + '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+import { espnHttp } from './espnClient.mjs';
 
 const SITE = 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba';
 const CORE = 'https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba';
@@ -54,30 +53,14 @@ const nbaId = (espnId) => ESPN_TO_NBA.get(Number(espnId)) ?? null;
 
 // ---------------------------------------------------------------- HTTP
 
-/** before：每次尝试（含重试）前 await 一下，给调用方做全局限速用 */
-async function get(url, { tries = 3, timeoutMs = 20000, before } = {}) {
-  let lastErr;
-  for (let i = 0; i < tries; i++) {
-    await before?.();
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-    try {
-      const res = await fetch(url, {
-        headers: { 'User-Agent': UA, Accept: 'application/json' },
-        signal: ctrl.signal,
-      });
-      // 404 表示这场没有盘口记录，属于正常情况，不重试
-      if (res.status === 404) return null;
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return await res.json();
-    } catch (e) {
-      lastErr = e;
-      if (i < tries - 1) await new Promise((r) => { setTimeout(r, 800 * (i + 1)); });
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  throw new Error(`ESPN 请求失败 ${url.slice(0, 90)}: ${lastErr?.message}`);
+/**
+ * 走与伤病共用的 ESPN 客户端（请求头、节奏、熔断见 politeFetch.mjs）。
+ * 404 表示这场没有盘口记录，属于正常情况，返回 null。
+ * before：发请求前 await 一下，给调用方叠加自己的限速/计数用。
+ */
+async function get(url, { before, ...opts } = {}) {
+  await before?.();
+  return espnHttp.get(url, { notFoundOk: true, ...opts });
 }
 
 /**
