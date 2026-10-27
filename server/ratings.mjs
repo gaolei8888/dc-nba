@@ -45,6 +45,25 @@ export function buildGames(logRows) {
 }
 
 /**
+ * 赛程里已结束的常规赛 -> computeElo 的输入（ESPN 刷新用，与 buildGames 同形同序）。
+ * 只算 type=regular，和 ingest 的 leaguegamelog(Regular Season) 口径一致——NBA 杯决赛不进 Elo。
+ * 中立场（海外赛、杯赛拉斯维加斯）沿用赛程的 neutral 标记，不给主场优势。
+ */
+export function scheduleEloGames(scheduleGames, teams) {
+  const abbr = (id) => teams.find((t) => t.teamId === id)?.abbr;
+  return scheduleGames
+    .filter((g) => g.type === 'regular' && g.homeScore != null)
+    .map((g) => ({
+      gameId: g.gameId,
+      date: g.date,
+      neutral: !!g.neutral,
+      home: { teamId: g.homeId, abbr: abbr(g.homeId), pts: g.homeScore, win: g.homeScore > g.awayScore },
+      away: { teamId: g.awayId, abbr: abbr(g.awayId), pts: g.awayScore, win: g.awayScore > g.homeScore },
+    }))
+    .sort((a, b) => (a.date === b.date ? a.gameId.localeCompare(b.gameId) : a.date.localeCompare(b.date)));
+}
+
+/**
  * 538 风格 Elo：K=20，胜负分差放大系数抑制"垃圾时间"虚高。
  * 传入 initial 可以从已有评级继续迭代——赛季中吸收新结果就靠这个。
  * 返回 { 赛季末 Elo, 逐场轨迹 }。

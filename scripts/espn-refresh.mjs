@@ -21,7 +21,7 @@
 import { readJson, writeJson } from '../server/nbaClient.mjs';
 import { fetchScoreboard, fetchUpcomingOdds } from '../server/oddsClient.mjs';
 import { fetchInjuries } from '../server/espnClient.mjs';
-import { computeElo } from '../server/ratings.mjs';
+import { computeElo, scheduleEloGames } from '../server/ratings.mjs';
 
 const log = (...a) => console.log('·', ...a);
 const r1 = (v) => Math.round(v * 10) / 10;
@@ -58,29 +58,14 @@ async function main() {
       if (!g || g.homeScore != null) continue;
       g.homeScore = ev.homeScore;
       g.awayScore = ev.awayScore;
+      g.neutral ||= ev.neutral; // 赛程没标而 ESPN neutralSite 标了的，以 ESPN 补上
       filled += 1;
     }
   }
   log(`ESPN 补上 ${filled} 场比分`);
 
-  // ---- 2. Elo：从开赛日评级起用全部已结束常规赛重算
-  // 只算 type=regular，和 ingest 用的 leaguegamelog(Regular Season) 口径一致——
-  // NBA 杯决赛不计入常规赛，也就不进 Elo。
-  const done = schedule.games
-    .filter((g) => g.type === 'regular' && g.homeScore != null)
-    .map((g) => {
-      const home = teams.find((t) => t.teamId === g.homeId);
-      const away = teams.find((t) => t.teamId === g.awayId);
-      return {
-        gameId: g.gameId,
-        date: g.date,
-        neutral: false,
-        home: { teamId: g.homeId, abbr: home?.abbr, pts: g.homeScore, win: g.homeScore > g.awayScore },
-        away: { teamId: g.awayId, abbr: away?.abbr, pts: g.awayScore, win: g.awayScore > g.homeScore },
-      };
-    })
-    // 与 ratings.buildGames 相同的顺序：日期，再按 gameId
-    .sort((a, b) => (a.date === b.date ? a.gameId.localeCompare(b.gameId) : a.date.localeCompare(b.date)));
+  // ---- 2. Elo：从开赛日评级起用全部已结束常规赛重算（中立场不给主场优势）
+  const done = scheduleEloGames(schedule.games, teams);
 
   const initial = Object.fromEntries(teams.map((t) => [t.teamId, t.eloPreseasonExact ?? t.eloPreseason]));
   const { final, history } = computeElo(done, { initial });
