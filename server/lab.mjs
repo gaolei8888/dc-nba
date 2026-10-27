@@ -164,6 +164,8 @@ export function replay(dataset, seasons, opts = {}) {
         mktPred: g.odds ? -g.odds.spread : null,
         mktTotal: g.odds?.total ?? null,
         mktProb: g.odds ? marketProb(g.odds, p.spreadSd) : null,
+        // 原始钱线 [主, 客]：平注回测要按真实（含抽水）价格结算
+        ml: g.odds ? [g.odds.homeMl, g.odds.awayMl] : null,
       });
 
       played.set(g.home.teamId, (played.get(g.home.teamId) ?? 0) + 1);

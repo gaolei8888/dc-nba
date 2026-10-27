@@ -12,6 +12,8 @@ import { readJson, DATA_DIR } from './nbaClient.mjs';
 import * as db from './db.mjs';
 import * as lab from './lab.mjs';
 import { liveRosterRankings } from './liveRosterRankings.mjs';
+import { buildBoard } from './predictionBoard.mjs';
+import { bettingEvidence } from './bettingEvidence.mjs';
 import {
   initPool, run as runInPool, poolAvailable, cached, clearCaches,
   cacheStats, pendingCount, sendCached,
@@ -359,6 +361,33 @@ app.get('/api/schedule', wrap(async (req, res) => {
   }));
 }));
 
+/**
+ * 预测总表：本季常规赛全部赛前预测 + 真实结果的成绩单。
+ * 走和赛程页完全相同的 predictSchedule + marketOf，同一场比赛两页的胜率必然一致。
+ */
+app.get('/api/predictions/summary', wrap(async (req, res) => {
+  const params = pickParams(req.query);
+  const out = outFromQuery(req);
+  const games = store.schedule.games.filter((g) => g.type === 'regular');
+  const cn = new Map(store.teams.map((t) => [t.teamId, t.cn]));
+  await sendCached(res, req, `predBoard|${JSON.stringify([params, out])}`, async () => {
+    // 历史投注证据只依赖离线数据集与生产参数，整个进程算一次
+    const betting = await cached('labBetting', 'v1', () => runLab('labBetting', {}), { max: 1 });
+    const board = buildBoard(predictSchedule(getModel(params), games, out).map((g) => {
+      const market = marketOf(g.gameId, g.prediction);
+      return market ? { ...g, market } : g;
+    }), { teamName: (id) => cn.get(id) ?? String(id) });
+    return {
+      seasonYear: store.schedule.seasonYear,
+      oddsFetchedAt: store.odds?.fetchedAt ?? null,
+      ...board,
+      // 总结里也要直说历史证据的结论，不能只藏在下面的小节里
+      summary: [...board.summary, betting.summary[0], betting.summary.at(-1)],
+      betting,
+    };
+  });
+}));
+
 // ---------------------------------------------------------------- 排行榜
 
 /** 排行榜结果缓存：1000 在线用户下不能每次请求都跑一次全表聚合 */
@@ -552,6 +581,7 @@ const runLab = async (type, payload) => {
   if (type === 'labMarket') {
     return lab.market(lab.replay(labData, seasons, params));
   }
+  if (type === 'labBetting') return bettingEvidence(labData);
   if (type === 'labMeasure') {
     return {
       homeAdvantage: lab.homeAdvantageBySeason(labData, seasons, params),

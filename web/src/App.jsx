@@ -19,6 +19,7 @@ import Play from './pages/Play.jsx';
 import Profiles from './pages/Profiles.jsx';
 import Lab from './pages/Lab.jsx';
 import Today from './pages/Today.jsx';
+import Board from './pages/Board.jsx';
 
 // ------------------------------------------------------------ 全局数据
 
@@ -31,6 +32,7 @@ const NAV = [
   { path: 'players', label: '球员', ico: '⚇' },
   { path: 'today', label: '今日比赛', ico: '◷' },
   { path: 'schedule', label: '赛程', ico: '▤' },
+  { path: 'board', label: '预测总表', ico: '✓' },
   { path: 'predict', label: '比赛预测', ico: '◎' },
   { path: 'simulate', label: '赛季模拟', ico: '∿' },
   { path: 'play', label: '人机对赌', ico: '⚔' },
@@ -196,6 +198,7 @@ export default function App() {
   else if (head === 'teams') page = <Teams />;
   else if (head === 'players') page = <Players />;
   else if (head === 'schedule') page = <Schedule />;
+  else if (head === 'board') page = <Board />;
   else if (head === 'today') page = <Today initial={rest} />;
   else if (head === 'predict') page = <Predict initial={rest} />;
   else if (head === 'simulate') page = <Simulate />;

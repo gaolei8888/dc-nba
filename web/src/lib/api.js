@@ -42,6 +42,7 @@ export const api = {
   team: (id, params) => get(`/teams/${id}`, params),
   players: (params) => get('/players', params),
   schedule: (params) => get('/schedule', params),
+  predictionBoard: (params) => get('/predictions/summary', params),
   rankings: (params) => get('/rankings', params),
   predict: (body) => post('/predict', body),
   simulate: (body) => post('/simulate', body),
