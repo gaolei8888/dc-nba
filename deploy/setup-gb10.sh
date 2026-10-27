@@ -16,6 +16,15 @@ set -eu
 cd "$(dirname "$0")/.."
 DIR=$(pwd)
 KEY=${DC_NBA_SSH_KEY:-$HOME/.ssh/dc_nba}
+# 没装 node 就用 docker 里的 node 22（不需要 sudo 装系统软件）
+if command -v node >/dev/null && [ "$(node -p 'process.versions.node.split(".")[0]')" -ge 22 ]; then
+  NODE=node
+else
+  NODE="docker run --rm -u $(id -u):$(id -g) -v $DIR:$DIR -w $DIR node:22-alpine node"
+fi
+# cron 时间按本机时区写。默认 00:30：美西最晚的比赛约 22:00 PT 结束，统计稍后定稿；
+# 这台在太平洋时区时，00:30 PT = 北京 15:30，正好在服务器 14:30 的 ESPN 刷新之后
+CRON_TIME=${DC_NBA_CRON_TIME:-30 0}
 REMOTE=${DC_NBA_REMOTE:-dev@gpu.tzspace.cn}
 CHECK_ONLY=0
 [ "${1:-}" = "--check" ] && CHECK_ONLY=1
@@ -25,14 +34,12 @@ fail() { echo "  ✗ $*"; exit 1; }
 
 echo "检查 GB10 数据刷新环境（$DIR）"
 
-# 1. node
-command -v node >/dev/null || fail "没有 node。装 22 版：curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs"
-major=$(node -p 'process.versions.node.split(".")[0]')
-[ "$major" -ge 22 ] || fail "node 版本 $(node -v)，需要 ≥ 22"
-ok "node $(node -v)"
+# 1. node（本机的，或 docker 里的）
+$NODE -v >/dev/null 2>&1 || fail "没有可用的 node ≥ 22，也跑不了 docker 里的 node:22-alpine（docker pull node:22-alpine 试试）"
+ok "node $($NODE -v)（$( [ "$NODE" = node ] && echo 本机 || echo docker )）"
 
 # 2. NBA 可达，且返回的是 JSON
-node --input-type=module -e '
+$NODE --input-type=module -e '
   import { nbaGet, statsUrl } from "./server/nbaClient.mjs";
   const p = await nbaGet(statsUrl("leaguestandingsv3", { LeagueID: "00", Season: "2026-27", SeasonType: "Regular Season" }), { tries: 1 });
   if (!p?.resultSets?.length) { console.error("返回的不是积分榜 JSON"); process.exit(1); }
@@ -54,9 +61,8 @@ if [ "$CHECK_ONLY" = 1 ]; then
   exit 0
 fi
 
-# 5. cron：北京 14:00。美西最晚的比赛约北京 13:00 结束；
-#    服务器 14:30 的 ESPN 刷新会再补上这之后才出的比分
-LINE="0 14 * * * cd $DIR && DC_NBA_SSH_KEY=$KEY sh deploy/push-refresh.sh >> $DIR/push-refresh.log 2>&1"
+# 5. cron（时间见上面的 CRON_TIME）
+LINE="$CRON_TIME * * * cd $DIR && DC_NBA_SSH_KEY=$KEY DC_NBA_NODE='$NODE' sh deploy/push-refresh.sh >> $DIR/push-refresh.log 2>&1"
 if crontab -l 2>/dev/null | grep -q "deploy/push-refresh.sh"; then
   echo "  cron 已经装过，不重复添加："
   crontab -l | grep "deploy/push-refresh.sh"
@@ -64,5 +70,5 @@ else
   { crontab -l 2>/dev/null; echo "# dc-nba：全量抓 NBA 数据并推到 gpu.tzspace.cn（GB10 只做数据刷新）"; echo "$LINE"; } | crontab -
   ok "cron 已安装：$LINE"
 fi
-echo "时区：$(date +%Z)（cron 按本机时区执行，若不是 CST 请把 14 改成对应小时）"
-echo "立刻试跑一次：cd $DIR && DC_NBA_SSH_KEY=$KEY sh deploy/push-refresh.sh"
+echo "时区：$(date +%Z)，cron 时间「$CRON_TIME」按本机时区执行（DC_NBA_CRON_TIME 可改）"
+echo "立刻试跑一次：cd $DIR && DC_NBA_SSH_KEY=$KEY DC_NBA_NODE='$NODE' sh deploy/push-refresh.sh"
