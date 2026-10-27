@@ -3,7 +3,7 @@
 #
 # 放在服务器部署目录下（与 docker-compose.yml 同级的 deploy/ 里），由 cron 调用：
 #
-#   0 18 * * * /opt/works/dc-nba/deploy/refresh.sh >> /opt/works/dc-nba/refresh.log 2>&1
+#   0 18 * * * /home/dev/work/works/dc-nba/deploy/refresh.sh >> /home/dev/work/works/dc-nba/refresh.log 2>&1
 #
 #   deploy/refresh.sh --fetch-only   只抓取并体检，不动线上（首次部署先用它测网络）
 #

@@ -1,6 +1,6 @@
 # 部署与数据刷新
 
-线上：`gpu.tzspace.cn` 的 `/opt/works/dc-nba/` → https://ai.tzspace.cn/works/dc-nba/
+线上：`gpu.tzspace.cn` 的 `/home/dev/work/works/dc-nba/` → https://ai.tzspace.cn/works/dc-nba/
 
 数据快照烤在镜像里，更新数据 = 换 `data/*.json` + 重建镜像。
 2026-27 赛季起由 `deploy/refresh.sh` 每天自动做一次（为什么改成自动，见主 README「部署说明」）。
@@ -18,19 +18,20 @@
 在本机（仓库根目录）：
 
 ```bash
-# 1. 代码：只同步刷新需要的目录，不碰 docker-compose.yml
-scp -r server scripts deploy package.json package-lock.json Dockerfile .dockerignore \
-    dev@gpu.tzspace.cn:/opt/works/dc-nba/
+# 1. 代码：用 git archive 发已提交的版本，刻意不带 docker-compose.yml
+git archive HEAD server scripts deploy web docs package.json package-lock.json \
+    Dockerfile .dockerignore README.md \
+  | ssh dev@gpu.tzspace.cn 'tar -x -C /home/dev/work/works/dc-nba'
 
-# 2. history：ingest 算 APM、实验室数据集都要它，镜像里没有（.dockerignore 排除了）
-#    约 21MB，只需同步一次；之后 refresh.sh 在服务器上自己维护
-scp -r data/history dev@gpu.tzspace.cn:/opt/works/dc-nba/data/
+# 2. 数据：快照 + history。history 是 ingest 算 APM、实验室数据集要的，
+#    镜像里没有（.dockerignore 排除了）。约 21MB，只需同步一次
+tar -c data/*.json data/history | ssh dev@gpu.tzspace.cn 'tar -x -C /home/dev/work/works/dc-nba'
 ```
 
 在服务器上：
 
 ```bash
-cd /opt/works/dc-nba
+cd /home/dev/work/works/dc-nba
 chmod +x deploy/refresh.sh
 
 # 3. 先只抓不部署——确认这台机器能连上 stats.nba.com。
@@ -42,7 +43,7 @@ deploy/refresh.sh
 
 # 5. 装 cron（crontab -e）。时间按服务器时区写，先 `date` 确认。
 #    美西最晚的比赛约 UTC 07:30 结束，UTC 10:00（北京 18:00）时数据已稳定。
-0 18 * * * /opt/works/dc-nba/deploy/refresh.sh >> /opt/works/dc-nba/refresh.log 2>&1
+0 18 * * * /home/dev/work/works/dc-nba/deploy/refresh.sh >> /home/dev/work/works/dc-nba/refresh.log 2>&1
 ```
 
 日志写在部署目录里，**不要写 `/var/log/`**——普通用户写不进去，cron 的 `>>` 打不开文件时
@@ -54,7 +55,7 @@ deploy/refresh.sh
 
 ```bash
 curl -s https://ai.tzspace.cn/works/dc-nba/api/meta    # fetchedAt 应是今天
-tail -30 /opt/works/dc-nba/refresh.log
+tail -30 /home/dev/work/works/dc-nba/refresh.log
 ```
 
 ## 失败时会发生什么
@@ -69,7 +70,7 @@ tail -30 /opt/works/dc-nba/refresh.log
 ## 手动回滚
 
 ```bash
-cd /opt/works/dc-nba
+cd /home/dev/work/works/dc-nba
 cp data-prev/*.json data/ && docker compose build && docker compose up -d
 ```
 

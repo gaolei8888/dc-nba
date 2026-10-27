@@ -1,4 +1,4 @@
-# 部署到 gpu.tzspace.cn 的 /opt/works/dc-nba/
+# 部署到 gpu.tzspace.cn 的 /home/dev/work/works/dc-nba/
 #
 #   docker compose build && docker compose up -d
 #   docker exec works-gateway nginx -s reload      # 仅首次上线需要
