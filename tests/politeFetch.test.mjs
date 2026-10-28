@@ -319,3 +319,24 @@ test('浏览器传输：预热页面就被 403，报 BLOCKED', async () => {
   const t = chromeTransport({ port: 9999, fetchImpl, WebSocketImpl: Denied, log: () => {} });
   await assert.rejects(t.request('u', { headers: {}, timeoutMs: 1 }), { code: 'BLOCKED' });
 });
+
+test('parse 可换掉 JSON 解析（取 PDF）；校验不过照样熔断', async () => {
+  const pdf = (r) => { if (!r.bytes.subarray(0, 4).equals(Buffer.from('%PDF'))) throw new Error('not pdf'); return r.bytes; };
+  const tr = fakeTransport([{ status: 200, text: '', bytes: Buffer.from('%PDF-1.4 x') },
+    { status: 200, text: '<html>', bytes: Buffer.from('<html>') }, ok(1)]);
+  const c = client(tr);
+  assert.equal(String(await c.get('a.pdf', { parse: pdf })), '%PDF-1.4 x');
+  await assert.rejects(c.get('b.pdf', { parse: pdf }), { code: 'BLOCKED' });
+  await assert.rejects(c.get('c'), { code: 'BLOCKED' });
+  assert.equal(tr.calls.length, 2);
+});
+
+test('notFoundOk 可传判定函数：认得出的「没这个文件」返回 null，别的 403 照样熔断', async () => {
+  const s3Missing = (r) => r.status === 403 && r.text.includes('<Code>AccessDenied</Code>');
+  const tr = fakeTransport([{ status: 403, text: '<Error><Code>AccessDenied</Code></Error>' },
+    { status: 403, text: '<HTML>Access Denied. Reference #18</HTML>' }, ok(1)]);
+  const c = client(tr);
+  assert.equal(await c.get('a', { notFoundOk: s3Missing }), null);
+  await assert.rejects(c.get('b', { notFoundOk: s3Missing }), { code: 'BLOCKED' });
+  await assert.rejects(c.get('c'), { code: 'BLOCKED' });
+});
