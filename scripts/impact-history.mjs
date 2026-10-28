@@ -142,6 +142,7 @@ function compact(season, raw) {
       ptsPaint: num(mi.PTS_PAINT), pfd: num(mi.PFD),
       onPoss: o.onPoss ?? null, onNet: o.onNet ?? null,
       offPoss: o.offPoss ?? null, offNet: o.offNet ?? null,
+      age: num(b.AGE),
     });
   }
   return { season, builtAt: new Date().toISOString(), count: rows.length, players: rows };
