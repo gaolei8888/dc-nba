@@ -87,6 +87,10 @@ export default function App() {
       .catch((error) => setState({ loading: false, error }));
   }, []);
 
+  // 球队表交给 i18n（服务端消息里的队名占位符要用）；setTeams 稳定、teams 只在加载完成时变一次
+  const { setTeams } = i18n;
+  useEffect(() => { if (state.teams) setTeams(state.teams); }, [state.teams, setTeams]);
+
   // 主题写到 <html> 上，CSS 变量随之切换
   useEffect(() => {
     document.documentElement.dataset.theme = theme;

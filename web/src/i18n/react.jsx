@@ -26,6 +26,9 @@ export function I18nProvider({ children }) {
     });
     return { lang: r.lang, explicitTz: r.tzFollowsLang ? null : r.tz };
   });
+  // 球队表由 App 加载后通过 setTeams 交进来，供服务端消息里的 {team} 占位符渲染队名
+  const [teams, setTeamsState] = useState(null);
+  const teamById = useMemo(() => (teams ? new Map(teams.map((x) => [x.teamId, x])) : undefined), [teams]);
   const { lang, explicitTz } = state;
   const meta = locales[lang].meta;
   const tz = explicitTz ?? meta.defaultTz;
@@ -41,16 +44,19 @@ export function I18nProvider({ children }) {
     try { writePrefs(localStorage, { tz: v }); } catch { /* 忽略 */ }
   }, []);
 
+  // 引用不变则不触发重建 fmt，避免 App 的 effect 造成渲染循环
+  const setTeams = useCallback((next) => setTeamsState((cur) => (cur === next ? cur : next ?? null)), []);
+
   const value = useMemo(() => {
-    const fmt = createFormat({ locale: locales[lang], fallback: locales[SOURCE_LANG], tz });
+    const fmt = createFormat({ locale: locales[lang], fallback: locales[SOURCE_LANG], tz, teamById });
     // t 额外带 msg 格式化器：服务端嵌套消息（{verdict, msg}）用 renderMsg(m, t) 渲染
     const t = createMsgT({
       dict: locales[lang], fallback: locales[SOURCE_LANG], lang, formatters: fmt.formatters, warn,
     });
     return {
-      lang, tz, tzFollowsLang: explicitTz === null, setLang, setTz, t, fmt, langs, timezones: TIMEZONES,
+      lang, tz, tzFollowsLang: explicitTz === null, setLang, setTz, setTeams, t, fmt, langs, timezones: TIMEZONES,
     };
-  }, [lang, tz, explicitTz, setLang, setTz]);
+  }, [lang, tz, explicitTz, teamById, setLang, setTz, setTeams]);
 
   useEffect(() => {
     document.documentElement.lang = meta.htmlLang;

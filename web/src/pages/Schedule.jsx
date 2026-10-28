@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useApp, go } from '../App.jsx';
 import { api, withOut } from '../lib/api.js';
 import { TeamCell, Loading, ErrorBox, ProbBar, StatTile } from '../components/common.jsx';
+import { useI18n } from '../i18n/react.jsx';
+import { groupByDay } from '../lib/gameDays.js';
 import { fmtDate, restLabel, probColor, num, snapshotAge } from '../lib/format.js';
 
 const TYPES = [
@@ -12,6 +14,7 @@ const TYPES = [
 
 export default function Schedule() {
   const { meta, teams, teamById, out, params, setAccent } = useApp();
+  const { tz } = useI18n();
   const [type, setType] = useState('regular');
   const [teamFilter, setTeamFilter] = useState('all');
   const [from, setFrom] = useState('');
@@ -47,18 +50,13 @@ export default function Schedule() {
 
   const byDate = useMemo(() => {
     if (!data.games) return [];
-    const map = new Map();
-    for (const g of data.games) {
-      if (!map.has(g.date)) map.set(g.date, []);
-      map.get(g.date).push(g);
-    }
-    return [...map.entries()];
-  }, [data.games]);
+    return groupByDay(data.games, tz);
+  }, [data.games, tz]);
 
   if (data.error) return <ErrorBox error={data.error} />;
 
   const games = data.games ?? [];
-  const dateRange = games.length ? `${games[0].date} ~ ${games[games.length - 1].date}` : '—';
+  const dateRange = byDate.length ? `${byDate[0][0]} ~ ${byDate[byDate.length - 1][0]}` : '—';
   const closeGames = games.filter((g) => Math.abs(g.prediction.homeWinProb - 0.5) < 0.06).length;
   const finished = games.filter((g) => g.hit !== undefined);
   const hits = finished.filter((g) => g.hit).length;
@@ -87,11 +85,11 @@ export default function Schedule() {
           </select>
         </div>
         <div className="field">
-          <label>起始日期</label>
+          <label>起始日期（按美东日期）</label>
           <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
         </div>
         <div className="field">
-          <label>结束日期</label>
+          <label>结束日期（按美东日期）</label>
           <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
         </div>
         <div className="field">

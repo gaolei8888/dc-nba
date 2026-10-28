@@ -2,12 +2,15 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useApp, go } from '../App.jsx';
 import { api, withOut } from '../lib/api.js';
 import { TeamLogo, Loading, ErrorBox, ProbBar, StatTile } from '../components/common.jsx';
+import { useI18n } from '../i18n/react.jsx';
+import { tzToday } from '../i18n/fmt.js';
+import { gameDates, gamesOn, fetchRangeFor } from '../lib/gameDays.js';
 import {
-  fmtDate, probColor, restLabel, snapshotAge, bjToday, bjDateOf, bjTimeOf, shiftDate,
+  fmtDate, probColor, restLabel, snapshotAge,
 } from '../lib/format.js';
 
 /**
- * 今日比赛：按北京时间取一天的比赛，逐场给出模型预测。
+ * 今日比赛：按所选时区（默认随语言：中文北京、英文美东）取一天的比赛，逐场给出模型预测。
  *
  * 两个容易说错的地方，界面上都要讲清楚：
  *   1. 数据是快照。评级、伤病、盘口都停在最后一次抓取的时刻，
@@ -18,7 +21,9 @@ import {
  */
 export default function Today({ initial = [] }) {
   const { meta, teamById, injuries, out, params, setAccent } = useApp();
+  const { tz, fmt } = useI18n();
   const [dates, setDates] = useState(null);
+  const [allGames, setAllGames] = useState(null);
   const [date, setDate] = useState(initial[0] || null);
   const [data, setData] = useState({ loading: true });
 
@@ -28,42 +33,37 @@ export default function Today({ initial = [] }) {
   const routeDate = initial[0] || null;
   useEffect(() => { if (routeDate) setDate(routeDate); }, [routeDate]);
 
-  // 有比赛的北京日期，用来定默认日期和前后翻页
+  // 全赛程（不预测）只取一次；有比赛的日期随所选时区重算，用来定默认日期和前后翻页
   useEffect(() => {
     let alive = true;
     api.schedule({ type: 'all', predict: '0' })
-      .then((d) => {
-        if (!alive) return;
-        const set = new Set(d.games.filter((g) => g.type !== 'preseason').map((g) => bjDateOf(g.dateTimeUtc)));
-        setDates([...set].filter(Boolean).sort());
-      })
+      .then((d) => alive && setAllGames(d.games))
       .catch((error) => alive && setData({ loading: false, error }));
     return () => { alive = false; };
   }, []);
+  useEffect(() => { if (allGames) setDates(gameDates(allGames, tz)); }, [allGames, tz]);
 
   // 没指定日期：今天有比赛就是今天，否则下一个比赛日（休赛期则是最后一个）
   useEffect(() => {
     if (date || !dates?.length) return;
-    const today = bjToday();
+    const today = tzToday(tz);
     setDate(dates.find((d) => d >= today) ?? dates[dates.length - 1]);
-  }, [dates, date]);
+  }, [dates, date, tz]);
 
   useEffect(() => {
     if (!date) return undefined;
     let alive = true;
     setData((d) => ({ ...d, loading: true }));
-    // 北京日期 X 的比赛几乎都是美东 X-1 晚上打的，少数午场落在美东 X，两天都取
-    api.schedule(withOut({ ...params, type: 'all', from: shiftDate(date, -1), to: date }, out))
+    // 服务端 from/to 是美东日期；任一时区的某天都落在前后各一天内，取回后再按所选时区精确过滤
+    // （请求里不带 tz / lang：时区只影响分日与显示，不改预测）
+    api.schedule(withOut({ ...params, type: 'all', ...fetchRangeFor(date) }, out))
       .then((d) => {
         if (!alive) return;
-        const games = d.games
-          .filter((g) => g.type !== 'preseason' && bjDateOf(g.dateTimeUtc) === date)
-          .sort((a, b) => a.dateTimeUtc.localeCompare(b.dateTimeUtc));
-        setData({ loading: false, games });
+        setData({ loading: false, games: gamesOn(d.games, date, tz) });
       })
       .catch((error) => alive && setData({ loading: false, error }));
     return () => { alive = false; };
-  }, [date, params, out]);
+  }, [date, params, out, tz]);
 
   const outByTeam = useMemo(() => {
     const m = new Map();
@@ -87,7 +87,7 @@ export default function Today({ initial = [] }) {
   const close = [...upcoming].sort((a, b) => conf(a) - conf(b))[0];
   const split = upcoming.filter((g) => g.market).sort((a, b) => Math.abs(b.market.edge) - Math.abs(a.market.edge))[0];
   const age = snapshotAge(meta.fetchedAt, { staleDays: 1 });
-  const isToday = date === bjToday();
+  const isToday = date === tzToday(tz);
   // 当天比赛全打完了：赛前指标没有对象，换成这一天的预测复盘
   const finished = games.filter((g) => g.hit !== undefined);
   const review = finished.length > 0 && upcoming.length === 0;
@@ -104,18 +104,18 @@ export default function Today({ initial = [] }) {
     <>
       <div className="page-head">
         <h1>{isToday ? '今日比赛' : '比赛日'}预测</h1>
-        <p>按北京时间分日，每场给出模型胜率、预测比分与让分。点击比赛进入详细预测与分差拆解。</p>
+        <p>按{fmt.zoneLabel()}分日，每场给出模型胜率、预测比分与让分。点击比赛进入详细预测与分差拆解。</p>
       </div>
 
       <div className="toolbar">
         <button className="btn" disabled={!prev} onClick={() => prev && pick(prev)}>‹ 前一个比赛日</button>
         <div className="field" style={{ minWidth: 0 }}>
           <b style={{ fontSize: 15 }}>{date ? fmtDate(date) : '—'}</b>
-          <span className="dim" style={{ marginLeft: 8 }}>北京时间{isToday ? ' · 今天' : ''}</span>
+          <span className="dim" style={{ marginLeft: 8 }}>{fmt.zoneLabel()}{isToday ? ' · 今天' : ''}</span>
         </div>
         <button className="btn" disabled={!next} onClick={() => next && pick(next)}>后一个比赛日 ›</button>
         {!isToday && dates?.length > 0 && (
-          <button className="btn" onClick={() => pick(dates.find((d) => d >= bjToday()) ?? dates[dates.length - 1])}>
+          <button className="btn" onClick={() => pick(dates.find((d) => d >= tzToday(tz)) ?? dates[dates.length - 1])}>
             回到今天
           </button>
         )}
@@ -155,7 +155,7 @@ export default function Today({ initial = [] }) {
       ) : (
         <div className="grid cols-2">
           {games.map((g) => (
-            <TodayCard key={g.gameId} game={g} teamById={teamById} outByTeam={outByTeam} out={out} />
+            <TodayCard key={g.gameId} game={g} teamById={teamById} outByTeam={outByTeam} out={out} fmt={fmt} />
           ))}
         </div>
       )}
@@ -172,7 +172,7 @@ export default function Today({ initial = [] }) {
 const conf = (g) => Math.max(g.prediction.homeWinProb, 1 - g.prediction.homeWinProb);
 const favorite = (g, teamById) => teamById.get(g.prediction.homeWinProb >= 0.5 ? g.homeId : g.awayId) ?? {};
 
-function TodayCard({ game: g, teamById, outByTeam, out }) {
+function TodayCard({ game: g, teamById, outByTeam, out, fmt }) {
   const home = teamById.get(g.homeId);
   const away = teamById.get(g.awayId);
   const p = g.prediction;
@@ -185,7 +185,7 @@ function TodayCard({ game: g, teamById, outByTeam, out }) {
     <div className="game-card" onClick={() => go(`predict/${g.awayId}/${g.homeId}/${g.gameId}`)}>
       <div className="top">
         <span>
-          {bjTimeOf(g.dateTimeUtc)} 开打
+          {fmt.timeZoned(g.dateTimeUtc)} 开打
           {g.label && <span className="chip blue" style={{ marginLeft: 6 }}>{g.label}</span>}
         </span>
         <span>{g.national?.join(' / ') || g.arena}</span>

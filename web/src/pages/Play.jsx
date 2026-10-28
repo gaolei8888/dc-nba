@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useApp, go } from '../App.jsx';
 import { useI18n } from '../i18n/react.jsx';
+import { tzDateOf } from '../i18n/fmt.js';
 import { errorText } from '../lib/apiError.js';
 import { api } from '../lib/api.js';
 import { TeamLogo, StatTile, Loading, ErrorBox, ProbBar, Segmented } from '../components/common.jsx';
 import {
-  pct, fmtDateFull, restLabel, probColor, bjDateOf, bjTimeOf,
+  pct, fmtDateFull, restLabel, probColor,
 } from '../lib/format.js';
 import {
   loadPlay, savePlay, resetPlay, scorePick, summarize,
@@ -317,15 +318,15 @@ function ReplayMode({ season }) {
 }
 
 const REJECT_CN = { locked: '已开赛，锁定了', unknown: '不是本季可下的比赛', side: '方向不对' };
-/** 开赛时刻：北京时间为主（读者在国内），赛程日期是美东口径 */
-const tipLabel = (utc) => `北京 ${fmtDateFull(bjDateOf(utc)).slice(5)} ${bjTimeOf(utc)}`;
+/** 开赛时刻：按所选时区显示并标明时区；赛程日期仍是美东口径（服务端按美东日锁盘） */
+const tipLabel = (utc, tz, fmt) => `${fmtDateFull(tzDateOf(utc, tz)).slice(5)} ${fmt.timeZoned(utc)}`;
 
 /**
  * 本季实战。服务端记下「你的选择 + 模型此刻的赛前预测」，按赛程开赛时间锁定，比分出来后翻牌。
  * 开赛前可以改，改的时候模型快照也跟着更新到那一刻。
  */
 function LiveMode({ live, reload, headers }) {
-  const { t } = useI18n();
+  const { t, tz, fmt } = useI18n();
   const { teamById, meta, leaderboardOn, cloud, connectCloud } = useApp();
   const [pending, setPending] = useState({});
   const [busy, setBusy] = useState(false);
@@ -409,7 +410,7 @@ function LiveMode({ live, reload, headers }) {
         <h2 style={{ flexWrap: 'wrap', rowGap: 8 }}>
           比赛日
           <span className="sub">
-            美东 {fmtDateFull(live.date)} · {games.length} 场，还能下 {day?.open ?? 0} 场
+            {t('tz.short.et')} {fmtDateFull(live.date)} · {games.length} 场，还能下 {day?.open ?? 0} 场
           </span>
           <span style={{ marginLeft: 'auto' }}>
             <select value={live.date ?? ''} onChange={(e) => reload(e.target.value)} style={{ minWidth: 0, maxWidth: '100%' }}>
@@ -437,7 +438,7 @@ function LiveMode({ live, reload, headers }) {
                     choice={pending[g.gameId] ?? (saved ? { side: saved.side, conf: saved.conf } : null)}
                     status={(
                       <>
-                        {g.locked ? '已开赛 · 锁定' : `${tipLabel(g.tipoff)} 开赛`}
+                        {g.locked ? '已开赛 · 锁定' : `${tipLabel(g.tipoff, tz, fmt)} 开赛`}
                         {saved && !g.locked && <span className="chip hit" style={{ marginLeft: 6 }}>已提交{pending[g.gameId] ? ' · 改动未保存' : ''}</span>}
                       </>
                     )}
@@ -466,7 +467,7 @@ function LiveMode({ live, reload, headers }) {
             <table className="data">
               <thead>
                 <tr>
-                  <th className="left">日期（美东）</th><th className="left">对阵</th><th className="left">你押</th>
+                  <th className="left">日期（{t('tz.short.et')}）</th><th className="left">对阵</th><th className="left">你押</th>
                   <th>比分</th><th>你</th><th>模型（提交时）</th><th>模型</th>
                 </tr>
               </thead>

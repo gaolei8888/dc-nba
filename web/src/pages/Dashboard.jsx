@@ -6,8 +6,11 @@ import {
 } from '../components/common.jsx';
 import {
   num, signed, signClass, fmtDate, probColor, CONF_CN, DIV_CN, DIV_ORDER,
-  bjToday, bjDateOf, bjTimeOf, shiftDate,
+  shiftDate,
 } from '../lib/format.js';
+import { useI18n } from '../i18n/react.jsx';
+import { tzToday } from '../i18n/fmt.js';
+import { gameDay, nextGameDay } from '../lib/gameDays.js';
 
 const MINUTES_SOURCE_CN = { 'current+prior': '本季→上季收缩', 'current+population': '本季→均值收缩', 'prior-season': '上季轮换',
   'dnp-benched': '轮换外（本季未出场）', replacement: '无分钟信息' };
@@ -19,6 +22,7 @@ const IMPACT_SOURCE_CN = { 'current-blended': '本季混合', 'prior-season': '�
 
 export default function Dashboard() {
   const { meta, teamById, out, params, setAccent } = useApp();
+  const { tz, fmt } = useI18n();
   const [data, setData] = useState({ loading: true });
   const [rankingModel, setRankingModel] = useState('roster');
   const [availability, setAvailability] = useState('reported');
@@ -33,13 +37,13 @@ export default function Dashboard() {
     setData((d) => ({ ...d, loading: true }));
     Promise.all([
       api.rankings(withOut({ ...params, rankingModel, availability }, out)),
-      // 今日比赛预览：从昨天（美东）起取一批，挑出北京时间今天或之后的第一个比赛日
-      api.schedule(withOut({ ...params, type: 'all', from: shiftDate(bjToday(), -1), limit: 40 }, out)),
+      // 今日比赛预览：从昨天（美东）起取一批，按所选时区挑出今天或之后的第一个比赛日（美东日期 >= 所选时区今天 - 1，所以 -1 天足够）
+      api.schedule(withOut({ ...params, type: 'all', from: shiftDate(tzToday(tz), -1), limit: 40 }, out)),
     ])
       .then(([rankings, schedule]) => alive && setData({ loading: false, rankings, schedule }))
       .catch((error) => alive && setData({ loading: false, error }));
     return () => { alive = false; };
-  }, [params, out, meta, rankingModel, availability]);
+  }, [params, out, meta, rankingModel, availability, tz]);
 
   if (data.loading) return <Loading />;
   if (data.error) return <ErrorBox error={data.error} />;
@@ -50,10 +54,10 @@ export default function Dashboard() {
   const detail = rosterMode ? rankings.find((r) => r.teamId === selectedTeam) : null;
   const validRankings = rankings.filter((r) => r.total != null);
   const selectTeam = (r) => rosterMode ? setSelectedTeam(r.teamId) : go(`team/${r.teamId}`);
-  const upcomingGames = data.schedule.games
-    .filter((g) => g.type !== 'preseason' && g.homeScore == null && bjDateOf(g.dateTimeUtc) >= bjToday());
-  const nextDay = upcomingGames[0] ? bjDateOf(upcomingGames[0].dateTimeUtc) : null;
-  const dayGames = upcomingGames.filter((g) => bjDateOf(g.dateTimeUtc) === nextDay);
+  const nextDay = nextGameDay(data.schedule.games, tz);
+  const dayGames = nextDay
+    ? data.schedule.games.filter((g) => g.type !== 'preseason' && g.homeScore == null && gameDay(g, tz) === nextDay)
+    : [];
   const east = validRankings.filter((t) => t.conference === 'East');
   const west = validRankings.filter((t) => t.conference === 'West');
   const improvementField = rosterMode ? 'modelDelta' : 'turnoverAdj';
@@ -248,14 +252,14 @@ export default function Dashboard() {
       {dayGames.length > 0 && (
         <div className="card">
           <h2>
-            {nextDay === bjToday() ? '今日比赛预测' : '下一个比赛日'}
-            <span className="sub">{fmtDate(nextDay)} · 北京时间 · {dayGames.length} 场 · 胜率来自 Elo 模型</span>
+            {nextDay === tzToday(tz) ? '今日比赛预测' : '下一个比赛日'}
+            <span className="sub">{fmtDate(nextDay)} · {fmt.zoneLabel()} · {dayGames.length} 场 · 胜率来自 Elo 模型</span>
             <button className="btn" style={{ marginLeft: 'auto' }} onClick={() => go(`today/${nextDay}`)}>
               全部详情 ›
             </button>
           </h2>
           <div className="grid cols-3">
-            {dayGames.slice(0, 6).map((g) => <GameCard key={g.gameId} game={g} teamById={teamById} />)}
+            {dayGames.slice(0, 6).map((g) => <GameCard key={g.gameId} game={g} teamById={teamById} fmt={fmt} />)}
           </div>
         </div>
       )}
@@ -329,7 +333,7 @@ function LeaderTile({ label, row, teamById, field = 'total' }) {
   );
 }
 
-function GameCard({ game, teamById }) {
+function GameCard({ game, teamById, fmt }) {
   const home = teamById.get(game.homeId);
   const away = teamById.get(game.awayId);
   const p = game.prediction;
@@ -342,7 +346,7 @@ function GameCard({ game, teamById }) {
       onClick={() => go(`predict/${game.awayId}/${game.homeId}/${game.gameId}`)}
     >
       <div className="top">
-        <span>{bjTimeOf(game.dateTimeUtc)} 开打</span>
+        <span>{fmt.timeZoned(game.dateTimeUtc)} 开打</span>
         <span>{game.national?.join(' / ') || game.arena}</span>
       </div>
       <Side team={away} score={p.awayScore} bold={!homeFav} />

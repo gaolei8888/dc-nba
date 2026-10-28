@@ -5,7 +5,7 @@ import { api, withOut } from '../lib/api.js';
 import {
   TeamCell, Loading, ErrorBox, ProbBar, StatTile, Segmented, DataTable,
 } from '../components/common.jsx';
-import { fmtDate, fmtDateShort, probColor, pct, num, signed, bjTimeOf } from '../lib/format.js';
+import { fmtDate, fmtDateShort, probColor, pct, num, signed } from '../lib/format.js';
 
 const TABS = [
   { value: 'stats', label: '统计' },
@@ -287,7 +287,7 @@ const ciRoi = (c) => (c?.lo == null ? '—' : `${roi(c.lo)} ~ ${roi(c.hi)}`);
 const MIN_LEDGER = 100;
 
 function PaperBetting({ teamById }) {
-  const { t } = useI18n();
+  const { t, fmt } = useI18n();
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
   const [season, setSeason] = useState('all');
@@ -382,7 +382,7 @@ function PaperBetting({ teamById }) {
             cols={[
               ['日期', (r) => fmtDate(r.game_date), true],
               ['规则', (r) => (r.rule.endsWith('-late') ? '临近开赛' : '早记'), true],
-              ['价格时间', (r) => (r.odds_fetched_at ? `北京 ${bjTimeOf(r.odds_fetched_at)}` : '—')],
+              ['价格时间', (r) => (r.odds_fetched_at ? fmt.timeZoned(r.odds_fetched_at) : '—')],
               ['对阵', (r) => `${team(r.away_id)} @ ${team(r.home_id)}`, true],
               ['模拟押', (r) => <b>{team(r.side === 'home' ? r.home_id : r.away_id)}</b>, true],
               ['DK 赔率', (r) => (r.bet_ml > 0 ? `+${r.bet_ml}` : r.bet_ml)],
