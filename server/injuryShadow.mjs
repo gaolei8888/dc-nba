@@ -17,6 +17,8 @@ import { normalCdf } from './lab.mjs';
 import { bootstrapCI } from './fusionLab.mjs';
 
 export const VARIANTS = ['base', 'r22', 'r0630'];
+/** 页面汇总里的全部方案：rr22 / rr0630 来自 shadow_rr_predictions（server/rosterResultsShadow.mjs） */
+export const SUMMARY_VARIANTS = [...VARIANTS, 'rr22', 'rr0630'];
 export const TARGET_GAMES = 300;
 /** 运行时刻离决策时点超过这么久，就不算这个时点（14:30 那次、补跑太晚的都不记） */
 export const CAPTURE_TOL_H = 2;
@@ -156,13 +158,13 @@ const tx = (db, fn) => {
  * 插入；已有的 (game_id, variant) 由触发器忽略。每行一个保存点：某场恰在运行中开赛被触发器拒，
  * 只丢那一行，不连累整晚。返回 { n: 新插入行数, rejected: [{ game_id, variant, why }] }
  */
-export function insertShadow(db, rows) {
-  const stmt = db.prepare(`INSERT INTO shadow_predictions (${COLS.join(', ')}) VALUES (${COLS.map(() => '?').join(', ')})`);
+export function insertShadow(db, rows, { table = 'shadow_predictions', cols = COLS } = {}) {
+  const stmt = db.prepare(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`);
   const rejected = [];
   const n = tx(db, () => rows.reduce((k, r) => {
     db.exec('SAVEPOINT row');
     try {
-      const c = Number(stmt.run(...COLS.map((col) => r[col] ?? null)).changes ?? 0);
+      const c = Number(stmt.run(...cols.map((col) => r[col] ?? null)).changes ?? 0);
       db.exec('RELEASE row');
       return k + c;
     } catch (e) {
@@ -175,8 +177,8 @@ export function insertShadow(db, rows) {
 }
 
 /** scores: { gameId: { homeScore, awayScore } }。只写还没结算的行，返回写入行数 */
-export function settleShadow(db, scores, at = new Date().toISOString()) {
-  const stmt = db.prepare(`UPDATE shadow_predictions SET home_score = ?, away_score = ?, home_win = ?, settled_at = ?
+export function settleShadow(db, scores, at = new Date().toISOString(), table = 'shadow_predictions') {
+  const stmt = db.prepare(`UPDATE ${table} SET home_score = ?, away_score = ?, home_win = ?, settled_at = ?
     WHERE game_id = ? AND settled_at IS NULL`);
   return tx(db, () => Object.entries(scores).reduce((n, [gid, s]) => (s.homeScore == null || s.awayScore == null ? n
     : n + Number(stmt.run(s.homeScore, s.awayScore, s.homeScore > s.awayScore ? 1 : 0, at, gid).changes ?? 0)), 0));
@@ -203,12 +205,13 @@ const mean = (a) => (a.length ? a.reduce((s, v) => s + v, 0) / a.length : null);
 
 /**
  * 每套方案：已结算场数、log loss、Brier；方案还给出与基线在同一批场次上的配对差（bootstrap 95% 区间）。
- * progress = 06:30 方案与基线都已结算的场数（切换门槛按它算）
+ * progress = 06:30 方案与基线都已结算的场数（切换门槛按它算）；rrProgress 同理按 rr0630。
+ * rows 可以是 shadow_predictions 与 shadow_rr_predictions 两张表的行拼在一起（按 variant 区分）
  */
 export function shadowSummary(rows, { B = 1000, target = TARGET_GAMES } = {}) {
   const done = rows.filter((r) => r.settled_at != null && r.home_win != null);
   const base = new Map(done.filter((r) => r.variant === 'base').map((r) => [r.game_id, r]));
-  const variants = VARIANTS.map((variant) => {
+  const variants = SUMMARY_VARIANTS.map((variant) => {
     const mine = done.filter((r) => r.variant === variant);
     const out = {
       variant, n: mine.length,
@@ -227,6 +230,8 @@ export function shadowSummary(rows, { B = 1000, target = TARGET_GAMES } = {}) {
   return {
     target,
     progress: variants.find((v) => v.variant === 'r0630').paired,
+    // 阵容+战绩榜的预注册主方案是 rr0630（见 docs/roster-results-update-verdict.md「影子运行预注册」）
+    rrProgress: variants.find((v) => v.variant === 'rr0630').paired,
     pending: new Set(rows.filter((r) => r.settled_at == null).map((r) => r.game_id)).size,
     firstDate: rows[0]?.game_date ?? null,
     variants,

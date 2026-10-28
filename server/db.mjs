@@ -200,6 +200,65 @@ BEGIN SELECT RAISE(ABORT, 'injury_reports 只追加：不能改'); END;
 `;
 
 /**
+ * 阵容+战绩榜影子运行（见 server/rosterResultsShadow.mjs，docs/roster-results-update-verdict.md「影子运行预注册」）。
+ * 单独一张表：shadow_predictions 的 variant CHECK 已在线上库里定死，SQLite 改不了 CHECK，重建表又会被
+ * 「开赛后不能记」挡住旧行——新开一张表，规则与它相同，另加两条赛前性兜底：
+ *   - results_through（用到的最后一个赛果日期，美东）必须早于 game_date：同日早场的结果不能进晚场的评级；
+ *   - board_fetched_at（数据快照时间）不能晚于 captured_at。
+ */
+const RR_FROZEN = ['game_id', 'variant', 'params_version', 'captured_at', 'game_date', 'tipoff_utc', 'home_id', 'away_id',
+  'neutral', 'rating_home', 'rating_away', 'prior_home', 'prior_away', 'hca', 'rest_pts', 'margin', 'p_home',
+  'board_fetched_at', 'injuries_fetched_at', 'results_through', 'results_as_of', 'board_code', 'inputs'];
+export const RR_SHADOW_SCHEMA = `
+CREATE TABLE IF NOT EXISTS shadow_rr_predictions (
+  game_id             TEXT NOT NULL,
+  variant             TEXT NOT NULL CHECK (variant IN ('rr22', 'rr0630')),
+  params_version      INTEGER NOT NULL,
+  captured_at         TEXT NOT NULL,
+  game_date           TEXT NOT NULL,
+  tipoff_utc          TEXT NOT NULL,
+  home_id             INTEGER NOT NULL,
+  away_id             INTEGER NOT NULL,
+  neutral             INTEGER NOT NULL,
+  rating_home         REAL NOT NULL,
+  rating_away         REAL NOT NULL,
+  prior_home          REAL,
+  prior_away          REAL,
+  hca                 REAL NOT NULL,
+  rest_pts            REAL NOT NULL,
+  margin              REAL NOT NULL,
+  p_home              REAL NOT NULL CHECK (p_home > 0 AND p_home < 1),
+  board_fetched_at    TEXT NOT NULL,
+  injuries_fetched_at TEXT,
+  results_through     TEXT,
+  results_as_of       TEXT NOT NULL,
+  board_code          TEXT,
+  inputs              TEXT,
+  home_score          INTEGER,
+  away_score          INTEGER,
+  home_win            INTEGER,
+  settled_at          TEXT,
+  PRIMARY KEY (game_id, variant)
+);
+CREATE TRIGGER IF NOT EXISTS rr_dup BEFORE INSERT ON shadow_rr_predictions
+WHEN EXISTS (SELECT 1 FROM shadow_rr_predictions WHERE game_id = NEW.game_id AND variant = NEW.variant)
+BEGIN SELECT RAISE(IGNORE); END;
+CREATE TRIGGER IF NOT EXISTS rr_after_tipoff BEFORE INSERT ON shadow_rr_predictions
+WHEN NEW.tipoff_utc <= ${NOW_SQL} OR NEW.captured_at >= NEW.tipoff_utc
+BEGIN SELECT RAISE(ABORT, 'shadow_rr_predictions：开赛后不能记'); END;
+CREATE TRIGGER IF NOT EXISTS rr_pregame BEFORE INSERT ON shadow_rr_predictions
+WHEN NEW.results_through >= NEW.game_date OR NEW.results_as_of > NEW.game_date OR NEW.board_fetched_at > NEW.captured_at
+BEGIN SELECT RAISE(ABORT, 'shadow_rr_predictions：用了比赛日当天或之后的赛果 / 未来的数据快照'); END;
+CREATE TRIGGER IF NOT EXISTS rr_no_delete BEFORE DELETE ON shadow_rr_predictions
+BEGIN SELECT RAISE(ABORT, 'shadow_rr_predictions 只追加：不能删除'); END;
+CREATE TRIGGER IF NOT EXISTS rr_frozen BEFORE UPDATE ON shadow_rr_predictions
+WHEN ${changed(RR_FROZEN)}
+  OR (OLD.settled_at IS NOT NULL AND (${changed(SHADOW_SCORE)}))
+  OR (NEW.settled_at IS NULL AND (${changed(SHADOW_SCORE)}))
+BEGIN SELECT RAISE(ABORT, 'shadow_rr_predictions 只追加：已记录的字段不能改'); END;
+`;
+
+/**
  * 人机对赌「本季实战」（见 server/livePlay.mjs）。和回放的 picks 表分开：回放可立即结算、
  * 题目答案早已公开，实战是开赛前下判断、赛后才知道结果，两边战绩不能混。
  *   - 一人一场一行；开赛前可改（选择与模型快照一起改），开赛后改不了——触发器按真实时钟兜底，
@@ -261,7 +320,7 @@ export function openWith(schema, label, dbPath = DB_PATH) {
   }
 }
 // 影子运行与账本同一个句柄：同是「开赛前记下、赛后结算」的前向记录，同一个开关（ENABLE_LEDGER）
-export const openLedger = (dbPath = DB_PATH) => openWith(LEDGER_SCHEMA + SHADOW_SCHEMA, '模拟投注账本', dbPath);
+export const openLedger = (dbPath = DB_PATH) => openWith(LEDGER_SCHEMA + SHADOW_SCHEMA + RR_SHADOW_SCHEMA, '模拟投注账本', dbPath);
 
 /**
  * 打开数据库。任何失败都不抛，只记原因并让 isEnabled() 返回 false。

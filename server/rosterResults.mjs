@@ -13,6 +13,7 @@
  * 加了近期加权后，n 换成各场权重之和 Σw、均值换成加权均值（每场噪声方差按 1/w 放大）。
  * 对手强度 r_对手 取同一张后验榜（SRS 式），用 Gauss–Seidel 迭代求解；K>0 时方程组严格对角占优，必收敛。
  */
+import { normalCdf } from './lab.mjs';
 
 /**
  * 线上配置：留一赛季在 96 组预注册候选（K × {无, 先验下限, 近期加权, 净胜分截断}）里按 log loss 选出，
@@ -20,6 +21,15 @@
  * 近期加权：每场权重 0.4^(距今天数/60)，约等于「第 1 场是第 30 场权重的 40%」（KenPom 式）。
  */
 export const RESULTS = Object.freeze({ K: 8, recency: Object.freeze({ ratio: 0.4, days: 60 }) });
+
+/**
+ * 单场预测：净胜分 = r主 − r客 + 主场项（中立场 0）+ 休息项，胜率 = Φ(净胜分 / sd)。
+ * 回测（scripts/roster-results-backtest.mjs）与影子运行（server/rosterResultsShadow.mjs）共用这一个函数，保证同口径。
+ */
+export function gamePred(ratingHome, ratingAway, hca, restPts, sd) {
+  const margin = ratingHome - ratingAway + hca + restPts;
+  return { margin, p: normalCdf(margin, sd) };
+}
 
 const dayNum = (d) => Math.round(Date.parse(`${d}T00:00:00Z`) / 86400000);
 

@@ -205,10 +205,13 @@ function Stats({ d, teamById }) {
   );
 }
 
-const SHADOW_LABEL = { base: '基线（线上预测）', r22: '+ 22:00 伤病报告', r0630: '+ 06:30 伤病报告' };
+const SHADOW_LABEL = {
+  base: '基线（线上预测）', r22: '+ 22:00 伤病报告', r0630: '+ 06:30 伤病报告',
+  rr22: '阵容+战绩榜（22:00）', rr0630: '阵容+战绩榜（06:30，主方案）',
+};
 const d4 = (c) => (c ? `${c.mean >= 0 ? '+' : ''}${c.mean.toFixed(4)} [${c.lo.toFixed(4)}, ${c.hi.toFixed(4)}]` : '—');
 
-/** 伤病报告影子运行：只记录、不影响页面显示的预测（scripts/shadow.mjs） */
+/** 影子运行：伤病报告三套 + 阵容+战绩榜两套，只记录、不影响页面显示的预测（scripts/shadow.mjs） */
 function ShadowCard() {
   const [s, setS] = useState(null);
   useEffect(() => { api.shadow().then(setS).catch(() => setS({ available: false })); }, []);
@@ -216,11 +219,12 @@ function ShadowCard() {
   return (
     <div className="card">
       <h2>影子模式（不影响显示的预测）
-        <span className="sub">三套赛前预测同时记录：06:30 方案已结算 {s.progress} / {s.target} 场{s.pending ? `，待结算 ${s.pending} 场` : ''}</span>
+        <span className="sub">多套赛前预测同时记录：06:30 伤病方案已结算 {s.progress} / {s.target} 场
+          {s.rrProgress != null ? `，阵容+战绩（06:30）${s.rrProgress} / ${s.target} 场` : ''}{s.pending ? `，待结算 ${s.pending} 场` : ''}</span>
       </h2>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '4px 0 10px' }}>
         <ProbBar p={Math.min(1, s.progress / s.target)} width={160} />
-        <span className="dim">满 {s.target} 场且 06:30 方案的 Δ 对数损失 &lt; 0 才考虑切换；前 20 场本来就没有收益</span>
+        <span className="dim">伤病方案：满 {s.target} 场且 06:30 方案的 Δ 对数损失 &lt; 0 才考虑切换；前 20 场本来就没有收益</span>
       </div>
       <Mini
         rowKey={(r) => r.variant}
@@ -232,11 +236,21 @@ function ShadowCard() {
           ['Brier', (r) => num(r.brier, 4)],
           ['Δ 对数损失 vs 基线（95% 区间）', (r) => (r.variant === 'base' ? '—' : d4(r.dLogLoss))],
           ['Δ Brier', (r) => (r.variant === 'base' ? '—' : d4(r.dBrier))],
+          ['进度（配对场数）', (r) => (r.variant === 'base' ? '—' : (
+            <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+              <ProbBar p={Math.min(1, (r.paired ?? 0) / s.target)} width={48} />{r.paired ?? 0} / {s.target}
+            </span>
+          ))],
         ]}
       />
       <p className="dim" style={{ marginTop: 8 }}>
         方案 = 线上预测的净胜分 + β ×（主队 − 客队的预期缺阵损失），缺阵按开赛前能看到的 NBA 官方伤病报告 × 各状态的出场率、
         球员价值用每周重拟合的 RAPM；参数在 2021–26 赛季上冻结，影子期内不调。Δ 为负表示比基线准。盘口不参与。
+      </p>
+      <p className="dim" style={{ marginTop: 4 }}>
+        阵容+战绩榜 = 总览页的「阵容+战绩」评级：(8 × 阵容先验 + 近期加权的对手调整净胜分之和) ÷ (8 + 加权场数)，
+        只用比赛日之前的赛果；胜率 = Φ((主队评级 − 客队评级 + 主场 1.6 + 休息项) ÷ 12)，与回测同一公式，参数冻结。
+        预注册：以 06:30 那套为准，配对满 300 场后，Δ 对数损失的 95% 区间上界 &lt; 0 才提议改用它做预测，否则保留 Elo；中途不看结果调参。
       </p>
     </div>
   );

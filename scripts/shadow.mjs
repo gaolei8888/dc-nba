@@ -1,5 +1,7 @@
 /**
  * 伤病报告影子运行：抓当时最新的官方报告、记三套赛前预测、赛后结算（只追加，见 server/injuryShadow.mjs）。
+ * 同一次运行另记阵容+战绩榜的 rr22 / rr0630（server/rosterResultsShadow.mjs，表 shadow_rr_predictions）：
+ * 与前三套完全隔离——rr 出任何错只跳过 rr 行、只记日志，base / r22 / r0630 照常。
  *
  *   node scripts/shadow.mjs capture          # 北京 22:00 那次：base + r22（06:30 前开打的场另记 r0630）
  *   node scripts/shadow.mjs capture --late   # 北京 06:30 那次：r0630。身份由参数给出，不按钟点猜
@@ -15,16 +17,26 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { readJson } from '../server/nbaClient.mjs';
 import { openLedger } from '../server/db.mjs';
-import { buildModel, predictSchedule } from '../server/predict.mjs';
+import { buildModel, predictSchedule, powerRankings } from '../server/predict.mjs';
 import { REPORT_BASE, candidates, isS3Missing, parseReportText } from '../server/injuryReport.mjs';
 import { asPdf, injuryClient, pdfText } from '../server/injuryFetch.mjs';
 import {
   captureDate, etToUtc, insertShadow, settleShadow, shadowAll, shadowRows, shadowSummary, storeReport, storedReports,
 } from '../server/injuryShadow.mjs';
+import { RR_COLS, rrAll, rrBoard, rrRows } from '../server/rosterResultsShadow.mjs';
 
 const PARAMS = JSON.parse(fs.readFileSync(new URL('../server/injury-params-v1.json', import.meta.url), 'utf8'));
+const RR_PARAMS_FILE = new URL('../server/roster-results-params-v1.json', import.meta.url);
+/** 榜的代码指纹：影子期内榜的代码若有改动（分钟 / 缺阵逻辑等），逐行可查，评估时据此分段报告 */
+const RR_CODE_FILES = ['liveRosterRankings.mjs', 'rosterProjection.mjs', 'rosterResults.mjs', 'rosterResultsShadow.mjs', 'impact.mjs', 'impactShrink.mjs'];
+const boardCode = () => {
+  const h = crypto.createHash('sha256');
+  for (const f of RR_CODE_FILES) h.update(fs.readFileSync(new URL(`../server/${f}`, import.meta.url)));
+  return h.digest('hex').slice(0, 12);
+};
 const db = openLedger();
 if (!db) process.exit(1);
 const cmd = process.argv[2];
@@ -79,6 +91,7 @@ async function capture() {
   const slate = predictSchedule(buildModel(store), games, {}).map((g) => ({
     gameId: g.gameId, date: g.date, tipoff: g.dateTimeUtc, homeId: g.homeId, awayId: g.awayId,
     margin: g.prediction.margin, dataAt: store.meta.fetchedAt,
+    neutral: !!g.neutral, restHome: g.prediction.restHome, restAway: g.prediction.restAway,
   }));
   // 06:30 方案加在 22:00 那次记下的基线上（配对比较的是同一个基线）；没有基线才用此刻的线上预测
   const baseM = new Map(shadowAll(db).filter((r) => r.variant === 'base' && r.game_date === D).map((r) => [r.game_id, r.base_margin]));
@@ -94,17 +107,43 @@ async function capture() {
     + `报告 ${got ?? '没找到'}；球员价值 ${values ? `拟合于 ${values.fittedAt}、生成于 ${values.builtAt}` : '缺失'}`
     + `${values && !rows.some((r) => r.variant !== 'base') && rows.length ? '（过期，只记基线）' : ''}`
     + `${tipped.length ? `；已开赛未记 ${tipped.join(',')}` : ''}${rejected.length ? `；库拒绝 ${rejected.map((r) => `${r.game_id}/${r.variant}`).join(',')}` : ''}`);
+  // 阵容+战绩榜：放在前三套已落库之后，出错只记日志
+  try {
+    captureRr({ D, store, slate, now: clock() });
+  } catch (e) {
+    console.warn(`· 阵容+战绩影子：失败（不影响 base / r22 / r0630）：${String(e.message).slice(0, 200)}`);
+  }
+}
+
+function captureRr({ D, store, slate, now }) {
+  const params = JSON.parse(fs.readFileSync(RR_PARAMS_FILE, 'utf8'));
+  const full = { ...store, injuries: readJson('injuries.json') ?? { players: [], fetchedAt: null }, impactModel: readJson('impact-model.json') };
+  const legacy = powerRankings(buildModel(full), {});
+  const board = rrBoard({ store: full, legacy, D, params, now });
+  const { rows, skipped } = rrRows({ slate, slot, now, params, board, code: boardCode() });
+  const { n, rejected } = insertShadow(db, rows, { table: 'shadow_rr_predictions', cols: RR_COLS });
+  const by = rows.reduce((o, r) => ({ ...o, [r.variant]: (o[r.variant] ?? 0) + 1 }), {});
+  const why = [...new Set(skipped.map((x) => x.why))];
+  console.log(`· 阵容+战绩影子（${slot === '22' ? '22:00' : '06:30'}，美东 ${D}）：${JSON.stringify(by)}，新插入 ${n} 行；`
+    + `${board.ok ? `快照 ${board.fetchedAt}、赛果截至 ${board.resultsThrough ?? '—'}（${board.resultsN} 场）` : `榜不可用：${board.reason}`}`
+    + `${skipped.length ? `；跳过 ${skipped.length} 行（${why.join('；')}）` : ''}`
+    + `${rejected.length ? `；库拒绝 ${rejected.map((r) => `${r.game_id}/${r.variant}：${r.why}`).join(',')}` : ''}`);
 }
 
 function settle() {
   const scores = Object.fromEntries(readJson('schedule.json').games.filter((g) => g.homeScore != null)
     .map((g) => [g.gameId, { homeScore: g.homeScore, awayScore: g.awayScore }]));
   console.log(`· 影子运行结算：${settleShadow(db, scores)} 行`);
+  try {
+    console.log(`· 阵容+战绩影子结算：${settleShadow(db, scores, undefined, 'shadow_rr_predictions')} 行`);
+  } catch (e) {
+    console.warn(`· 阵容+战绩影子结算失败：${String(e.message).slice(0, 200)}`);
+  }
 }
 
 function show() {
-  const s = shadowSummary(shadowAll(db));
-  console.log(`影子运行：06:30 方案已结算 ${s.progress}/${s.target} 场，待结算 ${s.pending} 场（自 ${s.firstDate ?? '—'}）`);
+  const s = shadowSummary([...shadowAll(db), ...rrAll(db)]);
+  console.log(`影子运行：06:30 方案已结算 ${s.progress}/${s.target} 场，rr0630 ${s.rrProgress}/${s.target} 场，待结算 ${s.pending} 场（自 ${s.firstDate ?? '—'}）`);
   for (const v of s.variants) {
     const d = v.dLogLoss ? `  Δ ${v.dLogLoss.mean.toFixed(4)} [${v.dLogLoss.lo.toFixed(4)}, ${v.dLogLoss.hi.toFixed(4)}]（配对 ${v.paired} 场）` : '';
     console.log(`  ${v.variant.padEnd(6)} n=${v.n} LL ${v.logLoss?.toFixed(4) ?? '—'} Brier ${v.brier?.toFixed(4) ?? '—'}${d}`);

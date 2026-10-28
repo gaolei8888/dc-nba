@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "name": "roster-results-v1",
+  "frozenAt": "2026-10-28",
+  "source": "docs/roster-results-update-verdict.md（四季合并选出 ★ K=8 近期加权）；scripts/roster-results-backtest.mjs",
+  "K": 8,
+  "recency": { "ratio": 0.4, "days": 60 },
+  "spreadSd": 12,
+  "homeAdv": 1.6,
+  "restWeight": 1.8,
+  "availability": "reported",
+  "impShrink": { "minutes": { "k": 3200, "pivot": 1600 } },
+  "maxDataAgeH": 36
+}

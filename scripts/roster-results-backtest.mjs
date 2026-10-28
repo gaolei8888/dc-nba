@@ -28,7 +28,7 @@ import { shrinkByMinutes, MINUTES_SHRINK } from '../server/impactShrink.mjs';
 import { replaySeason, eloStartFor, teamGamesFromStints, leagueCenter, logLoss } from '../server/continuityLab.mjs';
 import { expand, score, normalCdf } from '../server/lab.mjs';
 import { bootstrapCI } from '../server/fusionLab.mjs';
-import { resultsUpdate } from '../server/rosterResults.mjs';
+import { resultsUpdate, gamePred } from '../server/rosterResults.mjs';
 
 const HISTORY = path.join(DATA_DIR, 'history');
 const P = { k: 20, carryKeep: 0.75, homeAdv: 1.6, restWeight: 1.8 };
@@ -140,8 +140,8 @@ function seasonPreds(rows, cfg) {
     });
     for (let x = i; x < j; x += 1) {
       const r = rows[x];
-      const pred = post.get(r.homeId).rating - post.get(r.awayId).rating + r.hca + r.restPts;
-      out[x] = { row: r, p: normalCdf(pred, SD), pred, actual: r.actual, homeWin: r.homeWin };
+      const { margin: pred, p } = gamePred(post.get(r.homeId).rating, post.get(r.awayId).rating, r.hca, r.restPts, SD);
+      out[x] = { row: r, p, pred, actual: r.actual, homeWin: r.homeWin };
     }
     for (let x = i; x < j; x += 1) {
       done.push({ homeId: rows[x].homeId, awayId: rows[x].awayId, margin: rows[x].actual, hca: rows[x].hca, date });
