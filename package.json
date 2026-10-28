@@ -8,6 +8,7 @@
     "ingest": "node scripts/ingest.mjs",
     "backtest": "node scripts/backtest.mjs",
     "backtest:roster": "node scripts/roster-backtest.mjs",
+    "roster:results": "node scripts/roster-results-backtest.mjs",
     "test": "node --test tests/*.test.mjs",
     "backup": "node scripts/backup-db.mjs",
     "check": "node scripts/check-jsx.mjs",
