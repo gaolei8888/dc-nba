@@ -100,3 +100,9 @@ test('cumShift：累计年龄增量，反向取负', async () => {
   assert.equal(cumShift(g, 30, 30), 0);
   assert.equal(cumShift(g, 33, 36), -3);
 });
+
+test('fitHinge：没有样本时返回恒 0 曲线', () => {
+  const g = fitHinge([], [23, 27, 31], [19, 38]);
+  assert.equal(g.at(30), 0);
+  assert.equal(g.n, 0);
+});

@@ -98,6 +98,11 @@ export function hingeBasis(x, knots, [lo, hi] = [-Infinity, Infinity]) {
  */
 export function fitHinge(samples, knots, clip = [-Infinity, Infinity]) {
   const ok = samples.filter((s) => Number.isFinite(s.x) && Number.isFinite(s.y) && s.w > 0);
+  // 样本不足（例如最早一季之前没有相邻赛季对）时返回恒为 0 的曲线 = 不做年龄调整
+  if (ok.length < knots.length + 2) {
+    const coef = new Array(knots.length + 2).fill(0);
+    return { coef, at: () => 0, n: ok.length };
+  }
   // 极小的岭只为数值稳定，不起收缩作用
   const coef = ridge(ok.map((s) => hingeBasis(s.x, knots, clip)), ok.map((s) => s.y), ok.map((s) => s.w), 1e-6);
   const at = (x) => hingeBasis(x, knots, clip).reduce((s, b, i) => s + b * coef[i], 0);

@@ -8,7 +8,7 @@ import { DATA_DIR, readJsonAuto } from '../server/nbaClient.mjs';
 import { computeApm, decayedApm } from '../server/rapm.mjs';
 import { decayedRapm, stintsOf } from '../server/stintRapm.mjs';
 import { FEATURES, features, fit, corr, mean, MIN_GP, MIN_MPG } from '../server/impact.mjs';
-import { shrinkToward } from '../server/impactShrink.mjs';
+import { shrinkToward, shrinkByMinutes } from '../server/impactShrink.mjs';
 import {
   possShare, blendToward, momentPadding, padValue, fitHinge, lopoPick, verdict, seasonWeights, multiSeasonAvg, cumShift,
 } from '../server/impImproveLab.mjs';
@@ -342,7 +342,49 @@ function scoreCfg(cfg) {
 }
 
 
+/**
+ * 截至 upto 季（含）、只用 ≤upto 季数据的线上口径球员价值（每百回合，与 fit-impact / ingest 同单位）：
+ * 收缩前值 → 量纲校准（球队分钟加权值对球队净效率斜率 / 5）→ shrinkByMinutes（k=3200，pivot 1600）。
+ * 逐项年龄曲线只用 ≤upto 季内的相邻赛季对。返回 { values: Map(id → 值), raw: Map, scale }。
+ */
+function calibratedValues(upto, cfg, { train: trainIn = null } = {}) {
+  const seen = seasons.slice(0, seasons.indexOf(upto) + 1);
+  const train = trainIn ?? seen;
+  const agePairs = seen.slice(0, -1).map((x, i) => ({ s: x, nx: seen[i + 1] }));
+  const ctxFor = (x) => ({ s: x, train, agePairs, key: `cal${upto}|${x}|${train.join(',')}` });
+  const cal = [];
+  for (const x of seen) {
+    const raw = predictor(ctxFor(x), { ...cfg, k: 0 });
+    const byTeam = new Map();
+    for (const p of players[x]) {
+      if (!p.teamId || !(p.min > 0) || !(p.gp > 0)) continue;
+      if (!byTeam.has(p.teamId)) byTeam.set(p.teamId, []);
+      byTeam.get(p.teamId).push(p);
+    }
+    for (const squad of byTeam.values()) {
+      const tot = squad.reduce((a, p) => a + p.min * p.gp, 0);
+      cal.push({
+        x: squad.reduce((a, p) => a + ((p.min * p.gp) / tot) * (raw(p) ?? 0), 0),
+        y: squad.reduce((a, p) => a + ((p.min * p.gp) / tot) * (p.netRtg ?? 0), 0),
+      });
+    }
+  }
+  const mx = mean(cal.map((r) => r.x)); const my = mean(cal.map((r) => r.y));
+  const scale = cal.reduce((a, r) => a + (r.x - mx) * (r.y - my), 0) / cal.reduce((a, r) => a + (r.x - mx) ** 2, 0) / 5;
+  const raw = predictor(ctxFor(upto), { ...cfg, k: 0 });
+  const spmOnly = predictor(ctxFor(upto), { ...cfg, k: 0, w: 0 });
+  const mu = mean(players[upto].map(spmOnly).filter((v) => v !== null));
+  const values = new Map(); const raws = new Map();
+  for (const p of players[upto]) {
+    const v = raw(p);
+    if (v === null) continue;
+    raws.set(p.playerId, v * scale);
+    values.set(p.playerId, shrinkByMinutes(v, minutesOf(p), mu) * scale);
+  }
+  return { values, raw: raws, scale, mu };
+}
+
 export {
-  players, lineups, stints, allSeasons, seasons, byId, minutesOf, apmBy, meas, padsOf, spmModel, spmSingle, spmMulti,
+  calibratedValues, players, lineups, stints, allSeasons, seasons, byId, minutesOf, apmBy, meas, padsOf, spmModel, spmSingle, spmMulti,
   pairs, ageCurve, statCurves, backfillPairs, DEF, predictor, CTX, scoreCfg, eligible,
 };
