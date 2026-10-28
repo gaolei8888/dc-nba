@@ -34,7 +34,7 @@
 | 轮换 | rotation | lineup rotation, substitution pattern | 已定 |
 | 替补级 | replacement level | bench level, scrub level | 已定 |
 | 收缩 | shrinkage | shrinking, regularization | 已定 |
-| 缺阵 | Out | Absent, Missing, Injured Out | 已定 |
+| 缺阵 | Out | Absent, Injured Out | 已定 |
 | 存疑 | Doubtful | Uncertain, Doubt | 已定 |
 | 每日观察 | Day-to-day | Daily Observation, day to day | 已定 |
 | 美东时间 | ET | EST, Eastern Standard Time | 已定 |
