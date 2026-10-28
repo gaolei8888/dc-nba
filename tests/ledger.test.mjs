@@ -18,7 +18,7 @@ const slateGame = (id, pHome, hours, odds = { provider: 'Draft Kings', homeMl: -
 
 test('captureRows：每场按三条预注册规则各记一行，edge 与方向来自 DK 去水概率', () => {
   const rows = captureRows([slateGame('g1', 0.66, 10)], { now: NOW });
-  assert.deepEqual(rows.map((r) => r.rule), RULES.map((r) => r.rule));
+  assert.deepEqual(rows.map((r) => r.rule), RULES.filter((r) => !r.late).map((r) => r.rule));
   const pBook = devigHomeProb(-150, 130);
   for (const r of rows) {
     assert.equal(r.book, 'draftkings');
@@ -120,4 +120,62 @@ test('captureRows 记下赔率快照时间；ledgerReport 的今晚列表不含�
   insertBets(db, rows);
   assert.equal(ledgerReport(ledgerRows(db), { B: 50, now: NOW }).open.length, 1);
   assert.equal(ledgerReport(ledgerRows(db), { B: 50, now: NOW + 30 * 3600e3 }).open.length, 0, '延期/漏结算的旧单不算今晚');
+});
+
+// ---- 临近开赛规则 edge3-late（北京 06:30 那次 --late 运行记录）
+const LATE_NOW = Date.parse('2026-10-28T22:30:00Z');   // 北京 06:30
+const lateGame = (id, pHome, hours, odds) => ({ ...slateGame(id, pHome, 0, odds), tipoff: new Date(LATE_NOW + hours * 3600e3).toISOString() });
+const FRESH = new Date(LATE_NOW - 10 * 60e3).toISOString();
+
+test('按运行身份选规则：默认（早）只记 edge0/3/6，--late 只记 edge3-late', () => {
+  const early = captureRows([slateGame('g1', 0.66, 10)], { now: NOW });
+  assert.deepEqual(early.map((r) => r.rule), ['edge0', 'edge3', 'edge6']);
+  const late = captureRows([lateGame('g1', 0.66, 2)], { now: LATE_NOW, run: 'late', oddsFetchedAt: FRESH });
+  assert.deepEqual(late.map((r) => r.rule), ['edge3-late']);
+  assert.equal(late[0].threshold, 0.03);
+  assert.equal(late[0].odds_fetched_at, FRESH, '记下赔率快照时间');
+  assert.throws(() => captureRows([], { run: 'noon' }), /run/);
+});
+
+test('--late：已开赛的不记；赔率快照不新（> 2 小时）或晚于开赛的不记；超出 8 小时窗口的不记', () => {
+  const games = [lateGame('started', 0.7, -0.1), lateGame('ok', 0.7, 0.5), lateGame('far', 0.7, 9)];
+  assert.deepEqual(captureRows(games, { now: LATE_NOW, run: 'late', oddsFetchedAt: FRESH }).map((r) => r.game_id), ['ok']);
+  const stale = new Date(LATE_NOW - 8.5 * 3600e3).toISOString();   // 前一晚 22:00 的快照（刷新失败时）
+  assert.equal(captureRows(games, { now: LATE_NOW, run: 'late', oddsFetchedAt: stale }).length, 0);
+  assert.equal(captureRows(games, { now: LATE_NOW, run: 'late', oddsFetchedAt: null }).length, 0, '不知道快照时间就不算临近收盘');
+  const afterTip = new Date(LATE_NOW + 3600e3).toISOString();
+  assert.equal(captureRows([lateGame('g', 0.7, 0.5)], { now: LATE_NOW + 3600e3 - 1, run: 'late', oddsFetchedAt: afterTip }).length, 0, '开赛后的价是滚球价');
+});
+
+test('同一场早晚两条规则并存；各自只追加、不可改', () => {
+  const db = fresh();
+  assert.equal(insertBets(db, captureRows([slateGame('g1', 0.66, 10)], { now: NOW })), 3);
+  const lateOdds = { provider: 'Draft Kings', homeMl: -170, awayMl: 145, eventId: 'eg1' };
+  const late = () => captureRows([{ ...slateGame('g1', 0.66, 0, lateOdds), tipoff: new Date(NOW + 10 * 3600e3).toISOString() }],
+    { now: NOW + 8.5 * 3600e3, run: 'late', oddsFetchedAt: new Date(NOW + 8.4 * 3600e3).toISOString() });
+  assert.equal(insertBets(db, late()), 1);
+  assert.equal(insertBets(db, late()), 0, '再跑一次 --late 被忽略');
+  const rows = ledgerRows(db);
+  assert.equal(rows.length, 4);
+  assert.equal(rows.find((r) => r.rule === 'edge3').home_ml, -150);
+  assert.equal(rows.find((r) => r.rule === 'edge3-late').home_ml, -170);
+  assert.throws(() => db.exec("UPDATE paper_bets SET home_ml = 1 WHERE rule = 'edge3-late'"), /只追加/);
+  assert.throws(() => db.exec("DELETE FROM paper_bets WHERE rule = 'edge3-late'"), /只追加/);
+
+  settleBets(db, { g1: { homeScore: 110, awayScore: 100, close: [-180, 150] } }, 'x');
+  const rep = ledgerReport(ledgerRows(db), { B: 50 });
+  const e3 = rep.rules.find((r) => r.rule === 'edge3');
+  const e3l = rep.rules.find((r) => r.rule === 'edge3-late');
+  assert.equal(e3l.late, true);
+  assert.equal(e3.bets, 1); assert.equal(e3l.bets, 1);
+  near(e3l.profit ?? e3l.units, 100 / 170);
+  assert.ok(e3.clv.mean > e3l.clv.mean, '早记的价离收盘更远，CLV 更大');
+  assert.equal(rep.captured, 1);
+});
+
+test('今晚列表同时列出早、晚两条规则的未结算下注', () => {
+  const db = fresh();
+  insertBets(db, captureRows([slateGame('g1', 0.66, 10)], { now: NOW }));
+  insertBets(db, captureRows([slateGame('g1', 0.66, 10)], { now: NOW + 8 * 3600e3, run: 'late', oddsFetchedAt: new Date(NOW + 7.9 * 3600e3).toISOString() }));
+  assert.deepEqual(ledgerReport(ledgerRows(db), { B: 50, now: NOW }).open.map((r) => r.rule).sort(), ['edge3', 'edge3-late']);
 });

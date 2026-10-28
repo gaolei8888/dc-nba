@@ -10,9 +10,11 @@
 #   deploy/refresh.sh              在这里跑全量 ingest。要求能访问 stats.nba.com——
 #                                  2026-10-27 起这台服务器不行，保留给以后换了网络或配了代理。
 #   加 --fetch-only                只取数据、体检，不动线上。
+#   加 --late                      账本按「临近开赛」身份记录（只记 edge3-late），给北京 06:30 那次用。
+#                                  不加就是默认的早规则 edge0/3/6。身份由 cron 行显式给出，不按钟点猜。
 #
 # cron（服务器时区 CST）：
-#   30 6 * * *  /home/dev/work/works/dc-nba/deploy/refresh.sh --espn >> /home/dev/work/works/dc-nba/refresh.log 2>&1
+#   30 6 * * *  /home/dev/work/works/dc-nba/deploy/refresh.sh --espn --late >> /home/dev/work/works/dc-nba/refresh.log 2>&1
 #   30 14 * * * /home/dev/work/works/dc-nba/deploy/refresh.sh --espn >> /home/dev/work/works/dc-nba/refresh.log 2>&1
 #   0 22 * * *  /home/dev/work/works/dc-nba/deploy/refresh.sh --espn >> /home/dev/work/works/dc-nba/refresh.log 2>&1
 #
@@ -37,11 +39,13 @@ NODE_IMAGE=node:22-alpine
 INGEST_TIMEOUT=1800
 MODE=ingest
 FETCH_ONLY=0
+LATE=
 for a in "$@"; do
   case "$a" in
     --espn) MODE=espn ;;
     --incoming) MODE=incoming ;;
     --fetch-only) FETCH_ONLY=1 ;;
+    --late) LATE=--late ;;
     *) echo "未知参数 $a"; exit 2 ;;
   esac
 done
@@ -62,7 +66,9 @@ fi
 
 ledger() {
   for c in settle capture; do
-    timeout 300 docker exec -e NODE_NO_WARNINGS=1 "$CONTAINER" node scripts/ledger.mjs "$c" \
+    # --late 只对 capture 有意义；$LATE 为空时不传
+    # shellcheck disable=SC2086
+    timeout 300 docker exec -e NODE_NO_WARNINGS=1 "$CONTAINER" node scripts/ledger.mjs "$c" $([ "$c" = capture ] && echo $LATE) \
       || log "模拟投注账本 $c 失败（不影响线上）"
   done
 }

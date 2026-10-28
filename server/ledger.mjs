@@ -10,14 +10,30 @@
 import { devigHomeProb } from './oddsClient.mjs';
 import { decide, settle, clvOf, summarize, THRESHOLDS, PRIMARY } from './paperBetting.mjs';
 
-/** 预注册的三条规则，每场各记一行；页面主看 edge3 */
-export const RULES = THRESHOLDS.map((t) => ({ rule: `edge${Math.round(t * 100)}`, threshold: t }));
+/**
+ * 预注册规则，每场每条各记一行；页面主看 edge3。
+ * 早（默认运行）：edge0/3/6，北京 22:00 那次记，开赛前 9–12 小时的价。
+ * 晚（`capture --late`，只由北京 06:30 那次 cron 带 --late 跑）：edge3-late，同样 edge ≥ 3% 平注 1 单位，
+ * 记的是开赛前约 0.5–4 小时、接近收盘的价。两条规则各占一个 (game_id, rule, book)，互不覆盖。
+ */
+export const RULES = [
+  ...THRESHOLDS.map((t) => ({ rule: `edge${Math.round(t * 100)}`, threshold: t, late: false })),
+  { rule: `edge${Math.round(PRIMARY * 100)}-late`, threshold: PRIMARY, late: true },
+];
 export const PRIMARY_RULE = `edge${Math.round(PRIMARY * 100)}`;
+export const LATE_RULE = `${PRIMARY_RULE}-late`;
 /**
  * 只记开赛前这么多小时内的比赛。服务器 14:30（北京）那次刷新离开赛 16 小时以上，
  * 22:00 那次是 9–12 小时：窗口 14 小时 = 由 22:00 那次记录，见设计 §3。
  */
 export const WINDOW_H = 14;
+/** 晚规则：06:30（北京）= UTC 22:30，当晚最晚的西部比赛约 5 小时后开打 */
+export const LATE_WINDOW_H = 8;
+/**
+ * 晚规则要的是「接近收盘」的价：赔率快照必须是本次刷新新抓的（2 小时内）且早于开赛。
+ * 刷新失败时 refresh.sh 照样跑账本，容器里是前一晚 22:00 的旧快照——那不是临近收盘的价，宁可不记。
+ */
+export const LATE_MAX_ODDS_AGE_H = 2;
 const DK = /draft ?kings/i;
 
 /**
@@ -25,16 +41,23 @@ const DK = /draft ?kings/i;
  * slate: [{ gameId, date, tipoff, homeId, awayId, pHome, homeElo, awayElo,
  *           odds: { provider, homeMl, awayMl, homeMlOpen, awayMlOpen, eventId } }]
  */
-export function captureRows(slate, { now = Date.now(), windowH = WINDOW_H, oddsFetchedAt = null } = {}) {
+export function captureRows(slate, { now = Date.now(), run = 'early', windowH, oddsFetchedAt = null } = {}) {
+  if (run !== 'early' && run !== 'late') throw new Error(`未知的 run：${run}（early | late）`);
+  const late = run === 'late';
+  const rules = RULES.filter((r) => r.late === late);
+  const win = (windowH ?? (late ? LATE_WINDOW_H : WINDOW_H)) * 3600e3;
+  const oddsAt = Date.parse(oddsFetchedAt);
+  if (late && !(now - oddsAt <= LATE_MAX_ODDS_AGE_H * 3600e3)) return [];
   const at = new Date(now).toISOString();
   const rows = [];
   for (const g of slate) {
     const o = g.odds;
     const t = Date.parse(g.tipoff);
-    if (!o || !DK.test(o.provider ?? '') || !(t > now) || t - now > windowH * 3600e3) continue;
+    // 已开赛（按赛程开赛时间）一律不记；晚规则另要求价格抓于开赛前，不是滚球价
+    if (!o || !DK.test(o.provider ?? '') || !(t > now) || t - now > win || (late && !(oddsAt < t))) continue;
     const pBook = devigHomeProb(o.homeMl, o.awayMl);
     if (pBook == null || g.pHome == null) continue;
-    for (const { rule, threshold } of RULES) {
+    for (const { rule, threshold } of rules) {
       const d = decide(g.pHome, pBook, threshold);
       rows.push({
         game_id: g.gameId, rule, book: 'draftkings', captured_at: at,
@@ -126,16 +149,16 @@ export function ledgerReport(rows, { B, now = Date.now() } = {}) {
   return {
     captured: new Set(rows.map((r) => r.game_id)).size,
     firstDate: rows[0]?.game_date ?? null,
-    rules: RULES.map(({ rule, threshold }) => {
+    rules: RULES.map(({ rule, threshold, late }) => {
       const mine = rows.filter((r) => r.rule === rule && r.bet);
       return {
-        rule, threshold,
+        rule, threshold, late,
         pending: mine.filter((r) => r.settled_at == null).length,
         ...summarize(mine.filter((r) => r.settled_at != null).map(asBet), { B }),
       };
     }),
-    // 今晚：未结算、且开赛不早于 12 小时前（延期或漏结算的旧单不混进来）
-    open: rows.filter((r) => r.rule === PRIMARY_RULE && r.bet && r.settled_at == null
+    // 今晚：早、晚两条主规则里未结算、且开赛不早于 12 小时前的（延期或漏结算的旧单不混进来）
+    open: rows.filter((r) => (r.rule === PRIMARY_RULE || r.rule === LATE_RULE) && r.bet && r.settled_at == null
       && !(Date.parse(r.tipoff_utc) < now - 12 * 3600e3)),
   };
 }

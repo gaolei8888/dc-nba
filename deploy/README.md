@@ -88,10 +88,22 @@ scp data/paper-backtest.json dev@gpu.tzspace.cn:/home/dev/work/works/dc-nba/data
 - 开关：`ENABLE_LEDGER=0` 关掉页面读取（与 `ENABLE_LEADERBOARD` 无关；账本不含用户数据）。
   服务器 compose 不需要改。
 
-**北京 06:30 那次（2026-10-28 高磊同意后加进 crontab）**：UTC 22:30，开赛前约半小时，
-`refresh.sh --espn`，盘口更接近收盘。注意同一 (比赛, 规则, 博彩商) 只认第一次记录：
-22:00 那次已记过的比赛，06:30 的价格会被忽略——它目前只是 22:00 失败时的补记。
-要并存两个时点得给晚的那次另起规则名（如 `edge3-late`），这需要改 `server/ledger.mjs`。
+**北京 06:30 那次（2026-10-28 高磊同意后加进 crontab）**：UTC 22:30，开赛前约 0.5–4 小时，
+`refresh.sh --espn`，盘口更接近收盘。同一 (比赛, 规则, 博彩商) 只认第一次记录，
+所以临近开赛的价另起一条预注册规则 **`edge3-late`**（同样 edge ≥ 3%、DK、平注 1 单位），与 22:00 的 `edge3` 并存：
+
+- 运行身份显式给出，不按钟点猜：`refresh.sh --late` → `ledger.mjs capture --late`（或 `LEDGER_RUN=late`）只记 `edge3-late`；
+  不带 `--late` 的运行只记早规则 `edge0/3/6`。
+- 晚规则只记**按赛程还没开赛**、开赛前 8 小时内的比赛，且赔率快照必须是 2 小时内新抓、早于开赛的
+  （刷新失败时容器里是前一晚的旧快照，那不是临近收盘价，宁可不记）；`odds_fetched_at` 记下快照时间。
+- 结算、CLV、只追加触发器对两条规则一样适用；表结构没变（`rule` 本来就在主键里）。
+- 代价：06:30 不再给 22:00 失败的那晚补记早规则（以前它会用 06:30 的价补记 `edge3`，把早晚混在一起）。
+  22:00 失败时 EXIT trap 仍会用容器里上一份快照记早规则。
+- **需要改服务器 crontab 的 06:30 那一行**（代码部署后再改；不改的话 06:30 照旧按早规则跑，只是什么都不会新记）：
+
+```
+30 6 * * *  /home/dev/work/works/dc-nba/deploy/refresh.sh --espn --late >> /home/dev/work/works/dc-nba/refresh.log 2>&1
+```
 
 **ESPN 请求量与熔断（2026-10-28 核过）**：每次 `--espn` 约 15 个请求（14 个比赛日的 scoreboard
 + 1 伤病 + 每个待补比分的日期 1 个），账本结算每场最多 1 个（3 天内没取到收盘价的会重试），

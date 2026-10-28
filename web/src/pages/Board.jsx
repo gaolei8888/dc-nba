@@ -4,7 +4,7 @@ import { api, withOut } from '../lib/api.js';
 import {
   TeamCell, Loading, ErrorBox, ProbBar, StatTile, Segmented, DataTable,
 } from '../components/common.jsx';
-import { fmtDate, fmtDateShort, probColor, pct, num, signed } from '../lib/format.js';
+import { fmtDate, fmtDateShort, probColor, pct, num, signed, bjTimeOf } from '../lib/format.js';
 
 const TABS = [
   { value: 'stats', label: '统计' },
@@ -242,7 +242,9 @@ function PaperBetting({ teamById }) {
   const { backtest: bt, ledger: lg } = d;
   const name = (k) => bt?.bookNames?.[k] ?? k;
   const team = (id) => teamById.get(id)?.cn ?? id;
-  const main = lg.available ? lg.rules.find((r) => r.threshold === bt?.rules?.primary) ?? lg.rules[1] : null;
+  const main = lg.available ? lg.rules.find((r) => !r.late && r.threshold === (bt?.rules?.primary ?? 0.03)) ?? lg.rules[1] : null;
+  const late = lg.available ? lg.rules.find((r) => r.late) : null;
+  const pair = [main, late].filter(Boolean);
 
   const seasons = bt ? Object.keys(bt.coverage) : [];
   const books = bt ? [...new Set(bt.table.map((r) => r.book))].sort((a, b) => (a === 'draftkings' ? -1 : b === 'draftkings' ? 1 : a === 'best' ? 1 : b === 'best' ? -1 : 0)) : [];
@@ -289,14 +291,43 @@ function PaperBetting({ teamById }) {
         </div>
       </div>
 
+      {main && (
+        <div className="card">
+          <h2>本季账本 · 早记 vs 临近开赛<span className="sub">同一规则（edge ≥ 3%、DK、平注 1 单位），只是记录时点不同</span></h2>
+          <Mini
+            rowKey={(r) => r.rule}
+            rows={pair}
+            cols={[
+              ['规则', (r) => <b>{r.rule}</b>, true],
+              ['记录时点', (r) => (r.late ? '北京 06:30（开赛前约 0.5–4 小时）' : '北京 22:00（开赛前 9–12 小时）'), true],
+              ['已结算 / 待结算', (r) => `${r.bets} / ${r.pending}`],
+              ['战绩', (r) => (r.bets ? `${r.wins}-${r.bets - r.wins}` : '—')],
+              ['盈亏', (r) => (r.bets ? `${signed(r.units)} 注` : '—')],
+              ['ROI', (r) => (r.bets ? roi(r.roi) : '—')],
+              ['平均 CLV（对收盘）', (r) => (r.clv ? `${signed(r.clv.mean * 100, 2)} 个百分点（${r.clv.n} 注）` : '—')],
+            ]}
+          />
+          <p className="note">
+            {pair.every((r) => r.bets < MIN_LEDGER)
+              ? `两边各不足 ${MIN_LEDGER} 注，差别是噪声，不下结论。`
+              : '样本已过 100 注，但早晚两条下的大多是同几场，差别仍要看区间。'}
+            {' '}临近开赛的价更接近收盘，所以它的 CLV 天然接近 0；早记的 CLV 为正也不等于赚钱（历史回测里 CLV 为正、ROI 仍为负）。
+            晚规则只在 06:30 那次刷新新抓到盘口时记录，刷新失败那天不补；已开赛的比赛不记。
+            {late && late.bets + late.pending === 0 && ' 晚规则还没有记录：要等服务器 06:30 那次刷新带上 --late。'}
+          </p>
+        </div>
+      )}
+
       <div className="card">
-        <h2>今晚模拟下注<span className="sub">模拟，不是建议 · 账本里已记录、尚未结算的 edge ≥ 3% 选择</span></h2>
+        <h2>今晚模拟下注<span className="sub">模拟，不是建议 · 账本里已记录、尚未结算的 edge ≥ 3% 选择（早记、临近开赛各一条规则）</span></h2>
         {main && lg.open.length ? (
           <Mini
-            rowKey={(r) => r.game_id}
+            rowKey={(r) => `${r.game_id}|${r.rule}`}
             rows={lg.open}
             cols={[
               ['日期', (r) => fmtDate(r.game_date), true],
+              ['规则', (r) => (r.rule.endsWith('-late') ? '临近开赛' : '早记'), true],
+              ['价格时间', (r) => (r.odds_fetched_at ? `北京 ${bjTimeOf(r.odds_fetched_at)}` : '—')],
               ['对阵', (r) => `${team(r.away_id)} @ ${team(r.home_id)}`, true],
               ['模拟押', (r) => <b>{team(r.side === 'home' ? r.home_id : r.away_id)}</b>, true],
               ['DK 赔率', (r) => (r.bet_ml > 0 ? `+${r.bet_ml}` : r.bet_ml)],
@@ -307,7 +338,7 @@ function PaperBetting({ teamById }) {
               }],
             ]}
           />
-        ) : <div className="empty">今天账本里没有达到门槛的选择（或还没到记录时间：开赛前 14 小时内）</div>}
+        ) : <div className="empty">今天账本里没有达到门槛的选择（或还没到记录时间：早记在开赛前 14 小时内，临近开赛在北京 06:30）</div>}
       </div>
 
       {bt && (
