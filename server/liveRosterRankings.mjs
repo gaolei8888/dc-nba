@@ -1,6 +1,8 @@
 import { projectRotation, rosterRating } from './rosterProjection.mjs';
 import { REPLACEMENT_IMP } from './ratings.mjs';
 import { apply as spmOf } from './impact.mjs';
+import { resultsUpdate, RESULTS } from './rosterResults.mjs';
+import { DEFAULT_PARAMS } from './predict.mjs';
 
 const round = (n) => Math.round(n * 100) / 100;
 
@@ -100,8 +102,22 @@ function shares(players, keyOf) {
   return out;
 }
 
-/** Current snapshot estimate; not a historically validated forecast. */
-export function liveRosterRankings(store, legacyRows, { out = {}, availability = 'reported' } = {}) {
+/** 本季已完赛的常规赛（含杯赛小组赛等计入战绩的比赛）：主队净胜分与主场项（中立场 0） */
+export function seasonResults(store, homeAdv = DEFAULT_PARAMS.homeAdv) {
+  return (store.schedule?.games ?? [])
+    .filter((g) => g.type === 'regular' && Number.isFinite(g.homeScore) && Number.isFinite(g.awayScore))
+    .map((g) => ({ homeId: g.homeId, awayId: g.awayId, date: g.date, margin: g.homeScore - g.awayScore, hca: g.neutral ? 0 : homeAdv }));
+}
+
+/**
+ * 阵容实验榜 = 阵容先验 + 本季战绩修正。
+ * priorTotal：只看名单 × IMP × 预计分钟的阵容估计（旧版阵容榜的 total）；
+ * total：r = (K·先验 + Σw·对手调整净胜分)/(K + Σw)，w 为近期加权；K 与加权由留一赛季回测选出（docs/roster-results-update-verdict.md）；
+ * resultsAdj = total − priorTotal。rosterAdj 仍只是缺阵对先验的影响。
+ */
+export function liveRosterRankings(store, legacyRows, {
+  out = {}, availability = 'reported', results = RESULTS, homeAdv = DEFAULT_PARAMS.homeAdv, now = new Date(),
+} = {}) {
   if (!['reported', 'healthy'].includes(availability)) throw new Error('Unknown roster availability mode');
   const reportedOut = new Set(availability === 'reported'
     ? (store.injuries?.players ?? []).filter((p) => p.status === 'out').map((p) => p.playerId) : []);
@@ -136,11 +152,12 @@ export function liveRosterRankings(store, legacyRows, { out = {}, availability =
   const valid = [...projections.values()].filter((p) => !p.error);
   const mean = valid.reduce((s, p) => s + p.raw, 0) / valid.length;
   const fullLeague = valid.length === store.teams.length;
+  // 第一遍：阵容先验（只用名单 × IMP × 预计分钟，与比赛结果无关）
   const rows = legacyRows.map((row) => {
     const t = store.teams.find((team) => team.teamId === row.teamId);
     const projection = projections.get(row.teamId);
     const base = { ...row, legacyTotal: row.total, legacyRank: row.rank, model: 'roster',
-      total: null, rank: null, rosterAdj: null, modelDelta: null };
+      total: null, rank: null, priorTotal: null, resultsAdj: null, rosterAdj: null, modelDelta: null };
     const info = { experimental: true, fetchedAt: store.meta.fetchedAt,
       injuryFetchedAt: store.injuries?.fetchedAt ?? null, availability };
     if (!fullLeague || !projection || projection.error) return { ...base, rosterProjection: {
@@ -153,8 +170,8 @@ export function liveRosterRankings(store, legacyRows, { out = {}, availability =
       const expected = projectRotation(projection.players.map((p) => ({ ...p,
         availability: excluded.has(p.playerId) ? 0 : 1 })));
       const healthyTotal = (projection.raw - mean) * pace / 100;
-      const total = (rosterRating(expected) - mean) * pace / 100;
-      return { ...base, total: round(total), rosterAdj: round(total - healthyTotal), modelDelta: round(total - row.total),
+      const prior = (rosterRating(expected) - mean) * pace / 100;
+      return { ...base, prior, rosterAdj: round(prior - healthyTotal),
         rosterProjection: { ...info, healthyTotal: round(healthyTotal),
           priorMinutes: expected.priorMinutes,
           knownImpactPct: shares(expected.players, (p) => (MEASURED_IMPACT.has(p.impactSource) ? 'measured' : 'estimated')).measured ?? 0,
@@ -166,6 +183,23 @@ export function liveRosterRankings(store, legacyRows, { out = {}, availability =
       return { ...base, rosterProjection: { ...info, error: error.message } };
     }
   });
-  rows.sort((a, b) => (b.total ?? -Infinity) - (a.total ?? -Infinity) || a.teamId - b.teamId);
-  return rows.map((row, i) => ({ ...row, rank: row.total == null ? null : i + 1 }));
+  // 第二遍：本季已完赛结果修正（先验值 K 场，对手与主场调整，见 rosterResults.mjs）
+  const teamPriors = new Map(rows.filter((r) => Number.isFinite(r.prior)).map((r) => [r.teamId, r.prior]));
+  // 近期加权以「今天」（美东日期，与赛程 date 同口径）为基准
+  const asOf = new Date(now.getTime() - 4 * 3600 * 1000).toISOString().slice(0, 10);
+  const post = resultsUpdate(teamPriors, seasonResults(store, homeAdv), results.K,
+    { recency: results.recency ? { ...results.recency, asOf } : null });
+  const final = rows.map(({ prior, ...row }) => {
+    if (!Number.isFinite(prior)) return row;
+    const p = post.get(row.teamId);
+    return { ...row, total: round(p.rating), priorTotal: round(prior), resultsAdj: round(p.rating - prior),
+      modelDelta: round(p.rating - row.legacyTotal),
+      rosterProjection: { ...row.rosterProjection, results: {
+        k: results.K, recency: results.recency ?? null, asOf, games: p.n, effectiveGames: round(p.weight),
+        priorWeight: round(p.priorWeight),
+        adjResult: p.adjResult == null ? null : round(p.adjResult), homeAdv,
+      } } };
+  });
+  final.sort((a, b) => (b.total ?? -Infinity) - (a.total ?? -Infinity) || a.teamId - b.teamId);
+  return final.map((row, i) => ({ ...row, rank: row.total == null ? null : i + 1 }));
 }
