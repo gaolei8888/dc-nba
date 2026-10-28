@@ -119,6 +119,8 @@ const fullOf = new Map(teams.map((t) => [t.teamId, t.full]));   // 与报告里�
 const abbrOf = new Map(teams.map((t) => [t.teamId, t.abbr]));
 
 const people = toRows(await nbaGet(statsUrl('commonallplayers', { LeagueID: '00', Season: '2025-26', IsOnlyCurrentSeason: 0 }), { cache: true }))
+  // 只留 2020 年以后还在打的：去掉同名的父辈（Gary Payton / Jaren Jackson / Larry Nance），重名时才不会卡住
+  .filter((p) => Number(p.TO_YEAR) >= 2020)
   .map((p) => ({ id: p.PERSON_ID, name: p.DISPLAY_FIRST_LAST }));
 const nameById = new Map(people.map((p) => [p.id, p.name]));
 const idx = nameIndex(people);
