@@ -173,9 +173,35 @@ test('术语表：表格结构、状态值、必含条目', () => {
   assert.equal(honest.en, 'No evidence the model beats the market');
 });
 
+function bannedHit(text, bad) {
+  const cs = bad.startsWith('=');
+  const w = cs ? bad.slice(1) : bad;
+  return new RegExp(`\\b${escapeRe(w)}\\b`, cs ? '' : 'i').test(text);
+}
+
+test('术语匹配器自测：禁用写法命中，正确写法（相近大小写）不误伤', () => {
+  assert.ok(bannedHit('Net Efficiency by team', 'Net Efficiency'));
+  assert.ok(bannedHit('net efficiency', 'Net Efficiency'));
+  assert.ok(bannedHit('The ELO score', '=ELO'));
+  assert.ok(!bannedHit('Elo rating', '=ELO'));
+  assert.ok(!bannedHit('Not backtested', 'back test'));
+});
+
+test('术语表：「避免」项首尾为字母或数字', () => {
+  for (const r of parseGlossary(fs.readFileSync('docs/i18n-glossary.md', 'utf8'))) for (const bad of r.avoid) {
+    const w = bad.replace(/^=/, '');
+    assert.ok(/^[A-Za-z0-9].*[A-Za-z0-9]$/.test(w), `${r.zh} 的避免项「${bad}」首尾不是字母数字`);
+  }
+});
+
+test('术语表：伤病状态五项齐全', () => {
+  const rows = parseGlossary(fs.readFileSync('docs/i18n-glossary.md', 'utf8'));
+  for (const s of ['Out', 'Doubtful', 'Questionable', 'Probable', 'Day-to-day']) assert.ok(rows.some((r) => r.en === s), s);
+});
+
 test('en 译文遵守术语表的「避免」列', () => {
   const rows = parseGlossary(fs.readFileSync('docs/i18n-glossary.md', 'utf8'));
   assert.ok(enLeaves().length > 30);
   for (const [key, text] of enLeaves()) for (const r of rows) for (const bad of r.avoid)
-    assert.ok(!new RegExp(`\\b${escapeRe(bad)}\\b`, 'i').test(text), `${key} 用了「${bad}」，术语表要求 ${r.en}`);
+    assert.ok(!bannedHit(text, bad), `${key} 用了「${bad}」，术语表要求 ${r.en}`);
 });
