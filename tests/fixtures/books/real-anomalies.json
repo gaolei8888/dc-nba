@@ -1,0 +1,262 @@
+{
+ "note": "真实缓存裁剪：只留 US_BOOKS，用于异常价与主客翻转回归",
+ "records": [
+  {
+   "gameId": "0022200683",
+   "season": "2022-23",
+   "homeId": 1610612753,
+   "awayId": 1610612740,
+   "homeWin": true,
+   "actual": 13
+  },
+  {
+   "gameId": "0022400633",
+   "season": "2024-25",
+   "homeId": 1610612754,
+   "awayId": 1610612759,
+   "homeWin": true,
+   "actual": 38
+  },
+  {
+   "gameId": "0022500325",
+   "season": "2025-26",
+   "homeId": 1610612754,
+   "awayId": 1610612743,
+   "homeWin": false,
+   "actual": -15
+  },
+  {
+   "gameId": "0022501139",
+   "season": "2025-26",
+   "homeId": 1610612760,
+   "awayId": 1610612762,
+   "homeWin": true,
+   "actual": 35
+  },
+  {
+   "gameId": "0022500602",
+   "season": "2025-26",
+   "homeId": 1610612753,
+   "awayId": 1610612763,
+   "homeWin": false,
+   "actual": -17
+  },
+  {
+   "gameId": "0022500001",
+   "season": "2025-26",
+   "homeId": 1610612760,
+   "awayId": 1610612745,
+   "homeWin": true,
+   "actual": 1
+  }
+ ],
+ "cache": {
+  "0022200683": {
+   "eventId": "401468838",
+   "date": "2023-01-20",
+   "home": 1610612753,
+   "items": [
+    {
+     "id": "31",
+     "name": "Caesars Sportsbook",
+     "spread": 0.5,
+     "open": null,
+     "close": null,
+     "current": [
+      -110,
+      -110
+     ]
+    },
+    {
+     "id": "40",
+     "name": "DraftKings",
+     "spread": 1,
+     "open": null,
+     "close": null,
+     "current": [
+      -110,
+      -110
+     ]
+    },
+    {
+     "id": "58",
+     "name": "ESPN BET",
+     "spread": -0.5,
+     "open": null,
+     "close": [
+      -115,
+      -115
+     ],
+     "current": [
+      -115,
+      -115
+     ]
+    },
+    {
+     "id": "47",
+     "name": "MGM",
+     "spread": 1.5,
+     "open": null,
+     "close": null,
+     "current": [
+      110,
+      -105
+     ]
+    },
+    {
+     "id": "48",
+     "name": "PointsBet",
+     "spread": -1,
+     "open": null,
+     "close": null,
+     "current": [
+      -115,
+      -105
+     ]
+    },
+    {
+     "id": "41",
+     "name": "SugarHouse",
+     "spread": 1,
+     "open": null,
+     "close": null,
+     "current": [
+      -105,
+      -112
+     ]
+    },
+    {
+     "id": "36",
+     "name": "Unibet",
+     "spread": 1.5,
+     "open": null,
+     "close": null,
+     "current": [
+      -105,
+      -114
+     ]
+    }
+   ]
+  },
+  "0022400633": {
+   "eventId": "401705199",
+   "date": "2025-01-25",
+   "home": 1610612759,
+   "items": [
+    {
+     "id": "58",
+     "name": "ESPN BET",
+     "spread": 2.5,
+     "open": [
+      105,
+      -125
+     ],
+     "close": [
+      125,
+      -145
+     ],
+     "current": [
+      125,
+      -145
+     ]
+    }
+   ]
+  },
+  "0022500325": {
+   "eventId": "401810180",
+   "date": "2025-12-03",
+   "home": 1610612754,
+   "items": [
+    {
+     "id": "100",
+     "name": "Draft Kings",
+     "spread": 8.5,
+     "open": [
+      -305,
+      -305
+     ],
+     "close": [
+      250,
+      -310
+     ],
+     "current": [
+      250,
+      -310
+     ]
+    }
+   ]
+  },
+  "0022501139": {
+   "eventId": "401810994",
+   "date": "2026-04-05",
+   "home": 1610612760,
+   "items": [
+    {
+     "id": "100",
+     "name": "Draft Kings",
+     "spread": -24.5,
+     "open": [
+      -4500,
+      1700
+     ],
+     "close": [
+      -9000,
+      2500
+     ],
+     "current": [
+      -9000,
+      2500
+     ]
+    }
+   ]
+  },
+  "0022500602": {
+   "eventId": "401810457",
+   "date": "2026-01-18",
+   "home": 1610612763,
+   "items": [
+    {
+     "id": "100",
+     "name": "Draft Kings",
+     "spread": 2.5,
+     "open": [
+      170,
+      -205
+     ],
+     "close": [
+      120,
+      -142
+     ],
+     "current": [
+      120,
+      -142
+     ]
+    }
+   ]
+  },
+  "0022500001": {
+   "eventId": "401809243",
+   "date": "2025-10-21",
+   "home": 1610612760,
+   "items": [
+    {
+     "id": "58",
+     "name": "ESPN BET",
+     "spread": -6.5,
+     "open": [
+      -290,
+      240
+     ],
+     "close": [
+      -240,
+      200
+     ],
+     "current": [
+      -240,
+      200
+     ]
+    }
+   ]
+  }
+ }
+}

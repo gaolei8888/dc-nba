@@ -5,7 +5,12 @@
 import { cleanItems, US_BOOKS } from './books.mjs';
 import { mlToProb } from './oddsClient.mjs';
 
-/** 异常阈值：|美式| 超过 maxAbs 视为滚球价；两边隐含概率和应在 [overroundLo, overroundHi] */
+/**
+ * 异常阈值：|美式| 超过 maxAbs 视为滚球价；两边隐含概率和应在 [overroundLo, overroundHi]。
+ * 依据：赛前独赢盘常见抽水 4%–8%（概率和约 1.04–1.08），所以 1.0 以下（套利般的负抽水）
+ * 与 1.15 以上（真实赛前价不会这么黑）都是数据错误；赛前最悬殊的价也远不到 ±5000，
+ * 实测滚球价在 ±7500～±100000。三条边界均为含边界：恰好 ±5000、概率和恰好 1.0 / 1.15 判为正常。
+ */
 export const ANOMALY = { maxAbs: 5000, overroundLo: 1.0, overroundHi: 1.15 };
 
 /** 单个时点钱线 [主, 客] 的异常原因，正常返回 null */
@@ -55,9 +60,10 @@ export function auditSeason({ season, records, cache }) {
   const seen = new Set();
   const dupIds = new Set();
   for (const r of records) {
-    if (r.actual === 0 || r.homeWin !== (r.actual > 0)) audit.settlementErrors.push(r.gameId);
     if (seen.has(r.gameId)) { dupIds.add(r.gameId); continue; }
     seen.add(r.gameId);
+    // 结算检查放在重复守卫之后：重复的 gameId 只算一次，不重复计结算错误
+    if (r.actual === 0 || r.homeWin !== (r.actual > 0)) audit.settlementErrors.push(r.gameId);
 
     const c = cache?.[r.gameId];
     const status = c?.items?.length ? homeAwayStatus(r, c) : 'unmatched';

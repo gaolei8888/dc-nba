@@ -69,3 +69,37 @@ test('auditSeason：异常价进 anomalies，带书、时点与原因', () => {
     ['g1', 'betmgm', 'current', 'overroundLow'],
   ]);
 });
+
+test('priceAnomaly 边界含边界：恰好 ±5000、概率和恰好 1.0 / 1.15 判正常，越界一点判异常', () => {
+  assert.equal(priceAnomaly([-5000, 2000]), null);
+  assert.equal(priceAnomaly([5000, -5000]), null);
+  assert.equal(priceAnomaly([-5001, 2000]), 'liveLike');
+  assert.equal(priceAnomaly([5001, -5000]), 'liveLike');
+  assert.equal(priceAnomaly([100, -100]), null);          // 概率和恰好 1.0
+  assert.equal(priceAnomaly([101, -100]), 'overroundLow');
+  assert.equal(priceAnomaly([-300, 150]), null);          // 0.75 + 0.4 = 1.15
+  assert.equal(priceAnomaly([-301, 150]), 'overroundHigh');
+});
+
+test('auditSeason：重复 gameId 的结算错误只计一次', () => {
+  const bad = rec('g1', 1, 2, { homeWin: true, actual: -3 });
+  const a = auditSeason({ season: 's', records: [bad, { ...bad }], cache: {} });
+  assert.deepEqual(a.settlementErrors, ['g1']);
+  assert.deepEqual(a.duplicateGameIds, ['g1']);
+});
+
+test('真实数据回归：裁剪缓存里已知的异常、翻转场次被审计原样检出', async () => {
+  const fx = JSON.parse((await import('node:fs')).readFileSync(new URL('./fixtures/books/real-anomalies.json', import.meta.url)));
+  const a = auditSeason({ season: 'real', records: fx.records, cache: fx.cache });
+  assert.equal(a.games, 6);
+  assert.equal(a.matched, 6);
+  assert.equal(a.flipped, 2);                                 // 0022400633、0022500602
+  assert.deepEqual(a.teamMismatch, []);
+  assert.deepEqual(a.settlementErrors, []);
+  assert.deepEqual(a.anomalies.map((x) => [x.gameId, x.book, x.at, x.reason]), [
+    ['0022200683', 'betmgm', 'current', 'overroundLow'],
+    ['0022500325', 'draftkings', 'open', 'overroundHigh'],
+    ['0022501139', 'draftkings', 'close', 'liveLike'],
+    ['0022501139', 'draftkings', 'current', 'liveLike'],
+  ]);
+});
