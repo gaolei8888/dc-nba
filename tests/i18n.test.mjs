@@ -169,7 +169,7 @@ test('术语表：表格结构、状态值、必含条目', () => {
     assert.ok(['待确认', '已定'].includes(r.status), `${r.zh} 状态非法：${r.status}`);
   }
   assert.equal(new Set(rows.map((r) => r.zh)).size, rows.length, '中文列有重复');
-  assert.ok(rows.some((r) => r.status === '待确认') && rows.some((r) => r.status === '已定'));
+  assert.ok(rows.some((r) => r.status === '已定'));
   const net = rows.find((r) => r.zh === '净效率');
   assert.ok(net.en.startsWith('Net Rating') && net.avoid.includes('Net Efficiency'));
   const honest = rows.find((r) => r.zh === '无证据表明模型能赢盘口');

@@ -18,7 +18,7 @@
 | 进攻效率 | Offensive Rating | Offensive Efficiency, Off Efficiency | 已定 |
 | 防守效率 | Defensive Rating | Defensive Efficiency, Def Efficiency | 已定 |
 | 在场 / 不在场 | On/Off | On-Off | 已定 |
-| 背靠背 | back-to-back（缩写 B2B） | back to back | 已定 |
+| 背靠背 | back-to-back (B2B) | back to back | 已定 |
 | 休息天数 | rest days | — | 已定 |
 | 主场优势 | home-court advantage | home advantage, home field advantage | 已定 |
 | 让分 | spread | handicap | 已定 |
@@ -26,7 +26,7 @@
 | 钱线 | moneyline | money line | 已定 |
 | 回测 | backtest | back-test, back test | 已定 |
 | 样本外 | out-of-sample | out of sample | 已定 |
-| 置信区间 | confidence interval（95% CI） | confidence range | 已定 |
+| 置信区间 | confidence interval (95% CI) | confidence range | 已定 |
 | 准确率 | accuracy | — | 已定 |
 | 对数损失 | log loss | logarithmic loss | 已定 |
 | 冷门 | upset | surprise result | 已定 |
@@ -44,28 +44,28 @@
 | 分区 | Conference | — | 已定 |
 | 赛区 | Division | — | 已定 |
 | 无证据表明模型能赢盘口 | No evidence the model beats the market | promising edge, slight edge, may beat the market, likely beats the market, could beat the market | 已定 |
-| 未经回测验证 | Not backtested（首选；语境中 "Unvalidated" 也可） | not fully validated, still being refined, promising, may help | 已定 |
+| 未经回测验证 | Not backtested (or "Unvalidated" in context) | not fully validated, still being refined, promising, may help | 已定 |
 | 阵容先验 | Roster prior | Lineup prior, Roster baseline | 已定 |
-| 战绩修正 | Results adjustment（备选 Record adjustment） | Record correction, Record fix | 待确认 |
+| 战绩修正 | Record adjustment | Record correction, Record fix, Results adjustment | 已定 |
 | 旧模型分 | Legacy model score | Old model score, Old model rating | 已定 |
-| 阵容实验榜 | Roster experiment ranking（备选 Roster lab） | Lineup experiment board | 待确认 |
+| 阵容实验榜 | Roster rankings (experimental) | Lineup experiment board, Roster experiment ranking | 已定 |
 | 实力榜 | Power rankings | Strength list, Power list | 已定 |
-| 本季实战 | Current-season record（本季真实比赛，开赛前提交的预测） | Live season, Real season play | 待确认 |
+| 本季实战（标签/模式名；本季真实比赛，开赛前提交的预测） | Live this season | Live season, Real season play, Current-season record | 已定 |
 | 上季回放 | Last season replay | Last season rerun, Prior season replay | 已定 |
 | 收盘线价值 | closing line value (CLV) | closing value | 已定 |
-| 品牌「NBA超级幻想」 | NBA Super Fantasy | NBA Super Fan | 待确认 |
-| IMP（球员影响力，自研综合指标） | IMP（"Impact", our own composite metric；缩写保留） | Impact Score, Player Impact Rating | 待确认 |
-| Elo | Elo rating | =ELO, Elo score | 待确认 |
-| 盘口 | the market / betting line | handicap | 待确认 |
-| 去水胜率 | no-vig probability | fair odds, vig-free odds | 待确认 |
-| 模拟投注 | Paper betting | Simulated betting, Fake betting | 待确认 |
-| 前向账本 | Live ledger | Forward ledger, Forward book | 待确认 |
-| 影子模式 | Shadow mode | — | 待确认 |
-| 人机对赌 | You vs. the Model | Human vs AI wager | 待确认 |
-| 预测总表 | Prediction Scorecard | Prediction Summary Table, Prediction Master List | 待确认 |
-| 玩家档案 | Profiles | Player Profiles | 待确认 |
-| 按满勤计权 | Weight by full availability | Weight by full attendance | 待确认 |
-| 阵容更迭 ΔROS | Roster turnover | Roster churn, Roster shuffle | 待确认 |
-| 北京时间 | Beijing time | CST, China Standard Time | 待确认 |
-| 注 / 单位 | units | — | 待确认 |
-| 锋卫摇摆等位置 | G-F / F-C (code shown as-is) | swingman | 待确认 |
+| 品牌「NBA超级幻想」 | NBA Super Fantasy | NBA Super Fan | 已定 |
+| IMP（球员影响力，自研综合指标） | IMP | Impact Score, Player Impact Rating | 已定 |
+| Elo | Elo rating | =ELO, Elo score | 已定 |
+| 盘口 | the market (general); line (numeric lines) | handicap | 已定 |
+| 去水胜率 | no-vig probability | fair odds, vig-free odds | 已定 |
+| 模拟投注 | Paper betting | Simulated betting, Fake betting | 已定 |
+| 前向账本 | Live ledger | Forward ledger, Forward book | 已定 |
+| 影子模式 | Shadow mode | — | 已定 |
+| 人机对赌 | You vs. the Model | Human vs AI wager, Man vs. machine | 已定 |
+| 预测总表 | Prediction Scorecard (page title); Scorecard (nav label) | Prediction Summary Table, Prediction Master List | 已定 |
+| 玩家档案 | Profiles | Player Profiles | 已定 |
+| 按满勤计权 | Weight by full availability | Weight by full attendance, Assume full health | 已定 |
+| 阵容更迭 ΔROS | Roster turnover | Roster churn, Roster shuffle | 已定 |
+| 北京时间 | Beijing time | CST, China Standard Time | 已定 |
+| 注 / 单位 | units (stakes); bets (counts) | — | 已定 |
+| 锋卫摇摆等位置 | G-F / F-C (code shown as-is) | swingman | 已定 |
