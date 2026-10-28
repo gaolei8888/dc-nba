@@ -76,9 +76,11 @@ const decayV1 = (season) => decayUpto(season, DECAY_SPAN, DECAY_HALFLIFE);
  * 逐项年龄曲线（server/impactAging.mjs）：用相邻赛季对拟合，只看统计栏。
  * 验证时剔除被评估的那一对（held → 下一季），与实验室的留一对口径相同。
  */
-const agePairsExcept = (held) => seasons.slice(0, -1)
+// 统计栏历史回填（impact_2015-16 …，没有 lineups）也参与：曲线只看统计栏，与任何验证目标无关。
+const boxSeasons = Object.keys(players).sort();
+const agePairsExcept = (held) => boxSeasons.slice(0, -1)
   .filter((s) => s !== held)
-  .map((s) => ({ from: players[s], to: players[nextOf(s)] }));
+  .map((s) => ({ from: players[s], to: players[boxSeasons[boxSeasons.indexOf(s) + 1]] }));
 
 /** 训练 SPM，训练集里剔除 held 赛季 */
 function trainSpm(held) {
@@ -172,7 +174,7 @@ console.log(`逐对赛季：${sweeps}/${perPair.length} 次 IMP 排第一`);
 // ---------------------------------------------------------------- 出模型
 
 const allSamples = buildSamples(seasons.flatMap((s) => players[s]), { apmBySeason });
-const raw = { ...fit(allSamples, SPM_LAMBDA), ageCurves: fitAgeCurves(agePairsExcept(null)) };
+const raw = { ...fit(allSamples, SPM_LAMBDA), ageCurves: { ...fitAgeCurves(agePairsExcept(null)), seasons: boxSeasons } };
 
 // 量纲校准：把单位钉在"球队净效率"上。
 // teamRows 给的是分钟加权**平均**（权重和为 1），球队净效率对应场上**五人之和**，

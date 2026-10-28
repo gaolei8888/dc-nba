@@ -27,7 +27,9 @@ for (const f of fs.readdirSync(HISTORY)) {
   if (m) lineups[m[1]] = JSON.parse(fs.readFileSync(path.join(HISTORY, f), 'utf8')).rows;
 }
 // allSeasons：有统计栏的全部赛季（含可能的历史回填）；seasons：同时有 lineups 的赛季（APM、SPM 训练、尺子都只在这里）
-const allSeasons = Object.keys(players).sort();
+// IMP_LAB_NO_BACKFILL=1：只用有 lineups 的赛季（复现回填到位之前的结果）
+const allSeasons = Object.keys(players).sort().filter((s) => process.env.IMP_LAB_NO_BACKFILL !== '1' || lineups[s]);
+for (const s of Object.keys(players)) if (!allSeasons.includes(s)) delete players[s];
 const seasons = allSeasons.filter((s) => lineups[s]);
 for (const s of seasons) {
   const st = readJsonAuto(path.join(HISTORY, `stints_${s}.json.gz`));
@@ -77,6 +79,17 @@ function padsOf(s) {
   return padCache.get(s);
 }
 const rawVec = (p) => { const f = features(p); return f ? FEATURES.map((k) => f[k]) : null; };
+/**
+ * 同 rawVec，但源字段缺失的项记 NaN（features() 会把缺失当 0）。只用于年龄曲线与多季平均：
+ * 历史回填的 2015-16 有 329/476 人没有 hustle，当 0 会让「下一季 − 这一季」凭空多出整季的扑断/干扰。
+ * SPM 的训练与单季应用仍用 rawVec，基线数字不变。
+ */
+const NA_SRC = { defl: 'deflections', contest: 'contested', screen: 'screenAstPts', potAst: 'potentialAst', dSup: 'diffPct' };
+const rawVecNA = (p) => {
+  const x = rawVec(p);
+  if (!x) return null;
+  return x.map((v, j) => { const src = NA_SRC[FEATURES[j]]; return src && (p[src] === null || p[src] === undefined) ? NaN : v; });
+};
 const padVec = (x, m, s, alpha) => (alpha ? x.map((v, j) => padValue(v, m, alpha * padsOf(s)[j].pad, padsOf(s)[j].mean)) : x);
 const vecOf = (p, alpha) => { const x = rawVec(p); return x && padVec(x, minutesOf(p), p.season, alpha); };
 
@@ -142,7 +155,7 @@ function spmMulti(mdl, p, pad, multi, aging = null) {
   // feat：原始速率（可选先按逐项年龄曲线对齐到 N+1 岁）按 d·m 平均，再用有效分钟与第 N 季的 padding 收缩
   const target = Number.isFinite(p.age) ? p.age + 1 : null;
   const items = back.map((q, j) => {
-    let x = q && (q.min ?? 0) > 0 ? rawVec(q) : null;
+    let x = q && (q.min ?? 0) > 0 ? rawVecNA(q) : null;
     if (!x) return null;
     if (aging?.stat && target !== null && ageAt(q, j) !== null) {
       const a0 = ageAt(q, j);
@@ -152,7 +165,9 @@ function spmMulti(mdl, p, pad, multi, aging = null) {
   });
   const avg = multiSeasonAvg(items, d);
   if (!avg) return null;
-  return { v: applyVec(mdl, padVec(avg.v, avg.mEff, p.season, pad)), mEff: avg.mEff };
+  const own = rawVec(p); // 所有季都缺的项退回第 N 季的 rawVec（与单季口径相同）
+  const v = avg.v.map((x, i) => (Number.isFinite(x) ? x : own[i]));
+  return { v: applyVec(mdl, padVec(v, avg.mEff, p.season, pad)), mEff: avg.mEff };
 }
 
 // ---------------------------------------------------------------- 赛季对
@@ -220,22 +235,22 @@ function statCurves(agePairs, { weight = 'harm', impute = false } = {}) {
   if (!statCache.has(key)) {
     const per = FEATURES.map(() => []);
     for (const pr of use) {
-      const floors = impute ? FEATURES.map((_, j) => p10(players[pr.nx].filter((q) => minutesOf(q) >= 100).map((q) => rawVec(q)?.[j]))) : null;
+      const floors = impute ? FEATURES.map((_, j) => p10(players[pr.nx].filter((q) => minutesOf(q) >= 100).map((q) => rawVecNA(q)?.[j]))) : null;
       for (const p of players[pr.s]) {
         const m1 = minutesOf(p);
         if (m1 < 100 || !Number.isFinite(p.age)) continue;
-        const x1 = rawVec(p);
+        const x1 = rawVecNA(p);
         if (!x1) continue;
         const q = byId[pr.nx].get(p.playerId);
         const m2 = minutesOf(q);
         if (m2 < 100) {
-          if (impute && eligible(p)) FEATURES.forEach((_, j) => per[j].push({ x: p.age, y: floors[j] - x1[j], w: weight === 'harm' ? m1 / 2 : 1 }));
+          if (impute && eligible(p)) FEATURES.forEach((_, j) => { if (Number.isFinite(floors[j] - x1[j])) per[j].push({ x: p.age, y: floors[j] - x1[j], w: weight === 'harm' ? m1 / 2 : 1 }); });
           continue;
         }
-        const x2 = rawVec(q);
+        const x2 = rawVecNA(q);
         if (!x2) continue;
         const w = weight === 'harm' ? (2 * m1 * m2) / (m1 + m2) : 1;
-        FEATURES.forEach((_, j) => per[j].push({ x: p.age, y: x2[j] - x1[j], w }));
+        FEATURES.forEach((_, j) => { if (Number.isFinite(x2[j] - x1[j])) per[j].push({ x: p.age, y: x2[j] - x1[j], w }); });
       }
     }
     statCache.set(key, per.map((smp) => fitHinge(smp, [23, 27, 31], [19, 38])));

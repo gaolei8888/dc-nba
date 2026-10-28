@@ -15,6 +15,7 @@ import { features, FEATURES } from './impact.mjs';
 import { fitHinge } from './impImproveLab.mjs';
 
 export const AGE_KNOTS = [23, 27, 31];
+const NA_SRC = { defl: 'deflections', contest: 'contested', screen: 'screenAstPts', potAst: 'potentialAst', dSup: 'diffPct' };
 export const AGE_CLIP = [19, 38];
 
 /**
@@ -33,7 +34,12 @@ export function fitAgeCurves(seasonPairs, { minMinutes = 100 } = {}) {
       const a = features(p); const b = features(q);
       if (!a || !b) continue;
       const w = (2 * m1 * m2) / (m1 + m2);
-      for (const k of FEATURES) per[k].push({ x: p.age, y: b[k] - a[k], w });
+      for (const k of FEATURES) {
+        // 源字段缺失（如 2015-16 大半球员没有 hustle）时 features() 记 0，差值没有意义，跳过
+        const src = NA_SRC[k];
+        if (src && (p[src] == null || q[src] == null)) continue;
+        per[k].push({ x: p.age, y: b[k] - a[k], w });
+      }
     }
   }
   const coef = {}; let n = 0;

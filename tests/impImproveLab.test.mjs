@@ -106,3 +106,11 @@ test('fitHinge：没有样本时返回恒 0 曲线', () => {
   assert.equal(g.at(30), 0);
   assert.equal(g.n, 0);
 });
+
+test('multiSeasonAvg：向量里的缺失项只跳过那一季的那一项', async () => {
+  const { multiSeasonAvg } = await import('../server/impImproveLab.mjs');
+  const r = multiSeasonAvg([{ v: [1, 4], m: 100 }, { v: [3, NaN], m: 100 }], [1, 1]);
+  assert.deepEqual(r.v, [2, 4]);
+  assert.equal(r.mEff, 200);
+  assert.ok(Number.isNaN(multiSeasonAvg([{ v: [1, NaN], m: 100 }], [1]).v[1]));
+});

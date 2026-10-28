@@ -17,18 +17,19 @@ import { ridge } from './impact.mjs';
  * 权重 d_j·m_j。返回 { v, mEff }，mEff = Σ d_j·m_j；一季都没有返回 null。
  */
 export function multiSeasonAvg(items, d) {
-  let tot = 0; let acc = null;
+  let tot = 0; let acc = null; let wts = null;
   items.forEach((it, j) => {
     if (!it || it.v === null || it.v === undefined || !(it.m > 0) || !(d[j] > 0)) return;
     const w = d[j] * it.m;
     if (Array.isArray(it.v)) {
-      if (!acc) acc = new Array(it.v.length).fill(0);
-      it.v.forEach((x, i) => { acc[i] += w * x; });
+      // 向量逐项加权：某季某项缺失（NaN，例如 2015-16 大半球员没有 hustle）就只在该项上跳过这一季
+      if (!acc) { acc = new Array(it.v.length).fill(0); wts = new Array(it.v.length).fill(0); }
+      it.v.forEach((x, i) => { if (Number.isFinite(x)) { acc[i] += w * x; wts[i] += w; } });
     } else acc = (acc ?? 0) + w * it.v;
     tot += w;
   });
   if (!(tot > 0)) return null;
-  return { v: Array.isArray(acc) ? acc.map((x) => x / tot) : acc / tot, mEff: tot };
+  return { v: Array.isArray(acc) ? acc.map((x, i) => (wts[i] > 0 ? x / wts[i] : NaN)) : acc / tot, mEff: tot };
 }
 
 /** 实验 1：c=0 表示常数权重 wmax；n 为（半衰期加权的）APM 回合数 */

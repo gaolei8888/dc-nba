@@ -5,6 +5,7 @@
  *
  * 每个候选都用全部赛季训练 SPM、全部相邻赛季对拟合逐项年龄曲线，按线上口径校准与收缩
  * （calibratedValues，见 imp-improve-core.mjs），单位与「IMP 准不准」/阵容榜相同。
+ * 注意：示意统一按第 N 季分钟、k=3200 收缩（与线上同），不复现 8 系列里 mEff / k=1600 之类的折内选择。
  * 球队示意 = 2025-26 各队球员价值 × 该季出场分钟，按队分钟归一后 ×5（与 fit-impact 的量纲口径相同）。
  */
 import fs from 'node:fs';
@@ -20,7 +21,7 @@ const CANDS = {
   '仅 5b': { ageStat: 1 },
   '8b 逐项多季 exp h=0.5 span5（未采纳）': { multi: { mode: 'exp', h: 0.5, level: 'feat', span: 5 } },
   '8b Marcel span3（未采纳）': { multi: { mode: 'marcel', level: 'feat', span: 3 } },
-  '8d 年龄对齐多季 Marcel span5（未采纳）': { multi: { mode: 'marcel', level: 'feat', span: 5 }, ageStat: 1 },
+  '8d 年龄对齐多季 h=5 span5（未采纳）': { multi: { mode: 'exp', h: 5, level: 'feat', span: 5 }, ageStat: 1 },
 };
 const vals = Object.fromEntries(Object.entries(CANDS).map(([k, c]) => [k, calibratedValues(last, c)]));
 const names = Object.keys(CANDS);
