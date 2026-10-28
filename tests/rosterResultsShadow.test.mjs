@@ -149,21 +149,23 @@ const INJ = {
   version: 1, opts: { unknownV: -1, repl: -2 },
   slots: { 22: { beta: 0.6, pPlay: {} }, '0630': { beta: 0.65, pPlay: {} } },
 };
-const baseSlate = () => slateOf().map((g) => ({ ...g, margin: 2, dataAt: 'x' }));
+// 库触发器按真实当前时间拒开赛后的行，入库测试的开赛时间必须永远在未来
+const FUT = '2099-01-01T23:30:00Z';
+const baseSlate = (t) => slateOf(t).map((g) => ({ ...g, margin: 2, dataAt: 'x' }));
 
 test('隔离：rr 行被库拒或榜不可用，base 照记；base 与 rr 分在两张表', () => {
   const db = fresh();
-  const base = shadowRows({ slate: baseSlate(), slot: '22', now: NOW, params: INJ, values: null, reports: [], teams: [] });
+  const base = shadowRows({ slate: baseSlate(FUT), slot: '22', now: NOW, params: INJ, values: null, reports: [], teams: [] });
   assert.deepEqual(base.map((r) => r.variant), ['base']);
   assert.equal(insertShadow(db, base).n, 1);
-  const { rows } = rrRows({ slate: slateOf(), slot: '22', now: NOW, params: PARAMS, board: board(store({ games: PAST })) });
+  const { rows } = rrRows({ slate: slateOf(FUT), slot: '22', now: NOW, params: PARAMS, board: board(store({ games: PAST })) });
   const res = insertShadow(db, [{ ...rows[0], game_id: 'bad', p_home: null }, ...rows], { table: 'shadow_rr_predictions', cols: RR_COLS });
   assert.equal(res.n, 1);
   assert.deepEqual(res.rejected.map((r) => r.game_id), ['bad']);
   assert.equal(shadowAll(db).length, 1);
   assert.equal(rrAll(db).length, 1);
   // 榜挂了：rr 零行，base 不受影响（调用方先插 base，再单独 try rr）
-  const none = rrRows({ slate: slateOf(), slot: '22', now: NOW, params: PARAMS, board: board({ teams: null }) });
+  const none = rrRows({ slate: slateOf(FUT), slot: '22', now: NOW, params: PARAMS, board: board({ teams: null }) });
   assert.equal(none.rows.length, 0);
   assert.equal(insertShadow(db, none.rows, { table: 'shadow_rr_predictions', cols: RR_COLS }).n, 0);
   assert.equal(shadowAll(db).length, 1);
@@ -172,7 +174,7 @@ test('隔离：rr 行被库拒或榜不可用，base 照记；base 与 rr 分在
 test('rr 表只追加：重复忽略、不能删、预测字段不能改、开赛后 / 用了当天赛果 / 未来快照的插不进；比分只写一次', () => {
   const db = fresh();
   const opt = { table: 'shadow_rr_predictions', cols: RR_COLS };
-  const { rows } = rrRows({ slate: slateOf(), slot: '22', now: NOW, params: PARAMS, board: board(store({ games: PAST })) });
+  const { rows } = rrRows({ slate: slateOf(FUT), slot: '22', now: NOW, params: PARAMS, board: board(store({ games: PAST })) });
   assert.equal(insertShadow(db, rows, opt).n, 1);
   assert.equal(insertShadow(db, [{ ...rows[0], p_home: 0.99 }], opt).n, 0);
   assert.notEqual(rrAll(db)[0].p_home, 0.99);
@@ -184,7 +186,7 @@ test('rr 表只追加：重复忽略、不能删、预测字段不能改、开�
   assert.match(one({ results_as_of: '2026-10-29' })[0].why, /当天或之后/);
   assert.match(one({ board_fetched_at: '2026-10-28T14:30:00.000Z' })[0].why, /未来/);
   assert.match(one({ tipoff_utc: '2020-01-01T00:00:00.000Z' })[0].why, /开赛/);
-  assert.match(one({ captured_at: '2026-10-29T00:00:00.000Z' })[0].why, /开赛/);
+  assert.match(one({ captured_at: '2099-01-02T00:00:00.000Z' })[0].why, /开赛/);
   assert.match(one({ variant: 'r22' })[0].why, /CHECK/);
   assert.equal(one({ results_through: null }).length, 0, '开季第一天没有赛果可以记');
   assert.equal(settleShadow(db, { g12: { homeScore: 100, awayScore: 90 } }, undefined, 'shadow_rr_predictions'), 1);

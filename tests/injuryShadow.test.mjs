@@ -154,7 +154,9 @@ test('球员价值缺失或过期：只记基线，不记方案', () => {
 
 // ---------------------------------------------------------------- 只追加的库
 
-const capture = (db, slot, now, tipoff = '2026-10-28T23:30:00Z') => insertShadow(db, shadowRows({
+// 库触发器按真实当前时间拒开赛后的行，入库测试的开赛时间必须永远在未来
+const FUT = '2099-01-01T23:30:00Z';
+const capture = (db, slot, now, tipoff = FUT) => insertShadow(db, shadowRows({
   slate: slate(tipoff), slot, now: Date.parse(now), params: PARAMS, values: VALUES, reports: REPORTS, teams: TEAMS,
 })).n;
 
@@ -176,7 +178,7 @@ test('影子表只追加：重复插入忽略（含 OR REPLACE）、不能删、
 
 test('一行被触发器拒（运行中恰好开赛）只丢这一行，其余照记', () => {
   const db = fresh();
-  const rows = shadowRows({ slate: slate('2026-10-28T23:30:00Z'), slot: '22', now: Date.parse('2026-10-28T14:05:00Z'), params: PARAMS, values: VALUES, reports: REPORTS, teams: TEAMS });
+  const rows = shadowRows({ slate: slate(FUT), slot: '22', now: Date.parse('2026-10-28T14:05:00Z'), params: PARAMS, values: VALUES, reports: REPORTS, teams: TEAMS });
   const res = insertShadow(db, [{ ...rows[0], game_id: 'tipped', tipoff_utc: '2020-01-01T00:00:00.000Z' }, ...rows]);
   assert.equal(res.n, 2);
   assert.deepEqual(res.rejected.map((r) => r.game_id), ['tipped']);
