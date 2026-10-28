@@ -455,13 +455,13 @@ function ParamPanel({ meta, params, setParams }) {
       </div>
       <div style={{ marginTop: 10, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
         <button className="btn" onClick={() => setParams({})}>恢复默认</button>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5 }}>
+        <label title="不读伤病名单。勾选后上季出场满 10 场的球员按场均分钟×70 场计入轮换，不勾按实际出场。" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5 }}>
           <input
             type="checkbox"
             checked={!!params.assumeHealthy}
             onChange={(e) => setParams((p) => ({ ...p, assumeHealthy: e.target.checked ? 1 : 0 }))}
           />
-          假设全员健康
+          按满勤计权
         </label>
         <span className="note">参数为全站共享，会同时影响赛程页与赛季模拟。</span>
       </div>

@@ -36,7 +36,7 @@ export const DEFAULT_PARAMS = {
   // （4920 场里属于噪声），而原来的 0.8 会让准确率掉 2.5 个百分点。
   // 保留一个很小的默认值，滑块可调；详见 README「回测」一节。
   turnoverWeight: 0.15, // 阵容更迭修正强度
-  assumeHealthy: 0,     // 1 = 假设全员健康：按场均分钟×典型出勤估算新赛季轮换
+  assumeHealthy: 0,     // 1 = 按满勤计权（界面名）：场均分钟×70 场代替实际出勤；不读伤病名单
   // 轮换影响力用哪套球员价值：auto = 有 IMP 就用 IMP，否则 PIE。
   // 写死成 'pie' 可以复现旧行为，对照用。
   rotationBasis: 'auto',
@@ -85,7 +85,7 @@ export function buildModel(store, overrides = {}) {
   const priorMarginalCost = new Map();
 
   // 新赛季名单的分钟口径：默认沿用上赛季实际出勤，
-  // 开启"假设全员健康"后按场均分钟 × 典型出勤估算（伤停整季的球星才不会被埋没）。
+  // 开启"按满勤计权"（原名"假设全员健康"，但它并不读伤病名单）后按场均分钟 × 典型出勤估算（伤停整季的球星才不会被埋没）。
   const minutesOf = params.assumeHealthy ? healthyMinutes : totalMinutes;
 
   // 价值口径（IMP 还是 PIE）在**全联盟层面**定一次，绝不能逐队各判各的——
@@ -184,6 +184,16 @@ function buildRestTable(games) {
 /**
  * 缺阵修正：把缺阵球员移出轮换后重算影响力。
  * 空出的时间由名单里排在后面的球员顶上，因此损失会小于球员本身的全部价值。
+ *
+ * 「缺人不会让球队变强」这条下限必须**逐人**套，不能套在合计上：
+ * 一名低于替补级的球员（IMP < −0.5）单独移出时算出来是正数，
+ * 若先把所有缺阵者一起移出再对合计取 min(0, …)，他的正数会把别人的损失抵掉
+ * （实测魔术同时勾掉班凯罗 +0.92 与萨格斯 −0.86，合计变成 0）。
+ *
+ * 做法：先逐人算单独移出的边际（与球员列里显示的 costPts 同一算法），
+ * 边际 ≥ 0 的人视为"缺了也不影响"，不参与移出；其余人**一起**移出再取 min(0, …)。
+ * 一起移出而不是把逐人边际简单相加，是因为多人同时缺阵时空出的分钟要由
+ * 更靠后的球员顶上，存在交互；没有交互时两者相等，即合计 = 各人 costPts 之和。
  */
 function rosterAdjustment(model, teamId, outIds, overrideRoster = null) {
   const info = model.byId.get(teamId);
@@ -191,26 +201,31 @@ function rosterAdjustment(model, teamId, outIds, overrideRoster = null) {
   const roster = overrideRoster ?? info.roster;
   if (!outIds?.length) return { deltaPts: 0, missing: [] };
 
-  const exclude = new Set(outIds);
-  const base = overrideRoster
-    ? rotationImpact(roster, { minutesOf: info.minutesOf, basis: model.basis })
-    : info.baseRotation;
-  const without = rotationImpact(roster, { exclude, minutesOf: info.minutesOf, basis: model.basis });
-  const raw = model.impactB * (without - base) * (info.pace / 100);
+  const opts = { minutesOf: info.minutesOf, basis: model.basis };
+  const toPts = (raw) => model.impactB * raw * (info.pace / 100);
+  const base = overrideRoster ? rotationImpact(roster, opts) : info.baseRotation;
+  const outSet = new Set(outIds);
+  const absent = roster.filter((p) => outSet.has(p.playerId));
+
+  // 逐人边际：单独移出这一个人的影响（未取下限）
+  const single = new Map(absent.map((p) => [p.playerId,
+    toPts(rotationImpact(roster, { ...opts, exclude: new Set([p.playerId]) }) - base)]));
+  const costly = new Set(absent.filter((p) => single.get(p.playerId) < 0).map((p) => p.playerId));
+
+  const raw = costly.size ? toPts(rotationImpact(roster, { ...opts, exclude: costly }) - base) : 0;
   // 顶替者最差也是替补级：缺人不会让球队变强
   const deltaPts = Math.min(0, raw) * model.params.rosterWeight;
 
   return {
     deltaPts,
-    missing: roster
-      .filter((p) => exclude.has(p.playerId))
+    missing: absent
       .map((p) => ({
         playerId: p.playerId,
         name: p.name,
         min: p.min,
         gp: p.gp,
         pie: p.pie ?? p.adv?.pie ?? null,
-        costPts: model.marginalCost.get(p.playerId) ?? 0,
+        costPts: round(Math.min(0, single.get(p.playerId)), 2),
       }))
       .sort((a, b) => a.costPts - b.costPts),
   };

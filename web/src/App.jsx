@@ -232,15 +232,15 @@ export default function App() {
 
           <div className="side-bottom" style={{ marginTop: 0 }}>
           <div className="side-box">
-            <label title="上赛季因伤缺阵的球星会被埋没。开启后按场均分钟 × 典型出勤(70 场)估算新赛季轮换，只对上赛季出场满 10 场的球员生效。">
+            <label title="不读伤病名单。只改轮换分钟的算法：默认用上季实际分钟（场均×出场数）；勾选后对上季出场满 10 场的球员改用场均×70 场，伤停多的球星不会被埋没。">
               <input
                 type="checkbox"
                 checked={!!params.assumeHealthy}
                 onChange={(e) => setParams((p) => ({ ...p, assumeHealthy: e.target.checked ? 1 : 0 }))}
               />
-              <span>假设全员健康</span>
+              <span>按满勤计权</span>
             </label>
-            <p>不勾选则沿用上赛季实际出勤</p>
+            <p>不看伤病名单；勾选后上季分钟按场均×70 场算，不勾按实际出场</p>
           </div>
 
           <div className="side-box" style={{ marginTop: 'auto' }}>
@@ -281,6 +281,9 @@ export default function App() {
               >
                 套用「确定缺阵」
               </button>
+              <p style={{ fontSize: 10.5, color: 'var(--text-faint)', lineHeight: 1.5, margin: '6px 0 0' }}>
+                实验功能：按 IMP 估算缺阵影响，未经回测验证。正式预测不计伤病，伤病影响正在影子模式检验。
+              </p>
             </div>
           )}
 
