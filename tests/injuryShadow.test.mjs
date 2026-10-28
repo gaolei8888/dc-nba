@@ -186,6 +186,8 @@ test('报告存档：同名只存一次，按标注时间取', () => {
   assert.equal(got.length, 1);
   assert.equal(got[0].rows.length, 1);
   assert.equal(storedReports(db, '2026-10-29T00:00:00.000Z').length, 0);
+  assert.throws(() => storeReport(db, { ...REPORTS[0], name: 'x', asOf: '10/27/26 09:45 AM', fetchedAt: 'x' }), /UTC ISO/,
+    'PDF 里的标注写法不能进库：按字符串比较时间会全乱');
 });
 
 // ---------------------------------------------------------------- 页面汇总

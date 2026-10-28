@@ -163,9 +163,13 @@ export function settleShadow(db, scores, at = new Date().toISOString()) {
 
 export const shadowAll = (db) => db.prepare('SELECT * FROM shadow_predictions ORDER BY game_date, game_id, variant').all();
 
-/** 存一份解析好的报告（同名忽略）。rep: { name, asOf, fetchedAt, rows, notSubmitted } */
-export const storeReport = (db, rep) => Number(db.prepare('INSERT INTO injury_reports (name, as_of, fetched_at, json) VALUES (?, ?, ?, ?)')
-  .run(rep.name, rep.asOf, rep.fetchedAt, JSON.stringify({ rows: rep.rows, notSubmitted: rep.notSubmitted })).changes ?? 0);
+/** 存一份解析好的报告（同名忽略）。rep: { name, asOf(UTC ISO), fetchedAt, rows, notSubmitted } */
+const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/;
+export function storeReport(db, rep) {
+  if (!ISO.test(rep.asOf)) throw new Error(`报告标注时间必须是 UTC ISO：${rep.asOf}`);
+  return Number(db.prepare('INSERT INTO injury_reports (name, as_of, fetched_at, json) VALUES (?, ?, ?, ?)')
+    .run(rep.name, rep.asOf, rep.fetchedAt, JSON.stringify({ rows: rep.rows, notSubmitted: rep.notSubmitted })).changes ?? 0);
+}
 
 /** 标注时间不早于 sinceIso 的报告 */
 export const storedReports = (db, sinceIso) => db.prepare('SELECT * FROM injury_reports WHERE as_of >= ? ORDER BY as_of')

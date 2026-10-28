@@ -50,7 +50,8 @@ async function fetchLatest() {
     }
     if (!bytes) continue;
     const parsed = parseReportText(pdfText(bytes));
-    storeReport(db, { name: c.name, asOf: iso(etToUtc(c.date, c.min)), fetchedAt: iso(Date.now()), ...parsed });
+    // 标注时间取文件名（换成 UTC ISO），PDF 里的 'MM/DD/YY hh:mm AM' 只作核对，不能覆盖它
+    storeReport(db, { ...parsed, name: c.name, asOf: iso(etToUtc(c.date, c.min)), fetchedAt: iso(Date.now()) });
     return `${c.name}（新抓，PDF 标 ${parsed.asOf ?? '?'}，${parsed.rows.length} 行、未交名单 ${parsed.notSubmitted.length} 队）`;
   }
   return null;
