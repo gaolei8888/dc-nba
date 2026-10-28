@@ -1,0 +1,84 @@
+让分命中率 49.1% 复核
+=====================
+
+[1] 公式（server/lab.mjs market().atsOf）
+  edge  = pred − mktPred        模型预测的主队净胜分 − 盘口隐含的主队净胜分（mktPred = −spread）
+  cover = actual − mktPred      实际主队分差 − 盘口
+  选边：edge>0 选主队让分，edge<0 选客队；cover 同号即命中
+  push：edge===0 或 cover===0 不进分母（整数盘口刚好打平；edge===0 几乎不会发生）
+  命中率 = win / (win + lose)；半宽 = 1.96·√(r(1−r)/(win+lose))
+
+[2] 样本
+  重放场次 4920；有盘口 4908（覆盖 99.76%）；无盘口 12
+  win 2391 / lose 2471 / push 46（push 不在分母）；n(含 push)=4908，分母=4862
+  命中率 49.18%，95% 区间 ±1.41pp → [47.77%, 50.58%]
+  与打平线 52.38% 的差 -3.20pp；区间上界低于打平线
+  README 写的 ±1.41 对应分母 4862（不含 push），表内「合计 4908」含 push 与 46 场 push
+  与 50% 比：区间包含 50%（命中率与随机无法区分，不是显著亏损；但相对 −110 打平线是显著低于）
+
+[3] 按季
+  2022-23  有盘口 1230/1230  win 605 lose 601 push 24  命中率 50.17% ±2.82pp
+  2023-24  有盘口 1230/1230  win 590 lose 618 push 22  命中率 48.84% ±2.82pp
+  2024-25  有盘口 1224/1230  win 612 lose 612 push 0  命中率 50.00% ±2.80pp
+  2025-26  有盘口 1224/1230  win 584 lose 640 push 0  命中率 47.71% ±2.80pp
+
+[4] 分歧分档（README 表；分歧 = |pred − mktPred|）
+  0 ~ 1 分    n 1063  win 538 lose 518 push 7  命中率 50.9%
+  1 ~ 2 分    n 1003  win 484 lose 509 push 10  命中率 48.7%
+  2 ~ 3 分    n  832  win 373 lose 450 push 9  命中率 45.3%
+  3 ~ 5 分    n 1208  win 604 lose 593 push 11  命中率 50.5%
+  5 分以上      n  802  win 392 lose 401 push 9  命中率 49.4%
+  合计 n 4908
+
+[5] 盘口来源与时点（data/history/odds_*.json）
+  2022-23  场 1230  有 spread 1230  有 openSpread 0  整数盘口 624  让分价格字段 0
+      provider {"BetfairSportsbook":1230}  builtAt 2026-09-06T23:07:44.017Z
+  2023-24  场 1230  有 spread 1230  有 openSpread 1209  整数盘口 603  让分价格字段 0
+      provider {"BetfairSportsbook":1229,"Caesars Sportsbook (Colorado)":1}  builtAt 2026-09-06T23:08:17.183Z
+  2024-25  场 1224  有 spread 1224  有 openSpread 1224  整数盘口 0  让分价格字段 0
+      provider {"ESPN BET":1224}  builtAt 2026-09-06T23:08:40.976Z
+  2025-26  场 1224  有 spread 1224  有 openSpread 1224  整数盘口 0  让分价格字段 0
+      provider {"ESPN BET":249,"Draft Kings - Live Odds":1,"Draft Kings":974}  builtAt 2026-09-06T23:09:04.876Z
+  spread 取值：parseOddsItem 逐级回退 close → current → ESPN 顶层 item.spread；对已完赛比赛
+  顶层 spread ≈ 最后一次报价（接近收盘），但无时点标签；文件只存最终取到的数，不存是哪一级。
+  2022-23 / 2023-24 几乎全部是 BetfairSportsbook（交易所），不是美国博彩公司；2024-25 为 ESPN BET，
+  2025-26 主要为 Draft Kings。四季来源不同，让分口径并不统一。
+  让分价格（−110 还是 −105/−115）不在 odds_*.json，books_*.json 的 trimItem 也只存 spread 与钱线，
+  故历史让分价格缺失，无法按实际价格结算。
+
+  按盘口来源拆分命中率（同一批 4908 场）
+  BetfairSportsbook                n 2459  win 1194 lose 1219 push 46  命中率 49.48% ±1.99pp
+  ESPN BET                         n 1473  win 734 lose 739 push 0  命中率 49.83% ±2.55pp
+  Draft Kings                      n  974  win 461 lose 513 push 0  命中率 47.33% ±3.14pp
+  Caesars Sportsbook (Colorado)    n    1  win 1 lose 0 push 0  命中率 100.00%（样本太小）
+  Draft Kings - Live Odds          n    1  win 1 lose 0 push 0  命中率 100.00%（样本太小）
+
+[6] 参数是否在同一批赛季上调过（样本内问题）
+  DEFAULTS: homeAdv 1.6, restWeight 1.8, spreadSd 12, k 20, carryKeep 0.75
+  README「逐年测量」：homeAdv 1.6 由 2024-25（1.60）/ 2025-26（1.62）实测，并据此「改成 1.6 后偏置归零」；
+  restWeight 1.8 由背靠背实测 −1.98 分得出。二者都用到了评估季本身的数据 → 对 2024-25、2025-26 是样本内；
+  2022-23 / 2023-24 实测值（2.39 / 2.15）与 1.6 不同，对这两季是「用后来的参数」，同样不是干净的样本外。
+  k=20、carryKeep=0.75、spreadSd=12 的来源 README 未说明是否在这四季上调过（本审计无法证实，待核）。
+  walk-forward（每季只用此前赛季拟合）见提交 98a14e8，本脚本未使用。
+  敏感性（只读重放，不改默认）：
+    homeAdv 2.4（旧值）        win 2374 lose 2488 push 46  命中率 48.83%
+    homeAdv 1.6（现值）        win 2391 lose 2471 push 46  命中率 49.18%
+    restWeight 1.1（旧表）     win 2373 lose 2489 push 46  命中率 48.81%
+
+[7] 理论 ROI（假设情景，不是历史实际收益）
+  历史让分价格缺失 → 实际价格结算「不可计算」。下面仅在「统一 −110、等额下注、无手续费」假设下换算：
+  ROI = r·(100/110) − (1 − r)；push 退款，不计入分母
+  r = 49.18%（点估计）  → ROI -6.12%
+  r 区间 [47.77%, 50.58%] → ROI [-8.80%, -3.43%]
+  打平线 52.381% → ROI 0.00%（校验）
+  对照 research 文档 §10.2 的 49.1% → -6.26%（文档记 −6.26%，一致）
+  注意：这是无选择的「全部分歧场」全押，不是任何可执行策略；价格与时点均非历史实际可成交。
+
+[8] 与 README 数字对照
+  README 49.12%（±1.41）、合计 4908；本次实测 49.18%、n=4908。
+  差异 0.06pp：合计一致；win/lose/push = 2391/2471/46。
+  原因未能证实：当前快照为 66.32% / χ² 14.87 / 49.18%（docs/replay-same-day-fix-output.txt），
+  「按比赛日批量更新」修复前后逐位一致，所以不是该修复造成；推测 README 数字来自较早的数据版本（待核，无记录可证）。
+  README 分档表的场次是「win+lose」（不含 push，合计 4862），而表头写「合计 4908」；本次含 push 为 4908。
+  分档命中率也有 0.1~0.3pp 的差（如 1~2 分档 README 48.4% vs 实测 48.7%）。
+  README 不改；差异交 Task 17 报告说明。
