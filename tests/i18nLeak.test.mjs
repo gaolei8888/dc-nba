@@ -34,3 +34,14 @@ test('已迁移文件没有残留中文（白名单除外）', () => {
   const left = scanFiles(files, loadAllowlist());
   assert.deepEqual(left, [], left.map((x) => `${x.file}:${x.line} ${x.text}`).join('\n'));
 });
+
+test('format.js 不再导出中文 / 北京时间专用函数', async () => {
+  const m = await import('../web/src/lib/format.js');
+  for (const k of ['CONF_CN', 'DIV_CN', 'DIV_ORDER', 'MONTH_CN', 'WEEKDAY', 'fmtDate', 'fmtDateFull', 'bjToday', 'bjDateOf', 'bjTimeOf', 'restLabel', 'snapshotAge'])
+    assert.equal(m[k], undefined, `${k} 还在`);
+});
+
+test('migrated.json 为 "*"，全站 JS/JSX 都在扫描范围', () => {
+  assert.ok(migratedFiles().includes('web/src/lib/format.js'));
+  assert.ok(migratedFiles().includes('web/src/pages/Lab.jsx'));
+});

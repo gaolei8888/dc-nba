@@ -60,45 +60,7 @@ export const ABBR = {
   ptsPerTouch: 'PTS/TCH', passes: 'PASS', distMiles: 'DIST',
 };
 
-/** 分区与赛区的中文名。球队页和总览页共用，避免各写一份走样。 */
-export const CONF_CN = { East: '东部', West: '西部' };
-
-export const DIV_CN = {
-  Atlantic: '大西洋', Central: '中部', Southeast: '东南',
-  Northwest: '西北', Pacific: '太平洋', Southwest: '西南',
-};
-
-/** 展示顺序：先东部三个赛区，再西部三个 */
-export const DIV_ORDER = ['大西洋', '中部', '东南', '西北', '太平洋', '西南'];
-
-const WEEKDAY = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-
-/** "2026-10-20" -> "10月20日 周二" */
-export const fmtDate = (iso) => {
-  if (!iso) return '';
-  const [y, m, d] = iso.split('-').map(Number);
-  const wd = WEEKDAY[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
-  return `${m}月${d}日 ${wd}`;
-};
-
-/** "2025-10-27" -> "2025年10月27日 周一"：人机对赌两种模式都带年份，免得把上季回放当成今晚 */
-export const fmtDateFull = (iso) => (iso ? `${iso.slice(0, 4)}年${fmtDate(iso)}` : '');
-
-// ---- 北京时间
-// 赛程的 date 是美东日期（NBA 官方口径），但这个站的读者在国内：
-// 美东 10 月 27 日晚上的比赛，北京时间是 10 月 28 日上午。「今日比赛」按北京时间算。
-const BJ_OFFSET_MS = 8 * 3600e3;
-
-/** 当前北京日期 "YYYY-MM-DD" */
-export const bjToday = () => new Date(Date.now() + BJ_OFFSET_MS).toISOString().slice(0, 10);
-
-/** 比赛开打时刻（UTC 字符串）-> 北京日期 */
-export const bjDateOf = (utc) => (utc ? new Date(Date.parse(utc) + BJ_OFFSET_MS).toISOString().slice(0, 10) : null);
-
-/** 比赛开打时刻 -> 北京时间 "09:30" */
-export const bjTimeOf = (utc) => (utc ? new Date(Date.parse(utc) + BJ_OFFSET_MS).toISOString().slice(11, 16) : '');
-
-// shiftDate 已移到 i18n/fmt.js，这里保留导出给未迁移的页面
+// shiftDate 已移到 i18n/fmt.js，这里保留导出给 Dashboard
 export { shiftDate } from '../i18n/fmt.js';
 
 export const fmtDateShort = (iso) => {
@@ -109,18 +71,6 @@ export const fmtDateShort = (iso) => {
 
 export const monthOf = (iso) => (iso ? Number(iso.split('-')[1]) : 0);
 
-export const MONTH_CN = {
-  1: '1月', 2: '2月', 3: '3月', 4: '4月', 5: '5月',
-  9: '9月', 10: '10月', 11: '11月', 12: '12月',
-};
-
-/** 休息天数描述 */
-export const restLabel = (d) => {
-  if (d === null || d === undefined) return '—';
-  if (d === 0) return '背靠背';
-  return `休${d}天`;
-};
-
 /** 胜率 -> 颜色（绿=大概率赢，红=大概率输） */
 export const probColor = (p) => {
   const t = Math.max(0, Math.min(1, p));
@@ -130,26 +80,4 @@ export const probColor = (p) => {
   }
   const k = (0.5 - t) * 2;
   return `rgb(${Math.round(150 + 98 * k)}, ${Math.round(163 - 82 * k)}, ${Math.round(179 - 106 * k)})`;
-};
-
-/**
- * 快照有多旧。
- *
- * 用于盘口这类"抓下来就不会自己更新"的数据：
- * "没有盘口"和"盘口是三周前的"是两回事，后者更危险——
- * 用户看到一条过期的线却以为是当前的。所以时间要显式写出来。
- *
- * @returns {{days:number, text:string, stale:boolean}|null}
- */
-export const snapshotAge = (iso, { staleDays = 3 } = {}) => {
-  if (!iso) return null;
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return null;
-  const days = Math.floor((Date.now() - t) / 86400000);
-  const hours = Math.floor((Date.now() - t) / 3600000);
-  let text;
-  if (hours < 1) text = '刚刚抓取';
-  else if (hours < 24) text = `${hours} 小时前抓取`;
-  else text = `${days} 天前抓取`;
-  return { days, text, stale: days >= staleDays };
 };

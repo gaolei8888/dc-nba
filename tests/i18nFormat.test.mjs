@@ -4,7 +4,6 @@ import zhLoc from '../web/src/i18n/locales/zh.js';
 import enLoc from '../web/src/i18n/locales/en.js';
 import { createT } from '../web/src/i18n/core.js';
 import { createFormat, tzDateOf, tzTimeOf, tzToday, shiftDate, TIMEZONES } from '../web/src/i18n/fmt.js';
-import { bjDateOf, bjTimeOf, shiftDate as oldShift } from '../web/src/lib/format.js';
 
 const mk = (loc, tz) => createFormat({ locale: loc, fallback: zhLoc, tz });
 const zh = mk(zhLoc, 'Asia/Shanghai'); const en = mk(enLoc, 'America/New_York');
@@ -29,15 +28,20 @@ test('tzToday：同一时刻两地日期不同', () => {
   const now = Date.parse('2026-10-28T16:30:00Z');
   assert.equal(tzToday('Asia/Shanghai', now), '2026-10-29'); assert.equal(tzToday('America/New_York', now), '2026-10-28');
 });
-test('北京时间结果与旧 bjDateOf / bjTimeOf 一致', () => {
-  for (const u of ['2026-10-28T15:59:00Z', '2026-10-28T16:00:00Z', '2026-12-31T16:00:00Z', '2026-03-01T00:00:00Z', '2026-10-28T23:30:00Z']) {
-    assert.equal(tzDateOf(u, 'Asia/Shanghai'), bjDateOf(u));
-    assert.equal(tzTimeOf(u, 'Asia/Shanghai'), bjTimeOf(u));
+test('北京时间结果固定期望值（原 bjDateOf / bjTimeOf 口径）', () => {
+  const cases = [
+    ['2026-10-28T15:59:00Z', '2026-10-28', '23:59'], ['2026-10-28T16:00:00Z', '2026-10-29', '00:00'],
+    ['2026-12-31T16:00:00Z', '2027-01-01', '00:00'], ['2026-03-01T00:00:00Z', '2026-03-01', '08:00'],
+    ['2026-10-28T23:30:00Z', '2026-10-29', '07:30'],
+  ];
+  for (const [u, d, tm] of cases) {
+    assert.equal(tzDateOf(u, 'Asia/Shanghai'), d);
+    assert.equal(tzTimeOf(u, 'Asia/Shanghai'), tm);
   }
 });
 test('shiftDate 与旧实现一致', () => {
   assert.equal(shiftDate('2026-10-31', 2), '2026-11-02');
-  assert.equal(shiftDate('2026-03-01', -1), oldShift('2026-03-01', -1));
+  assert.equal(shiftDate('2026-03-01', -1), '2026-02-28');
 });
 test('日期：中文沿用旧格式，英文用 Intl', () => {
   assert.equal(zh.date('2026-10-20'), '10月20日 周二'); assert.equal(en.date('2026-10-20'), 'Tue, Oct 20');
