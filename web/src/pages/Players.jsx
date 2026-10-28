@@ -267,6 +267,15 @@ export function ImpactValidation({ impact }) {
         而且用了两把尺子：预测次季 APM，以及预测次季 on/off。
         只用前者不行，因为 IMP 里含 APM，两者共享同一个偏差。
       </p>
+      {v.shrink && (
+        <p className="note">
+          混合之后再<b>按上季出场分钟向人群均值收缩</b>（k = {v.shrink.k} 分钟）：
+          打满 {v.shrink.pivot} 分钟的人不变，480 分钟的人只保留约四成偏离——
+          上场时间本身就说明了教练怎么看他。表里「IMP」是收缩后的线上口径，
+          「IMP（收缩前）」照列作对照。k 是留一赛季对选的，4 折都选了同一个值；
+          次季 on/off 这把尺子上收缩也 4 对全胜，只是有两对的增量接近噪声。
+        </p>
+      )}
       <p className="note">
         做法对齐 EPM 的公开方法，但 EPM 用的是逐回合、含对手阵容的完整 RAPM，
         我们实测那一半只看得到进攻方五人，算出来的是<b>未做对手调整</b>的 APM。

@@ -21,6 +21,7 @@ import {
   FEATURES, buildSamples, fit, apply, blend, impactOf, corr, mean, sdOf,
   BLEND_W, DECAY_SPAN, DECAY_HALFLIFE,
 } from '../server/impact.mjs';
+import { shrinkByMinutes, populationMean, MINUTES_SHRINK } from '../server/impactShrink.mjs';
 
 const HISTORY = path.join(DATA_DIR, 'history');
 const APM_LAMBDA = Number(process.env.APM_LAMBDA) || 6000;
@@ -81,8 +82,18 @@ console.log(`APM lambda=${APM_LAMBDA}  SPM lambda=${SPM_LAMBDA}\n`);
 //
 // 每个"第 N 季 → 第 N+1 季"的组合各评一次，SPM 训练时看不到第 N 季。
 
+// IMP 是线上口径：混合后再按第 N 季出场分钟向人群 SPM 均值收缩（与 ingest 相同，
+// docs/impact-shrink-continuity-verdict.md 实验 1）。k=3200 是留一赛季对选的，4 折都选了它，
+// 所以这里固定 k 得到的逐对数字与留一对的结果相同。收缩前的版本照列，作为对照。
+const muCache = new Map();
+const muOf = (s, spm) => {
+  if (!muCache.has(s)) muCache.set(s, populationMean(players[s].map((p) => apply(spm, p))));
+  return muCache.get(s);
+};
+const unshrunk = (p, s, spm) => blend(apply(spm, p), decayUpto(s).get(p.playerId)?.apm);
 const candidates = {
-  IMP: (p, s, spm) => blend(apply(spm, p), decayUpto(s).get(p.playerId)?.apm),
+  IMP: (p, s, spm) => shrinkByMinutes(unshrunk(p, s, spm), (p.gp ?? 0) * (p.min ?? 0), muOf(s, spm)),
+  'IMP（收缩前）': unshrunk,
   'SPM（只看统计栏）': (p, s, spm) => apply(spm, p),
   'APM（只看场上结果）': (p, s) => decayUpto(s).get(p.playerId)?.apm ?? null,
   PIE: (p) => p.pie ?? 0,
@@ -110,6 +121,7 @@ for (const s of seasons) {
   const got = rowsFor(s);
   if (!got) continue;
   const spm = trainSpm(s);
+  muCache.delete(s); // 每对的 SPM 模型不同，人群均值跟着重算
   const line = { pair: `${s}→${got.nx}`, n: got.rows.length };
   for (const n of names) {
     const x = got.rows.map((p) => candidates[n](p, s, spm) ?? 0);
@@ -175,6 +187,7 @@ const model = {
   seasons,
   validation: {
     criterion: '用第 N 季的数据预测第 N+1 季的真实 APM',
+    shrink: { ...MINUTES_SHRINK, note: 'IMP 按第 N 季出场分钟向人群均值收缩；「IMP（收缩前）」为对照' },
     candidates: names,
     perPair,
     average: Object.fromEntries(names.map((n) => [n, mean(scores[n])])),
@@ -184,13 +197,17 @@ const model = {
 // 最新赛季的榜单（用校准后的模型 + 校准后的 APM）
 const last = seasons[seasons.length - 1];
 const dec = decayUpto(last);
-const impOf = (p) => impactOf(model, p, dec.get(p.playerId)?.apm ?? null);
+const muLast = populationMean(players[last].map((p) => apply(model, p)));
+const impOf = (p) => {
+  const v = impactOf(model, p, dec.get(p.playerId)?.apm ?? null);
+  return v === null ? null : shrinkByMinutes(v, (p.gp ?? 0) * (p.min ?? 0), muLast);
+};
 const board = players[last]
   .filter((p) => (p.gp ?? 0) >= 40 && (p.min ?? 0) >= 20)
   .map((p) => ({ name: p.name, v: impOf(p) }))
   .filter((r) => r.v !== null)
   .sort((a, b) => b.v - a.v);
-console.log(`\n${last} IMP 前 15：`);
+console.log(`\n${last} IMP（已按分钟收缩）前 15：`);
 board.slice(0, 15).forEach((r, i) => console.log(`  ${String(i + 1).padStart(2)}. ${r.name.padEnd(24)} ${r.v >= 0 ? '+' : ''}${r.v.toFixed(2)}`));
 
 const vals = board.map((r) => r.v);
