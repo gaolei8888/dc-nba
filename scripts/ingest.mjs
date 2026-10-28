@@ -627,8 +627,8 @@ async function main() {
     // 按上季出场分钟向人群均值收缩（实验 1，docs/impact-shrink-continuity-verdict.md）：
     // 480 分钟的 Thybulle 不该比 2300 分钟的东契奇高。收缩前的值留在 impactUnshrunk 供核对。
     // 上季 IMP 是拿来预测本季的：SPM 特征先按逐项年龄曲线平移一岁（aged，模型里没有曲线时不变），
-    // APM 用模型记的衰减（4 季、半衰期 3 季）。docs/imp-improve-verdict.md 组合 8c×5b。
-    // 10-28 之前的口径（3 季衰减、不调年龄）另算一份放在 impactV1，供对照。
+    // APM 用模型记的衰减（仍为 3 季、半衰期 1 季）。docs/imp-improve-verdict.md 实验 5b。
+    // 10-28 之前的口径（不调年龄）另算一份放在 impactV1，供对照。
     const mu = populationMean(players.map((p) => spmOf(impactModel, p, { aged: true })));
     // v1 的系数与本版同一套 SPM，只是量纲校准不同：按 scale 之比换回 v1 的量纲
     const r1 = impactModel.v1?.scale && impactModel.scale ? impactModel.v1.scale / impactModel.scale : 1;

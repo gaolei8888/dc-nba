@@ -15,12 +15,10 @@ import { players, seasons, minutesOf, calibratedValues } from './imp-improve-cor
 
 const last = seasons.at(-1);
 const CANDS = {
-  现行: {},
-  '组合 8c×5b（采纳）': { span: 4, hl: 3, ageStat: 1 },
-  '仅 8c': { span: 4, hl: 3 },
-  '仅 5b': { ageStat: 1 },
-  '8b 逐项多季 exp h=0.5 span5（未采纳）': { multi: { mode: 'exp', h: 0.5, level: 'feat', span: 5 } },
-  '8b Marcel span3（未采纳）': { multi: { mode: 'marcel', level: 'feat', span: 3 } },
+  '现行（v1）': {},
+  '采纳 5b（逐项年龄）': { ageStat: 1 },
+  '8c×5b（通过但未接入）': { span: 4, hl: 3, ageStat: 1 },
+  '仅 8c（未接入）': { span: 4, hl: 3 },
   '8d 年龄对齐多季 h=5 span5（未采纳）': { multi: { mode: 'exp', h: 5, level: 'feat', span: 5 }, ageStat: 1 },
 };
 const vals = Object.fromEntries(Object.entries(CANDS).map(([k, c]) => [k, calibratedValues(last, c)]));
@@ -51,6 +49,25 @@ for (const n of WATCH) {
 }
 console.log('\n（#名次 = 本季 ≥40 场且场均 ≥20 分钟球员中的排名；不够这个门槛的只给值）');
 
+// 5b 相对现行：涨跌最多的人（本季 ≥1000 分钟），以及 33 岁以上
+{
+  const [k0, k1] = names;
+  const moved = players[last].filter((p) => minutesOf(p) >= 1000 && vals[k0].values.has(p.playerId) && vals[k1].values.has(p.playerId))
+    .map((p) => ({ p, a: vals[k0].values.get(p.playerId), b: vals[k1].values.get(p.playerId) }))
+    .map((r) => ({ ...r, d: r.b - r.a }));
+  const line = (r) => `| ${r.p.name} | ${r.p.age} | ${r.p.gp}×${r.p.min} | ${fmt(r.a)}${rankOf[k0].get(r.p.playerId) ? `（#${rankOf[k0].get(r.p.playerId)}）` : ''} | ${fmt(r.b)}${rankOf[k1].get(r.p.playerId) ? `（#${rankOf[k1].get(r.p.playerId)}）` : ''} | ${fmt(r.d)} |`;
+  const head = `| 球员 | 年龄 | 场×分钟 | ${k0} | ${k1} | Δ |\n|---|---:|---|---|---|---:|`;
+  console.log(`\n## ${k1} 相对 ${k0}：涨最多的 5 人（本季 ≥1000 分钟）\n\n${head}`);
+  [...moved].sort((x, y) => y.d - x.d).slice(0, 5).forEach((r) => console.log(line(r)));
+  console.log(`\n## 跌最多的 5 人\n\n${head}`);
+  [...moved].sort((x, y) => x.d - y.d).slice(0, 5).forEach((r) => console.log(line(r)));
+  const old = moved.filter((r) => r.p.age >= 33).sort((x, y) => y.a - x.a);
+  console.log(`\n## 33 岁及以上（本季 ≥1000 分钟，${old.length} 人；涨 ${old.filter((r) => r.d > 0.005).length}，跌 ${old.filter((r) => r.d < -0.005).length}，Δ 均值 ${fmt(old.reduce((a, r) => a + r.d, 0) / old.length)}；名次涨 ${old.filter((r) => rankOf[k1].get(r.p.playerId) < rankOf[k0].get(r.p.playerId)).length}、跌 ${old.filter((r) => rankOf[k1].get(r.p.playerId) > rankOf[k0].get(r.p.playerId)).length}）\n\n${head}`);
+  old.forEach((r) => console.log(line(r)));
+  const all = moved.reduce((a, r) => a + r.d, 0) / moved.length;
+  console.log(`\n（全体 ≥1000 分钟球员 Δ 均值 ${fmt(all)}：量纲与人群均值随年龄平移整体有变化，老将要和这个均值比）`);
+}
+
 for (const k of names.slice(0, 2)) {
   console.log(`\n${k} 前 15：`);
   board(k).slice(0, 15).forEach((p, i) => console.log(`  ${String(i + 1).padStart(2)}. ${p.name.padEnd(26)} ${fmt(vals[k].values.get(p.playerId))}`));
@@ -74,7 +91,7 @@ const r0 = rank(tv[names[0]]); const r1 = rank(tv[names[1]]);
 const teamNames = new Map((JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'history', `teamadv_${last}.json`), 'utf8')) ?? []).map((r) => [r.TEAM_ID, r.TEAM_NAME]));
 const abbr = (t) => teamNames.get(t) ?? t;
 const moves = [...r0.keys()].map((t) => ({ t, a: r0.get(t), b: r1.get(t) })).sort((x, y) => Math.abs(y.a - y.b) - Math.abs(x.a - x.b));
-console.log(`| 队 | 现行 名次（值） | 组合 名次（值） |`);
+console.log(`| 队 | ${names[0]} 名次（值） | ${names[1]} 名次（值） |`);
 console.log('|---|---|---|');
 for (const m of moves.slice(0, 10)) console.log(`| ${abbr(m.t)} | #${m.a}（${fmt(tv[names[0]].get(m.t))}） | #${m.b}（${fmt(tv[names[1]].get(m.t))}） |`);
 const sp = (() => {

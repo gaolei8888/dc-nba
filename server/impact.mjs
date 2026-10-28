@@ -118,13 +118,15 @@ export const BLEND_W = 0.35;
 /**
  * 多赛季衰减：越久远权重越低。
  * DECAY_SPAN / DECAY_HALFLIFE 是 2026-10-28 之前的线上口径（3 季、半衰期 1 季），各实验室脚本仍以它为基线复现旧数字。
- * 线上现在用 APM_DECAY_SPAN / APM_DECAY_HALFLIFE（4 季、半衰期 3 季，近乎等权，仍按回合加权）：
- * 实验 8c 留一赛季对 4 折中 3 折选了它（docs/imp-improve-verdict.md）。
+ * 线上用 APM_DECAY_SPAN / APM_DECAY_HALFLIFE，目前与旧口径相同（3 季、半衰期 1 季）。
+ * 实验 8c（4 季、半衰期 3 季）虽通过了规则，但往季 APM 不做年龄调整就进来，会把老将抬高
+ * （LeBron #97→#72、Durant #28→#20），与「随年龄衰退」的要求相反，用户决定不接入；
+ * 带年龄调整的长记忆见实验 9（docs/imp-improve-verdict.md）。
  */
 export const DECAY_SPAN = 3;
 export const DECAY_HALFLIFE = 1;
-export const APM_DECAY_SPAN = 4;
-export const APM_DECAY_HALFLIFE = 3;
+export const APM_DECAY_SPAN = 3;
+export const APM_DECAY_HALFLIFE = 1;
 
 /**
  * 把 SPM 与 APM 合成最终的 IMP。

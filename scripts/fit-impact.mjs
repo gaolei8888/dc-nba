@@ -96,8 +96,8 @@ console.log(`APM lambda=${APM_LAMBDA}  SPM lambda=${SPM_LAMBDA}\n`);
 //
 // 每个"第 N 季 → 第 N+1 季"的组合各评一次，SPM 训练时看不到第 N 季。
 
-// IMP 是线上口径（docs/imp-improve-verdict.md 的组合 8c×5b）：
-//   SPM 的特征先按逐项年龄曲线平移一岁（曲线只在其余赛季对上拟合），APM 取 4 季衰减（半衰期 3 季），
+// IMP 是线上口径（docs/imp-improve-verdict.md 实验 5b）：
+//   SPM 的特征先按逐项年龄曲线平移一岁（曲线只在其余赛季对上拟合），APM 仍为 3 季衰减（半衰期 1 季），
 //   混合后再按第 N 季出场分钟向人群（平移后）SPM 均值收缩（k=3200，docs/impact-shrink-continuity-verdict.md）。
 // 「IMP v1」是 10-28 之前的线上口径（3 季衰减、不调年龄、同样收缩），其余候选照列作对照。
 // 两把尺子都报：次季真实 APM 与次季裸 on/off（后者缺陷来源与 APM 不同）。
@@ -112,8 +112,8 @@ const unshrunk = (p, s, m) => blend(apply(m.aged, p, { aged: true }), decayUpto(
 const candidates = {
   IMP: (p, s, m) => shrinkByMinutes(unshrunk(p, s, m), mins(p), muOf(s, m.aged, 'aged')),
   'IMP v1（3季衰减、不调年龄）': (p, s, m) => shrinkByMinutes(blend(apply(m.spm, p), decayV1(s).get(p.playerId)?.apm), mins(p), muOf(s, m.spm, 'plain')),
-  'IMP 仅长记忆APM': (p, s, m) => shrinkByMinutes(blend(apply(m.spm, p), decayUpto(s).get(p.playerId)?.apm), mins(p), muOf(s, m.spm, 'plain')),
-  'IMP 仅逐项年龄': (p, s, m) => shrinkByMinutes(blend(apply(m.aged, p, { aged: true }), decayV1(s).get(p.playerId)?.apm), mins(p), muOf(s, m.aged, 'aged')),
+  // 实验 8c 通过了规则但未接入（往季 APM 不调年龄，抬高老将），作对照照列
+  'IMP+长记忆APM（8c，未接入）': (p, s, m) => shrinkByMinutes(blend(apply(m.aged, p, { aged: true }), decayUpto(s, 4, 3).get(p.playerId)?.apm), mins(p), muOf(s, m.aged, 'aged')),
   'IMP（收缩前）': unshrunk,
   'SPM（只看统计栏）': (p, s, m) => apply(m.spm, p),
   'APM（只看场上结果）': (p, s) => decayUpto(s).get(p.playerId)?.apm ?? null,
@@ -230,7 +230,7 @@ const model = {
     criterionOnoff: '用第 N 季的数据预测第 N+1 季的裸 on/off',
     shrink: { ...MINUTES_SHRINK, note: 'IMP 按第 N 季出场分钟向人群均值收缩；「IMP（收缩前）」为对照' },
     aging: {
-      note: 'SPM 特征先按逐项年龄曲线平移一岁；APM 取 4 季衰减、半衰期 3 季（docs/imp-improve-verdict.md 组合 8c×5b）',
+      note: 'SPM 特征先按逐项年龄曲线平移一岁（实验 5b）；APM 仍为 3 季衰减、半衰期 1 季（docs/imp-improve-verdict.md）',
       decaySpan: APM_DECAY_SPAN, decayHalfLife: APM_DECAY_HALFLIFE,
     },
     candidates: names,
