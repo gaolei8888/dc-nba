@@ -52,8 +52,9 @@ for (const id of todo) {
   try {
     r = await fetchGameStints(id, (e, p) => nbaGet(statsUrl(e, p)));
   } catch (e) {
-    stopped = String(e.message).slice(0, 120);
-    break;   // 被拦 / 到上限 / 网络：停手，下次续
+    // 被拦 / 到上限 / 挂起（politeFetch 的 code）：停手，下次续。其余（如刚打完 PBP 还是空的）只跳过这一场
+    if (e.code) { stopped = String(e.message).slice(0, 120); break; }
+    r = { ok: false, why: String(e.message).slice(0, 120) };
   }
   fetched += 1;
   data.dates[id] = dateOf.get(id);
