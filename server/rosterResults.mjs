@@ -17,10 +17,12 @@ import { normalCdf } from './lab.mjs';
 
 /**
  * 线上配置：留一赛季在 96 组预注册候选（K × {无, 先验下限, 近期加权, 净胜分截断}）里按 log loss 选出，
- * 四折都选「近期加权」，K=8/8/10/12；四季合并选 K=8。见回测脚本与结论文档。
+ * 首版（continuity 口径先验）四折都选「近期加权」K=8/8/10/12、四季合并 K=8；2026-10-28 合并 roster-fixes-batch1 后
+ * 先验改为线上新分钟口径重跑（RR_PRIOR=batch1，同一预注册协议），四折仍都选「近期加权」K=8/10/12/15，四季合并选 K=12。
+ * 见回测脚本与结论文档（docs/roster-results-backtest-batch1-output.txt）。
  * 近期加权：每场权重 0.4^(距今天数/60)，约等于「第 1 场是第 30 场权重的 40%」（KenPom 式）。
  */
-export const RESULTS = Object.freeze({ K: 8, recency: Object.freeze({ ratio: 0.4, days: 60 }) });
+export const RESULTS = Object.freeze({ K: 12, recency: Object.freeze({ ratio: 0.4, days: 60 }) });
 
 /**
  * 单场预测：净胜分 = r主 − r客 + 主场项（中立场 0）+ 休息项，胜率 = Φ(净胜分 / sd)。

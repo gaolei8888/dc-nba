@@ -3,9 +3,15 @@
  *
  *   node scripts/roster-results-backtest.mjs     （npm run roster:results）
  *
- * 只读 data/backtest.json 与 data/history/（impact_ / lineups_ / stints_），不抓数据。
+ * 只读 data/backtest.json、data/teams.json 与 data/history/（impact_ / lineups_ / stints_ / injury-reports），不抓数据。
  * 逐场特征（上季球员价值、此前出场名单与分钟、联盟均值）沿用 continuity-backtest 的同一套防泄漏构建，
  * 球员价值默认用收缩 IMP（与线上 ingest 一致；RR_VALUE=imp 换成收缩前做敏感性）。
+ *
+ * 阵容先验的分钟口径（RR_PRIOR）：
+ *   batch1（默认，2026-10-28 起线上口径）：roster-fixes-batch1 的分钟——出场时分钟 × 轮换概率 × P(出场|当天 22:00 官方伤病状态)，
+ *     σ 分配、单人上限 38（server/minutesLab.mjs 的逐场上下文，与 scripts/minutes-backtest.mjs 的 new/report 同一套）；
+ *     没有 stints 的比赛（约 3%）该队沿用上一次的先验，开季第一场就没有时退回 continuity 口径；只支持 RR_VALUE=shrunk。
+ *   continuity：旧线上口径（projectMinutes + 等比分配、不计伤病），即 docs/roster-results-backtest-output.txt 那一版。
  *
  * 模型：每个比赛日开赛前，用更早日期的本季全部完赛结果，对每队求
  *   r = (K·阵容先验 + n·对手调整净胜分)/(K + n)（对手强度取同一张后验榜，迭代求解，见 rosterResults.mjs）
@@ -29,6 +35,8 @@ import { replaySeason, eloStartFor, teamGamesFromStints, leagueCenter, logLoss }
 import { expand, score, normalCdf } from '../server/lab.mjs';
 import { bootstrapCI } from '../server/fusionLab.mjs';
 import { resultsUpdate, gamePred } from '../server/rosterResults.mjs';
+import { minutesLab, newRows } from '../server/minutesLab.mjs';
+import { projectExpectedRotation, rosterRating } from '../server/rosterProjection.mjs';
 
 const HISTORY = path.join(DATA_DIR, 'history');
 const P = { k: 20, carryKeep: 0.75, homeAdv: 1.6, restWeight: 1.8 };
@@ -37,6 +45,9 @@ const ALL_SEASONS = ['2021-22', ...SEASONS];
 const prevOf = (s) => ALL_SEASONS[ALL_SEASONS.indexOf(s) - 1];
 const SD = 12;
 const VALUE = process.env.RR_VALUE || 'shrunk';
+const PRIOR = process.env.RR_PRIOR || 'batch1';
+if (!['batch1', 'continuity'].includes(PRIOR)) { console.error(`未知 RR_PRIOR=${PRIOR}`); process.exit(1); }
+if (PRIOR === 'batch1' && VALUE !== 'shrunk') { console.error('RR_PRIOR=batch1 只支持 RR_VALUE=shrunk'); process.exit(1); }
 const KS = [1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 60, 100];
 
 // ---------------------------------------------------------------- 特征（与 continuity-backtest 相同）
@@ -100,6 +111,11 @@ function valuesUpto(upto) {
 
 const t0 = Date.now();
 const rowsBy = {};
+const lab = PRIOR === 'batch1' ? minutesLab({
+  dataset, teams: JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'teams.json'), 'utf8')), players, stints,
+  injDir: process.env.INJURY_DIR ?? path.join(HISTORY, 'injury-reports'), allSeasons: ALL_SEASONS,
+}) : null;
+const b1Stats = { sides: 0, failed: 0, carried: 0, fallback: 0 };
 for (const s of SEASONS) {
   const prev = prevOf(s);
   const v = valuesUpto(prev);
@@ -109,14 +125,34 @@ for (const s of SEASONS) {
     prevGames: teamGamesFromStints(stints[prev]),
     priorMpg: v.priorMpg, values: v.values, center, window: 82,
   });
-  rowsBy[s] = rows.map((r) => ({ ...r, season: s }));
+  // batch1 口径：每场每队用赛前上下文 + 线上新版分钟算阵容分，减去同一个联盟均值（与 continuity 同尺度）
+  const b1 = new Map();
+  if (lab) {
+    const values = v.values.get('shrunk'); const c = center.get('shrunk');
+    for (const g of lab.buildContexts(s)) for (const side of [g.home, g.away]) {
+      b1Stats.sides += 1;
+      try { b1.set(`${g.gameId}|${side.teamId}`, rosterRating(projectExpectedRotation(newRows(side, 'report', values))) - c); }
+      catch { b1Stats.failed += 1; }
+    }
+  }
+  rowsBy[s] = rows.map((r) => {
+    if (!lab) return { ...r, season: s };
+    const pick = (teamId, t) => ({ ...t, b1: b1.get(`${r.gameId}|${teamId}`) ?? null });
+    return { ...r, season: s, home: pick(r.homeId, r.home), away: pick(r.awayId, r.away) };
+  });
 }
 const tFeat = (Date.now() - t0) / 1000;
 
 // ---------------------------------------------------------------- 战绩修正后的赛前强度
 
-/** 阵容先验（缺阵容分时退回 Elo 分，与 continuityLab.strength 相同） */
-const priorOfTeam = (t) => t.roster[VALUE] ?? t.elo;
+/** 阵容先验（缺阵容分时退回 Elo 分，与 continuityLab.strength 相同）；batch1 口径缺值时沿用该队上一次的先验 */
+const priorOfTeam = (t, last) => {
+  if (PRIOR !== 'batch1') return t.roster[VALUE] ?? t.elo;
+  if (t.b1 !== null) return t.b1;
+  if (last !== undefined) { b1Stats.carried += 1; return last; }
+  b1Stats.fallback += 1;
+  return t.roster[VALUE] ?? t.elo;
+};
 
 /**
  * 一个赛季、一个配置：逐比赛日，用更早日期的完赛结果求后验，返回逐场预测（顺序同 rows）。
@@ -131,8 +167,8 @@ function seasonPreds(rows, cfg) {
     let j = i;
     while (j < rows.length && rows[j].date === date) j += 1;
     for (let x = i; x < j; x += 1) {
-      prior.set(rows[x].homeId, priorOfTeam(rows[x].home));
-      prior.set(rows[x].awayId, priorOfTeam(rows[x].away));
+      prior.set(rows[x].homeId, priorOfTeam(rows[x].home, prior.get(rows[x].homeId)));
+      prior.set(rows[x].awayId, priorOfTeam(rows[x].away, prior.get(rows[x].awayId)));
     }
     const post = resultsUpdate(prior, done, cfg.K, {
       cap: cfg.cap ?? Infinity, floor: cfg.floor ?? 0,
@@ -197,7 +233,12 @@ const PHASES = [
   ['已赛 ≥20', (r) => r.teamGp >= 20],
 ];
 
-console.log(`# 阵容先验 + 本季战绩修正 回测（球员价值 ${VALUE}，sd=${SD}；特征构建 ${tFeat.toFixed(1)} 秒）\n`);
+console.log(`# 阵容先验 + 本季战绩修正 回测（球员价值 ${VALUE}，先验分钟口径 ${PRIOR}，sd=${SD}；特征构建 ${tFeat.toFixed(1)} 秒）\n`);
+if (lab) {
+  const ms = lab.matchStats; const per = ALL.length + 1; // seasonPreds 每季每配置各跑一次
+  console.log(`batch1 先验：${b1Stats.sides} 个队·场有赛前上下文（失败 ${b1Stats.failed}）；伤病报告 ${ms.withReport}/${ms.teamGames} 个队·场可用；`
+    + `无上下文时沿用上次先验 ${b1Stats.carried / per} 次、退回 continuity ${b1Stats.fallback / per} 次（四季合计，每个配置）。\n`);
+}
 console.log(`候选共 ${ALL.length} 组，分 ${Object.keys(FAMILIES).length} 族；★ = 全部候选按训练季 log loss 一起选。\n`);
 
 console.log('## 基础族：各 K 的逐季 log loss（样本内全貌，仅供看曲面；选择只用留一赛季）\n');

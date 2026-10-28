@@ -31,7 +31,8 @@ import { RR_COLS, rrAll, rrBoard, rrRows } from '../server/rosterResultsShadow.m
 const PARAMS = JSON.parse(fs.readFileSync(new URL('../server/injury-params-v1.json', import.meta.url), 'utf8'));
 const RR_PARAMS_FILE = new URL('../server/roster-results-params-v1.json', import.meta.url);
 /** 榜的代码指纹：影子期内榜的代码若有改动（分钟 / 缺阵逻辑等），逐行可查，评估时据此分段报告 */
-const RR_CODE_FILES = ['liveRosterRankings.mjs', 'rosterProjection.mjs', 'rosterResults.mjs', 'rosterResultsShadow.mjs', 'impact.mjs', 'impactShrink.mjs'];
+const RR_CODE_FILES = ['liveRosterRankings.mjs', 'rosterProjection.mjs', 'rotationMinutes.mjs', 'injury-params-v1.json',
+  'rosterResults.mjs', 'rosterResultsShadow.mjs', 'impact.mjs', 'impactShrink.mjs'];
 const boardCode = () => {
   const h = crypto.createHash('sha256');
   for (const f of RR_CODE_FILES) h.update(fs.readFileSync(new URL(`../server/${f}`, import.meta.url)));

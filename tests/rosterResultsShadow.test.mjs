@@ -46,9 +46,9 @@ const slateOf = (tipoff = '2026-10-28T23:30:00Z', o = {}) => [{
 }];
 const board = (s, now = NOW) => rrBoard({ store: s, legacy, D, params: PARAMS, now });
 
-test('冻结参数：K=8、近期加权 0.4/60 天、sd 12、主场 1.6、休息 1.8；IMP 收缩常数与代码一致', () => {
+test('冻结参数：K=12、近期加权 0.4/60 天、sd 12、主场 1.6、休息 1.8；IMP 收缩常数与代码一致', () => {
   assert.equal(PARAMS.version, 1);
-  assert.equal(PARAMS.K, 8);
+  assert.equal(PARAMS.K, 12);
   assert.deepEqual(PARAMS.recency, { ratio: 0.4, days: 60 });
   assert.equal(PARAMS.spreadSd, 12);
   assert.equal(PARAMS.homeAdv, 1.6);
@@ -68,7 +68,7 @@ test('rr 行的胜率 = 回测口径：Φ((r主 − r客 + 1.6 + 休息项)/12)�
   const priors = new Map([...b.byTeam].map(([id, x]) => [id, x.priorTotal]));
   const ref = resultsUpdate(priors, PAST.map((g) => ({
     homeId: g.homeId, awayId: g.awayId, margin: g.homeScore - g.awayScore, hca: g.neutral ? 0 : 1.6, date: g.date,
-  })), 8, { recency: { ratio: 0.4, days: 60, asOf: D }, tol: 1e-6 });
+  })), PARAMS.K, { recency: { ratio: 0.4, days: 60, asOf: D }, tol: 1e-6 });
   const rh = ref.get(1).rating; const ra = ref.get(2).rating;
   const rest = (restAdjust(0) - restAdjust(2)) * 1.8;
   const want = rh - ra + 1.6 + rest;
@@ -132,12 +132,15 @@ test('榜不可用只跳过 rr 行：数据超过 36 小时、缺 IMP 模型、�
   }
   const bad = rrBoard({ store: store({ games: PAST }), legacy, D, params: { ...PARAMS, impShrink: { minutes: { k: 1, pivot: 1 } } }, now: NOW });
   assert.match(bad.reason, /收缩常数/);
-  // 第 4 队没人：联盟不全，榜的 total 全为 null
+  // 第 4 队没人：按队隔离（roster-fixes-batch1），只有 4 队 total 为 null——涉及 4 队的场跳过，其余照记
   const missing = board(store({ games: PAST, teams: [1, 2, 3] }));
   assert.equal(missing.ok, true);
-  const r = rrRows({ slate: slateOf(), slot: '22', now: NOW, params: PARAMS, board: missing });
+  assert.equal(missing.byTeam.get(4).total, null);
+  assert.ok(Number.isFinite(missing.byTeam.get(1).total));
+  const r = rrRows({ slate: slateOf(undefined, { awayId: 4 }), slot: '22', now: NOW, params: PARAMS, board: missing });
   assert.equal(r.rows.length, 0);
   assert.match(r.skipped[0].why, /没有 total/);
+  assert.equal(rrRows({ slate: slateOf(), slot: '22', now: NOW, params: PARAMS, board: missing }).rows.length, 1);
 });
 
 // ---------------------------------------------------------------- 库
