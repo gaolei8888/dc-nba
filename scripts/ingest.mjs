@@ -86,7 +86,7 @@ function missingLineups(model) {
  * 正式抓取在 main 开头就会因缺文件而停下（见 missingLineups），这里的 null 只在
  * ALLOW_NO_APM=1 时才会出现。
  */
-function loadDecayedApm(model) {
+function loadDecayedApm(model, { quiet = false } = {}) {
   const { need, missing } = missingLineups(model);
   if (missing.length) return null;
   const dir = pathNode.join(DATA_DIR, 'history');
@@ -94,7 +94,7 @@ function loadDecayedApm(model) {
     season,
     rows: JSON.parse(fsNode.readFileSync(pathNode.join(dir, `lineups_${season}.json`), 'utf8')).rows,
   }));
-  log(`  实测 APM 取自 ${bySeason.map((b) => b.season).join('、')}（越近权重越高）`);
+  if (!quiet) log(`  实测 APM 取自 ${bySeason.map((b) => b.season).join('、')}（半衰期 ${model.decayHalfLife ?? 1} 季，按回合加权）`);
   return decayedApm(bySeason, {
     span: need.length,
     halfLife: model.decayHalfLife ?? 1,
@@ -626,15 +626,31 @@ async function main() {
     const apm = loadDecayedApm(impactModel);
     // 按上季出场分钟向人群均值收缩（实验 1，docs/impact-shrink-continuity-verdict.md）：
     // 480 分钟的 Thybulle 不该比 2300 分钟的东契奇高。收缩前的值留在 impactUnshrunk 供核对。
-    const mu = populationMean(players.map((p) => spmOf(impactModel, p)));
+    // 上季 IMP 是拿来预测本季的：SPM 特征先按逐项年龄曲线平移一岁（aged，模型里没有曲线时不变），
+    // APM 用模型记的衰减（4 季、半衰期 3 季）。docs/imp-improve-verdict.md 组合 8c×5b。
+    // 10-28 之前的口径（3 季衰减、不调年龄）另算一份放在 impactV1，供对照。
+    const mu = populationMean(players.map((p) => spmOf(impactModel, p, { aged: true })));
+    // v1 的系数与本版同一套 SPM，只是量纲校准不同：按 scale 之比换回 v1 的量纲
+    const r1 = impactModel.v1?.scale && impactModel.scale ? impactModel.v1.scale / impactModel.scale : 1;
+    const v1 = impactModel.v1 ? {
+      ...impactModel, ...impactModel.v1, ageCurves: null,
+      beta: impactModel.beta.map((b) => b * r1), intercept: impactModel.intercept * r1,
+    } : null;
+    const apmV1 = v1 ? loadDecayedApm(v1, { quiet: true }) : null;
+    const muV1 = v1 ? populationMean(players.map((p) => spmOf(v1, p))) : null;
     let n = 0;
     let withApm = 0;
     for (const p of players) {
       const a = apm?.get(p.playerId)?.apm ?? null;
-      const v = impactOf(impactModel, p, a);
+      const v = impactOf(impactModel, p, a, { aged: true });
       if (v !== null) {
+        const mins = (p.gp ?? 0) * (p.min ?? 0);
         p.impactUnshrunk = v;
-        p.impact = Math.round(shrinkByMinutes(v, (p.gp ?? 0) * (p.min ?? 0), mu) * 100) / 100;
+        p.impact = Math.round(shrinkByMinutes(v, mins, mu) * 100) / 100;
+        if (v1) {
+          const old = impactOf(v1, p, apmV1?.get(p.playerId)?.apm ?? null);
+          p.impactV1 = old === null ? null : Math.round(shrinkByMinutes(old, mins, muV1) * 100) / 100;
+        }
         n += 1; if (a !== null) withApm += 1;
       }
     }

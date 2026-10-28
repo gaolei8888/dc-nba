@@ -214,6 +214,22 @@ export function ImpactValidation({ impact }) {
   const avg = v.average ?? {};
   const best = (row) => Math.max(...names.map((n) => row[n] ?? -9));
   const wins = v.perPair.filter((row) => (row.IMP ?? -9) >= best(row)).length;
+  const columns = [
+    { key: 'pair', label: '赛季对', align: 'left', width: 132 },
+    { key: 'n', label: '人数', width: 58 },
+    ...names.map((n) => ({
+      key: n,
+      label: n === 'IMP' ? <Th abbr="IMP" cn="混合" /> : n,
+      title: n,
+      width: n === 'IMP' ? 76 : 112,
+      render: (r) => {
+        const val = r[n];
+        if (val === null || val === undefined) return <span className="dim">—</span>;
+        const isBest = val >= best(r);
+        return isBest ? <b className="pos">{val.toFixed(3)}</b> : val.toFixed(3);
+      },
+    })),
+  ];
 
   return (
     <div className="card">
@@ -241,23 +257,22 @@ export function ImpactValidation({ impact }) {
         rows={v.perPair}
         rowKey={(r) => r.pair}
         initialSort={{ key: 'pair', dir: 'asc' }}
-        columns={[
-          { key: 'pair', label: '赛季对', align: 'left', width: 132 },
-          { key: 'n', label: '人数', width: 58 },
-          ...names.map((n) => ({
-            key: n,
-            label: n === 'IMP' ? <Th abbr="IMP" cn="混合" /> : n,
-            title: n,
-            width: n === 'IMP' ? 76 : 112,
-            render: (r) => {
-              const val = r[n];
-              if (val === null || val === undefined) return <span className="dim">—</span>;
-              const isBest = val >= best(r);
-              return isBest ? <b className="pos">{val.toFixed(3)}</b> : val.toFixed(3);
-            },
-          })),
-        ]}
+        columns={columns}
       />
+      {v.perPairOnoff?.length > 0 && (
+        <>
+          <p className="note" style={{ marginTop: 10 }}>
+            第二把尺子：{v.criterionOnoff ?? '预测次季裸 on/off'}（平均 IMP {(v.averageOnoff?.IMP ?? 0).toFixed(3)}）。
+            它的缺陷来源与 APM 不同，不和 IMP 里的 APM 共享偏差。
+          </p>
+          <DataTable
+            rows={v.perPairOnoff}
+            rowKey={(r) => r.pair}
+            initialSort={{ key: 'pair', dir: 'asc' }}
+            columns={columns}
+          />
+        </>
+      )}
 
       <p className="note" style={{ marginTop: 10 }}>
         IMP 是<b>统计栏模型（SPM）</b>与<b>场上实测（APM）</b>的混合，两半各占
@@ -274,6 +289,15 @@ export function ImpactValidation({ impact }) {
           上场时间本身就说明了教练怎么看他。表里「IMP」是收缩后的线上口径，
           「IMP（收缩前）」照列作对照。k 是留一赛季对选的，4 折都选了同一个值；
           次季 on/off 这把尺子上收缩也 4 对全胜，只是有两对的增量接近噪声。
+        </p>
+      )}
+      {v.aging && (
+        <p className="note">
+          <b>长记忆 + 年龄</b>：APM 那一半取近 {v.aging.decaySpan} 季、半衰期 {v.aging.decayHalfLife} 季（近乎等权，仍按回合加权，
+          伤病短季自然权重小）；统计栏那一半先按<b>逐项年龄曲线</b>把上季速率平移一岁（年轻人得分、组织上升，
+          老将得分、篮板下降）。两者都是留一赛季对选出、按预注册规则采纳的。
+          「IMP v1」是此前的口径（3 季衰减、不调年龄），与「仅长记忆 APM」「仅逐项年龄」一起照列；
+          早期赛季对能用的往季少（2021-22 只有 1 季），收益主要在后两对。
         </p>
       )}
       <p className="note">

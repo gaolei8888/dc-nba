@@ -115,9 +115,16 @@ export const featureList = (withAge) => (withAge ? [...FEATURES, ...AGE_FEATURES
  */
 export const BLEND_W = 0.35;
 
-/** 多赛季衰减：越久远权重越低。半衰期 1 个赛季，取最近 3 季。 */
+/**
+ * 多赛季衰减：越久远权重越低。
+ * DECAY_SPAN / DECAY_HALFLIFE 是 2026-10-28 之前的线上口径（3 季、半衰期 1 季），各实验室脚本仍以它为基线复现旧数字。
+ * 线上现在用 APM_DECAY_SPAN / APM_DECAY_HALFLIFE（4 季、半衰期 3 季，近乎等权，仍按回合加权）：
+ * 实验 8c 留一赛季对 4 折中 3 折选了它（docs/imp-improve-verdict.md）。
+ */
 export const DECAY_SPAN = 3;
 export const DECAY_HALFLIFE = 1;
+export const APM_DECAY_SPAN = 4;
+export const APM_DECAY_HALFLIFE = 3;
 
 /**
  * 把 SPM 与 APM 合成最终的 IMP。
@@ -140,9 +147,10 @@ export function blend(spm, apm, w = BLEND_W) {
  * @param {object} model data/impact-model.json
  * @param {object} p 球员行
  * @param {number|null} rawApm 未校准的 APM，没有就传 null
+ * @param {object} [opts] aged：SPM 那一半先按逐项年龄曲线平移一岁（见 apply）
  */
-export function impactOf(model, p, rawApm) {
-  const spm = apply(model, p);
+export function impactOf(model, p, rawApm, { aged = false } = {}) {
+  const spm = apply(model, p, { aged });
   if (spm === null) return null;
   const scale = model.scale ?? 1;
   const apm = rawApm === null || rawApm === undefined ? null : rawApm * scale;
@@ -274,13 +282,31 @@ export function fit(samples, lambda) {
  * @param {number} opts.minGp 出场门槛。默认是训练门槛；本赛季的混合 IMP 会放宽它，
  *   因为那时小样本的噪声由上赛季的先验兜底（见 ingest.mjs 的 currentImpact）。
  */
-export function apply(model, p, { minGp = MIN_GP } = {}) {
+/**
+ * @param {boolean} opts.aged 先把特征平移一岁（model.ageCurves，见 server/impactAging.mjs）：
+ *   上季 IMP 用来预测本季时传 true；本季分段 SPM 测的是本季自己，不传。模型里没有曲线时忽略。
+ */
+export function apply(model, p, { minGp = MIN_GP, aged = false } = {}) {
   if ((p.gp ?? 0) < minGp || (p.min ?? 0) < MIN_MPG) return null;
   const f = features(p);
   if (!f) return null;
+  if (aged && model.ageCurves && Number.isFinite(p.age)) {
+    for (const [k, d] of Object.entries(ageShiftOf(model.ageCurves, p.age))) if (k in f) f[k] += d;
+  }
   let s = model.intercept;
   model.features.forEach((k, i) => {
     s += model.beta[i] * ((f[k] - model.mu[i]) / model.sd[i]);
   });
   return Math.round(s * 100) / 100;
+}
+
+/**
+ * 逐项年龄曲线在 age 岁的「一年变化」：{特征: Δ}。曲线是连续分段线性 [1, x, (x−k)+…]，年龄取整后截断。
+ * 拟合见 server/impactAging.mjs；这里只做求值，免得 impact.mjs 反过来依赖拟合代码。
+ */
+export function ageShiftOf(curves, age) {
+  const [lo, hi] = curves.clip ?? [-Infinity, Infinity];
+  const x = Math.min(hi, Math.max(lo, Math.round(age)));
+  const basis = [1, x, ...curves.knots.map((k) => Math.max(0, x - k))];
+  return Object.fromEntries(Object.entries(curves.coef).map(([k, c]) => [k, c.reduce((s, v, i) => s + v * basis[i], 0)]));
 }
