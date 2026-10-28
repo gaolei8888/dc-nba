@@ -161,7 +161,7 @@ export default function App() {
 
       // ---- 排行榜（服务端可能未启用，这里全部容错）
       leaderboardOn: !!state.meta?.features?.leaderboard,
-      leaderboardReason: state.meta?.features?.leaderboardReason ?? null,
+      leaderboardReasonCode: state.meta?.features?.leaderboardReasonCode ?? null,
       cloud: prof.profiles.find((p) => p.id === prof.activeId)?.cloud ?? null,
       /** 用当前档案名在服务端建一个玩家，把令牌绑回本地档案 */
       connectCloud: async () => {

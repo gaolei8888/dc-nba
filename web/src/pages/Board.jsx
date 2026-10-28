@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useApp, go } from '../App.jsx';
+import { useI18n } from '../i18n/react.jsx';
 import { api, withOut } from '../lib/api.js';
 import {
   TeamCell, Loading, ErrorBox, ProbBar, StatTile, Segmented, DataTable,
@@ -286,6 +287,7 @@ const ciRoi = (c) => (c?.lo == null ? '—' : `${roi(c.lo)} ~ ${roi(c.hi)}`);
 const MIN_LEDGER = 100;
 
 function PaperBetting({ teamById }) {
+  const { t } = useI18n();
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
   const [season, setSeason] = useState('all');
@@ -332,7 +334,7 @@ function PaperBetting({ teamById }) {
         </div>
         <div className="card">
           <h2>累计盈亏 · 本季账本<span className="sub">开赛前记录、赛后结算，记录后不可改</span></h2>
-          {main ? <Curve points={main.curve} label="本季账本累计盈亏" /> : <div className="empty">{lg.reason}</div>}
+          {main ? <Curve points={main.curve} label="本季账本累计盈亏" /> : <div className="empty">{lg.reasonCode ? t(lg.reasonCode) : lg.reason}</div>}
           {main && (
             <p className="note">
               已结算 <b>{main.bets}</b> 注、待结算 {main.pending} 注，自 {lg.firstDate ?? '—'} 起共记录 {lg.captured} 场。

@@ -368,6 +368,8 @@ export const isEnabled = () => db !== null;
 /** 排行榜那份库的句柄（本季实战在排行榜开启时与它共用） */
 export const handle = () => db;
 export const getDisabledReason = () => disabledReason;
+/** 与 getDisabledReason 对应的消息码（可用时为 null），前端按语言翻译 */
+export const getDisabledCode = () => (disabledReason ? 'srv.reason.dbUnavailable' : null);
 
 // ---------------------------------------------------------------- 玩家
 

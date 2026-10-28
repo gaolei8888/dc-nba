@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../App.jsx';
+import { useI18n } from '../i18n/react.jsx';
 import { StatTile, DataTable, ErrorBox, Loading, Segmented } from '../components/common.jsx';
 import { pct } from '../lib/format.js';
 import { exportProfile } from '../lib/profiles.js';
@@ -10,8 +11,9 @@ export default function Profiles() {
   const {
     profiles, profileId, createProfile, renameProfile,
     switchProfile, deleteProfile, importProfile,
-    leaderboardOn, leaderboardReason, cloud, connectCloud, disconnectCloud, meta,
+    leaderboardOn, leaderboardReasonCode, cloud, connectCloud, disconnectCloud, meta,
   } = useApp();
+  const { t } = useI18n();
 
   const [board, setBoard] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -353,7 +355,7 @@ export default function Profiles() {
         <div className="card plain">
           <h2>排行榜未启用</h2>
           <p className="note">
-            {leaderboardReason ?? '本部署未开启服务端排行榜。'}<br />
+            {leaderboardReasonCode ? t(leaderboardReasonCode) : '本部署未开启服务端排行榜。'}<br />
             所有进度仍然完整保存在这台浏览器本地，游戏功能不受影响。
           </p>
         </div>

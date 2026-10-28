@@ -10,6 +10,7 @@
  * 用正态分布（NBA 单场分差对盘口的标准差约 12 分）转成胜率。
  * 比分则由双方进攻/防守效率与节奏推出总分后按分差拆分。
  */
+import { codedError } from './messages.mjs';
 import {
   ELO_BASE, ELO_PER_POINT, rotationImpact, totalMinutes, healthyMinutes,
   VALUE_IMP, VALUE_PIE,
@@ -240,7 +241,7 @@ function rosterAdjustment(model, teamId, outIds, overrideRoster = null) {
  */
 export function teamStrength(model, teamId, outIds = [], rosterIds = null) {
   const info = model.byId.get(teamId);
-  if (!info) throw new Error(`未知球队: ${teamId}`);
+  if (!info) throw codedError('err.unknownTeam', `未知球队: ${teamId}`, { teamId });
   const { wElo, wNet, turnoverWeight } = model.params;
   const wSum = wElo + wNet || 1;
 

@@ -10,6 +10,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readJson, DATA_DIR } from './nbaClient.mjs';
 import * as db from './db.mjs';
+import { sendError, publicCode } from './messages.mjs';
 import * as lab from './lab.mjs';
 import { liveRosterRankings } from './liveRosterRankings.mjs';
 import { buildBoard } from './predictionBoard.mjs';
@@ -158,7 +159,7 @@ const rateLimit = ({ windowMs = 60_000, max = 60, key = 'ip' } = {}) => (req, re
   if (!b || now > b.reset) { b = { count: 0, reset: now + windowMs }; buckets.set(id, b); }
   b.count += 1;
   if (b.count > max) {
-    return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
+    return sendError(res, 429, 'err.rateLimited', '请求过于频繁，请稍后再试');
   }
   next();
 };
@@ -168,15 +169,19 @@ setInterval(() => {
   for (const [k, v] of buckets) if (now > v.reset) buckets.delete(k);
 }, 120_000).unref();
 
+const storageUnavailable = (res) => sendError(
+  res, 503, 'err.storageUnavailable', '服务端存储不可用', {}, { reason: db.getDisabledReason(), reasonCode: db.getDisabledCode() },
+);
+
 /** 需要令牌的接口 */
 function requireAuth(req, res, next) {
   if (!db.isEnabled()) {
-    return res.status(503).json({ error: '服务端存储不可用', reason: db.getDisabledReason() });
+    return storageUnavailable(res);
   }
   const auth = req.get('authorization') ?? '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
   const player = token && db.authenticate(token);
-  if (!player) return res.status(401).json({ error: '令牌无效，请重新创建玩家' });
+  if (!player) return sendError(res, 401, 'err.tokenInvalid', '令牌无效，请重新创建玩家');
   req.player = player;
   next();
 }
@@ -186,7 +191,11 @@ const wrap = (fn) => async (req, res) => {
     await fn(req, res);
   } catch (e) {
     console.error(e);
-    if (!res.headersSent) res.status(400).json({ error: e.message });
+    // 只转发 err.* 码；Node 内部码（ENOENT、ERR_SQLITE_ERROR 等）统一成 err.internal，不泄露给客户端
+    if (!res.headersSent) {
+      const code = publicCode(e);
+      sendError(res, 400, code, e.message, e.params ?? {});
+    }
   }
 };
 
@@ -204,6 +213,9 @@ app.get('/api/meta', wrap((req, res) => {
       leaderboardReason: LEADERBOARD_ON
         ? db.getDisabledReason()
         : '本部署已关闭排行榜（ENABLE_LEADERBOARD=0），进度仅保存在浏览器本地',
+      leaderboardReasonCode: LEADERBOARD_ON
+        ? db.getDisabledCode()
+        : 'srv.reason.leaderboardOff',
       lottery: process.env.ENABLE_LOTTERY === '1',
       livePlay: !!liveDb,
     },
@@ -299,7 +311,7 @@ const withCost = (model, list) => {
 app.get('/api/teams/:id', wrap((req, res) => {
   const id = Number(req.params.id);
   const team = store.teams.find((t) => t.teamId === id);
-  if (!team) return res.status(404).json({ error: '球队不存在' });
+  if (!team) return sendError(res, 404, 'err.teamNotFound', '球队不存在');
 
   const model = getModel(pickParams(req.query));
   const out = outFromQuery(req);
@@ -404,7 +416,11 @@ app.get('/api/paper', wrap((req, res) => {
     backtest: store.paper ?? null,
     ledger: ledgerDb
       ? { available: true, ...ledgerReport(ledgerRows(ledgerDb), { B: 1000 }) }
-      : { available: false, reason: LEDGER_OFF ? 'ENABLE_LEDGER=0' : '账本数据库打不开，见服务端日志' },
+      : {
+        available: false,
+        reason: LEDGER_OFF ? 'ENABLE_LEDGER=0' : '账本数据库打不开，见服务端日志',
+        reasonCode: LEDGER_OFF ? 'srv.reason.ledgerOff' : 'srv.reason.ledgerUnavailable',
+      },
   });
 }));
 
@@ -430,7 +446,7 @@ const LB_TTL = 10_000;
 
 app.get('/api/leaderboard', wrap((req, res) => {
   if (!db.isEnabled()) {
-    return res.status(503).json({ error: '服务端存储不可用', reason: db.getDisabledReason() });
+    return storageUnavailable(res);
   }
   const mode = ['live', 'season'].includes(req.query.mode) ? req.query.mode : 'practice';
   const min = Math.max(1, Math.min(200, Number(req.query.min) || 10));
@@ -459,7 +475,7 @@ app.get('/api/leaderboard', wrap((req, res) => {
 /** 创建玩家，返回一次性令牌 */
 app.post('/api/players', rateLimit({ max: 5, windowMs: 600_000 }), wrap((req, res) => {
   if (!db.isEnabled()) {
-    return res.status(503).json({ error: '服务端存储不可用', reason: db.getDisabledReason() });
+    return storageUnavailable(res);
   }
   res.json(db.createPlayer(req.body?.name));
 }));
@@ -535,6 +551,7 @@ app.get('/api/live', wrap((req, res) => {
   res.json({
     available: !!liveDb,
     reason: liveDb ? null : LIVE_REASON,
+    reasonCode: liveDb ? null : LIVE_REASON_CODE,
     identity: liveDb ? (LEADERBOARD_ON ? 'cloud' : 'local') : null,
     signedIn: !!playerId,
     now: new Date(now).toISOString(),
@@ -556,10 +573,12 @@ app.get('/api/live', wrap((req, res) => {
 }));
 
 app.post('/api/live/picks', rateLimit({ max: 30 }), wrap((req, res) => {
-  if (!liveDb) return res.status(503).json({ error: '本季实战不可用', reason: LIVE_REASON });
+  if (!liveDb) return sendError(res, 503, 'err.liveUnavailable', '本季实战不可用', {}, { reason: LIVE_REASON, reasonCode: LIVE_REASON_CODE });
   const playerId = livePlayerId(req);
   if (!playerId) {
-    return res.status(401).json({ error: LEADERBOARD_ON ? '令牌无效，请先用当前档案加入排行榜' : '缺少本地档案 id' });
+    return LEADERBOARD_ON
+      ? sendError(res, 401, 'err.liveTokenInvalid', '令牌无效，请先用当前档案加入排行榜')
+      : sendError(res, 401, 'err.liveNoProfile', '缺少本地档案 id');
   }
   const picks = Array.isArray(req.body?.picks) ? req.body.picks.slice(0, 40) : [];
   const out = submitLivePicks(liveDb, playerId, picks, {
@@ -574,7 +593,7 @@ app.get('/api/rankings', wrap(async (req, res) => {
   const out = outFromQuery(req);
   const roster = req.query.rankingModel === 'roster';
   const availability = req.query.availability ?? 'reported';
-  if (roster && !['reported', 'healthy'].includes(availability)) return res.status(400).json({ error: '未知的阵容可用性模式' });
+  if (roster && !['reported', 'healthy'].includes(availability)) return sendError(res, 400, 'err.unknownAvailability', '未知的阵容可用性模式');
   const key = JSON.stringify([params, out, roster, availability]);
   res.json(await cached('rankings', key, () => {
     const legacy = powerRankings(getModel(params), out).map(showRanking);
@@ -584,8 +603,8 @@ app.get('/api/rankings', wrap(async (req, res) => {
 
 app.post('/api/predict', wrap((req, res) => {
   const { homeId, awayId, gameId, neutral, restHome, restAway, out, params } = req.body ?? {};
-  if (!homeId || !awayId) return res.status(400).json({ error: '需要 homeId 与 awayId' });
-  if (Number(homeId) === Number(awayId)) return res.status(400).json({ error: '两队不能相同' });
+  if (!homeId || !awayId) return sendError(res, 400, 'err.needTeams', '需要 homeId 与 awayId');
+  if (Number(homeId) === Number(awayId)) return sendError(res, 400, 'err.sameTeams', '两队不能相同');
   const model = getModel(pickParams(params));
   // 指定的是一场已结束、且主客与赛程一致的比赛：和赛程页同一口径——
   // 用赛前 Elo 重算、不套用当前缺阵勾选，否则评级已吸收了这场结果，胜率是事后诸葛亮
@@ -738,7 +757,7 @@ app.post('/api/lab/counterfactual', rateLimit({ max: 60 }), wrap(async (req, res
   const teamId = Number(req.body?.teamId);
   const deltaPts = Math.max(-10, Math.min(10, Number(req.body?.deltaPts) || 0));
   if (!store.teams.some((t) => t.teamId === teamId)) {
-    return res.status(400).json({ error: '未知球队' });
+    return sendError(res, 400, 'err.unknownTeam', '未知球队', { teamId });
   }
   const params = pickLabParams(req.body?.params);
   const key = JSON.stringify([seasons, teamId, deltaPts, params]);
@@ -755,6 +774,7 @@ app.get('/api/health', wrap((req, res) => {
       enabled: LEADERBOARD_ON && db.isEnabled(),
       writable: LEADERBOARD_ON && db.isEnabled(),
       reason: LEADERBOARD_ON ? db.getDisabledReason() : 'ENABLE_LEADERBOARD=0',
+      reasonCode: LEADERBOARD_ON ? db.getDisabledCode() : 'srv.reason.leaderboardOff',
       path: process.env.DB_PATH ?? '(默认 data/app.db)',
     },
     // mem_limit 是硬限制，超了容器直接被 OOM kill 而不是变慢，
@@ -773,9 +793,9 @@ app.post('/api/refresh', (req, res) => {
   // 以及把「个人学习」变成「持续抓取并公开分发」。所以生产镜像里默认关掉
   // （ALLOW_REFRESH=0），本地不设这个变量则照常可用。
   if (process.env.ALLOW_REFRESH === '0') {
-    return res.status(403).json({ error: '该部署为只读数据快照，不支持在线抓取' });
+    return sendError(res, 403, 'err.readOnlySnapshot', '该部署为只读数据快照，不支持在线抓取');
   }
-  if (refreshing) return res.status(409).json({ error: '正在抓取中' });
+  if (refreshing) return sendError(res, 409, 'err.refreshing', '正在抓取中');
   refreshing = true;
   const child = spawn(process.execPath, [path.join(ROOT, 'scripts', 'ingest.mjs')], {
     cwd: ROOT, env: process.env,
@@ -786,10 +806,10 @@ app.post('/api/refresh', (req, res) => {
   child.on('close', (code) => {
     refreshing = false;
     if (code === 0) {
-      try { loadStore(); } catch (e) { return res.status(500).json({ error: e.message }); }
+      try { loadStore(); } catch (e) { return sendError(res, 500, 'err.reloadFailed', e.message); }
       return res.json({ ok: true, log: out.slice(-2000) });
     }
-    res.status(500).json({ error: '抓取失败', log: out.slice(-2000) });
+    sendError(res, 500, 'err.refreshFailed', '抓取失败', {}, { log: out.slice(-2000) });
   });
 });
 
@@ -846,6 +866,7 @@ const liveDb = LEADERBOARD_ON ? db.handle() : PROD ? null : db.openWith(db.LIVE_
 const LIVE_REASON = LEADERBOARD_ON
   ? db.getDisabledReason()
   : '本部署关闭了排行榜（ENABLE_LEADERBOARD=0），不在服务端保存任何用户数据，本季实战需要服务端锁定，暂不可用';
+const LIVE_REASON_CODE = LEADERBOARD_ON ? (db.getDisabledCode() ?? 'srv.reason.dbUnavailable') : 'srv.reason.liveOff';
 /**
  * 服务端时钟。本地开发可用 PLAY_NOW=2026-10-29T00:30:00Z 把「现在」拨到某一刻（之后照常走），
  * 用来演示开赛锁定；production 下忽略。

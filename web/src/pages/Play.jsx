@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useApp, go } from '../App.jsx';
+import { useI18n } from '../i18n/react.jsx';
+import { errorText } from '../lib/apiError.js';
 import { api } from '../lib/api.js';
 import { TeamLogo, StatTile, Loading, ErrorBox, ProbBar, Segmented } from '../components/common.jsx';
 import {
@@ -20,6 +22,7 @@ const CONF_STEPS = [0.55, 0.65, 0.75, 0.85, 0.95];
  * 有 24 小时内开赛的比赛就默认进本季实战，否则进上季回放。
  */
 export default function Play() {
+  const { t } = useI18n();
   const { setAccent, meta, profileId, cloud } = useApp();
   const [tab, setTab] = useState(null);
   const [live, setLive] = useState(null);
@@ -32,7 +35,7 @@ export default function Play() {
 
   // 本季实战接口出错不能连累上季回放：降级成「不可用」，回放照常
   const loadLive = (date) => api.live({ date }, headers).then(setLive)
-    .catch((e) => setLive((cur) => (cur?.available ? cur : { available: false, reason: `加载失败：${e.message}`, days: [] })));
+    .catch((e) => setLive((cur) => (cur?.available ? cur : { available: false, reasonText: `加载失败：${errorText(e, t)}`, days: [] })));
   useEffect(() => { loadLive(live?.date); }, [headers]);
 
   // 默认模式只在第一次拿到数据时定，之后听用户的
@@ -322,6 +325,7 @@ const tipLabel = (utc) => `北京 ${fmtDateFull(bjDateOf(utc)).slice(5)} ${bjTim
  * 开赛前可以改，改的时候模型快照也跟着更新到那一刻。
  */
 function LiveMode({ live, reload, headers }) {
+  const { t } = useI18n();
   const { teamById, meta, leaderboardOn, cloud, connectCloud } = useApp();
   const [pending, setPending] = useState({});
   const [busy, setBusy] = useState(false);
@@ -337,7 +341,7 @@ function LiveMode({ live, reload, headers }) {
     return (
       <div className="card plain">
         <h2>本季实战不可用</h2>
-        <p className="note">{live.reason}<br />「上季回放」不受影响。</p>
+        <p className="note">{live.reasonText ?? (live.reasonCode ? t(live.reasonCode) : live.reason)}<br />「上季回放」不受影响。</p>
       </div>
     );
   }
@@ -360,7 +364,7 @@ function LiveMode({ live, reload, headers }) {
       setPending({});
       await reload(live.date);
     } catch (e) {
-      setMsg(`提交失败：${e.message}`);
+      setMsg(`提交失败：${errorText(e, t)}`);
     }
     setBusy(false);
   };
@@ -385,7 +389,7 @@ function LiveMode({ live, reload, headers }) {
             <button
               className="btn primary"
               disabled={busy}
-              onClick={async () => { setBusy(true); try { await connectCloud(); } catch (e) { setMsg(e.message); } setBusy(false); }}
+              onClick={async () => { setBusy(true); try { await connectCloud(); } catch (e) { setMsg(errorText(e, t)); } setBusy(false); }}
             >
               用当前档案加入
             </button>
