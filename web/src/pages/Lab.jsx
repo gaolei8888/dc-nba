@@ -1,33 +1,33 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../App.jsx';
+import { useI18n } from '../i18n/react.jsx';
 import { api } from '../lib/api.js';
 import {
   DataTable, TeamCell, StatTile, Loading, ErrorBox, Segmented,
 } from '../components/common.jsx';
 import { num, pct, signed, signClass } from '../lib/format.js';
 
-const TABS = [
-  { value: 'build', label: '造一个模型' },
-  { value: 'errors', label: '模型错在哪' },
-  { value: 'measure', label: '逐年测量' },
-  { value: 'whatif', label: '反事实' },
-  { value: 'market', label: '对标盘口' },
-];
+const tabs = (t) => ['build', 'errors', 'measure', 'whatif', 'market']
+  .map((value) => ({ value, label: t(`lab.tab.${value}`) }));
 
-/** 可调的模型参数。范围是根据回测里有意义的区间定的 */
+/** 让分分歧档位的显示顺序（与服务端 EDGE_BUCKETS 一致；点表头排序按这个顺序） */
+const EDGE_ORDER = ['e0to1', 'e1to2', 'e2to3', 'e3to5', 'e5plus'];
+
+/** 可调的模型参数。范围是根据回测里有意义的区间定的；标签与提示见 lab.param.<key>.label / hint */
 const KNOBS = [
-  { key: 'wElo', label: 'Elo 权重', min: 0, max: 1, step: 0.05, hint: '球队实力来自逐场结果迭代' },
-  { key: 'wNet', label: '上赛季净效率权重', min: 0, max: 1, step: 0.05, hint: '回测显示这一项基本没用' },
-  { key: 'inSeasonElo', label: '赛季中学习', min: 0, max: 1, step: 1, hint: '关掉它准确率会掉约 5 个百分点' },
-  { key: 'homeAdv', label: '主场优势（分）', min: 0, max: 4, step: 0.1, hint: '实测近两季约 1.6' },
-  { key: 'restWeight', label: '休息因素强度', min: 0, max: 3, step: 0.1, hint: '实测约 1.8' },
-  { key: 'k', label: 'Elo 步长 K', min: 8, max: 40, step: 1, hint: '越大越快适应，也越容易被单场结果带偏' },
-  { key: 'carryKeep', label: '赛季间保留比例', min: 0.4, max: 1, step: 0.05, hint: '新赛季保留多少上赛季实力' },
-  { key: 'spreadSd', label: '分差标准差', min: 8, max: 16, step: 0.5, hint: '只影响概率，不影响胜负判断' },
+  { key: 'wElo', min: 0, max: 1, step: 0.05 },
+  { key: 'wNet', min: 0, max: 1, step: 0.05 },
+  { key: 'inSeasonElo', min: 0, max: 1, step: 1 },
+  { key: 'homeAdv', min: 0, max: 4, step: 0.1 },
+  { key: 'restWeight', min: 0, max: 3, step: 0.1 },
+  { key: 'k', min: 8, max: 40, step: 1 },
+  { key: 'carryKeep', min: 0.4, max: 1, step: 0.05 },
+  { key: 'spreadSd', min: 8, max: 16, step: 0.5 },
 ];
 
 export default function Lab() {
   const { teams, teamById, setAccent } = useApp();
+  const { t } = useI18n();
   const [tab, setTab] = useState('build');
   const [meta, setMeta] = useState(null);
   const [error, setError] = useState(null);
@@ -41,11 +41,10 @@ export default function Lab() {
   if (!meta.available) {
     return (
       <>
-        <div className="page-head"><h1>模型实验室</h1></div>
+        <div className="page-head"><h1>{t('nav.lab')}</h1></div>
         <div className="card">
           <p className="note">
-            缺少回测数据集。先运行一次 <code>npm run backtest</code> 抓取历史赛季，
-            再运行 <code>npm run ingest</code> 生成 <code>data/backtest.json</code>。
+            {t('lab.noData.p1')}<code>npm run backtest</code>{t('lab.noData.p2')}<code>npm run ingest</code>{t('lab.noData.p3')}<code>data/backtest.json</code>{t('lab.noData.p4')}
           </p>
         </div>
       </>
@@ -55,15 +54,12 @@ export default function Lab() {
   return (
     <>
       <div className="page-head">
-        <h1>模型实验室</h1>
-        <p>
-          在 {meta.seasons.join('、')} 共 {meta.games} 场真实比赛上重放模型。
-          每次重放都是无信息泄漏的——预测记录完成后才用真实结果更新评级。
-        </p>
+        <h1>{t('nav.lab')}</h1>
+        <p>{t('lab.intro', { seasons: meta.seasons.join(t('lab.listSep')), count: meta.games })}</p>
       </div>
 
       <div className="toolbar">
-        <Segmented value={tab} onChange={setTab} options={TABS} />
+        <Segmented value={tab} onChange={setTab} options={tabs(t)} />
       </div>
 
       {tab === 'build' && <BuildTab meta={meta} />}
@@ -78,6 +74,7 @@ export default function Lab() {
 // ---------------------------------------------------------------- 造模型
 
 function BuildTab({ meta }) {
+  const { t } = useI18n();
   const [params, setParams] = useState(() => ({ ...meta.defaults }));
   const [result, setResult] = useState(null);
   const [baseline, setBaseline] = useState(null);
@@ -120,37 +117,37 @@ function BuildTab({ meta }) {
 
       <div className="grid cols-4" style={{ marginBottom: 14 }}>
         <StatTile
-          label="你的模型 · 命中率"
+          label={t('lab.build.yourAcc')}
           value={result ? pct(result.summary.accuracy, 2) : '—'}
-          hint={baseline ? `默认模型 ${pct(baseline.summary.accuracy, 2)}` : ''}
+          hint={baseline ? t('lab.build.defaultModel', { v: pct(baseline.summary.accuracy, 2) }) : ''}
         />
         <StatTile
-          label="Brier（越低越好）"
+          label={t('lab.build.brierLabel')}
           value={result ? result.summary.brier.toFixed(4) : '—'}
-          hint={baseline ? `默认模型 ${baseline.summary.brier.toFixed(4)}` : ''}
+          hint={baseline ? t('lab.build.defaultModel', { v: baseline.summary.brier.toFixed(4) }) : ''}
         />
         <StatTile
-          label="分差平均误差"
-          value={result ? `${result.summary.marginMae.toFixed(2)} 分` : '—'}
+          label={t('lab.build.maeLabel')}
+          value={result ? t('lab.pts', { v: result.summary.marginMae.toFixed(2) }) : '—'}
         />
         <StatTile
-          label="分差偏置"
+          label={t('lab.marginBias')}
           value={result ? signed(result.summary.marginBias, 2) : '—'}
-          hint="接近 0 才说明没有系统性高估或低估"
+          hint={t('lab.build.biasHint')}
         />
       </div>
 
       <div className="grid cols-2">
         <div className="card">
           <h2>
-            参数
-            <span className="sub">改完点「回测」，在 {meta.games} 场真实比赛上打分</span>
+            {t('lab.build.params')}
+            <span className="sub">{t('lab.build.paramsSub', { count: meta.games })}</span>
           </h2>
           <div className="grid cols-2">
             {KNOBS.map((k) => (
               <div key={k.key} className="field">
-                <label title={k.hint}>
-                  {k.label} · <b className="mono">{num(params[k.key], 2)}</b>
+                <label title={t(`lab.param.${k.key}.hint`)}>
+                  {t(`lab.param.${k.key}.label`)} · <b className="mono">{num(params[k.key], 2)}</b>
                 </label>
                 <input
                   type="range"
@@ -158,25 +155,25 @@ function BuildTab({ meta }) {
                   value={params[k.key]}
                   onChange={(e) => setParams((p) => ({ ...p, [k.key]: Number(e.target.value) }))}
                 />
-                <span style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>{k.hint}</span>
+                <span style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>{t(`lab.param.${k.key}.hint`)}</span>
               </div>
             ))}
           </div>
           <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
             <button className="btn primary" disabled={busy} onClick={run}>
-              {busy ? '重放中…' : '回测这组参数'}
+              {busy ? t('lab.replaying') : t('lab.build.run')}
             </button>
             <button className="btn" disabled={!changed} onClick={() => setParams({ ...meta.defaults })}>
-              恢复默认
+              {t('lab.build.reset')}
             </button>
-            <span className="note">一次重放约 {meta.games} 场，跑在工作线程里</span>
+            <span className="note">{t('lab.build.replayNote', { count: meta.games })}</span>
           </div>
         </div>
 
         <div className="card">
-          <h2>你试过的模型 <span className="sub">按命中率排序</span></h2>
+          <h2>{t('lab.build.tried')} <span className="sub">{t('lab.build.triedSub')}</span></h2>
           {board.length === 0 ? (
-            <div className="empty">还没有记录。调几个参数试试。</div>
+            <div className="empty">{t('lab.build.triedEmpty')}</div>
           ) : (
             <DataTable
               rows={board}
@@ -185,23 +182,23 @@ function BuildTab({ meta }) {
               onRowClick={(r) => setParams({ ...r.params })}
               columns={[
                 {
-                  key: 'accuracy', label: '命中率', width: 78,
+                  key: 'accuracy', label: t('lab.col.accuracy'), width: 78,
                   render: (r) => <b className={baseline && r.accuracy > baseline.summary.accuracy ? 'pos' : ''}>{pct(r.accuracy, 2)}</b>,
                 },
                 { key: 'brier', label: 'Brier', width: 74, render: (r) => r.brier.toFixed(4) },
-                { key: 'marginMae', label: '分差误差', width: 78, render: (r) => r.marginMae.toFixed(2) },
+                { key: 'marginMae', label: t('lab.col.marginErr'), width: 78, render: (r) => r.marginMae.toFixed(2) },
                 {
-                  key: 'marginBias', label: '偏置', width: 66,
+                  key: 'marginBias', label: t('lab.col.bias'), width: 66,
                   render: (r) => <span className={Math.abs(r.marginBias) < 0.15 ? 'pos' : ''}>{signed(r.marginBias, 2)}</span>,
                 },
                 {
-                  key: 'desc', label: '参数', align: 'left', width: 240,
+                  key: 'desc', label: t('lab.build.colParams'), align: 'left', width: 240,
                   value: () => 0,
                   render: (r) => (
                     <span className="dim" style={{ fontSize: 11 }}>
                       {KNOBS.filter((k) => r.params[k.key] !== meta.defaults[k.key])
-                        .map((k) => `${k.label} ${num(r.params[k.key], 2)}`)
-                        .join(' · ') || '默认参数'}
+                        .map((k) => `${t(`lab.param.${k.key}.label`)} ${num(r.params[k.key], 2)}`)
+                        .join(' · ') || t('lab.build.defaultParams')}
                     </span>
                   ),
                 },
@@ -209,26 +206,26 @@ function BuildTab({ meta }) {
             />
           )}
           <p className="note" style={{ marginTop: 10 }}>
-            点任意一行可以把那组参数load回滑块。<br />
-            <b>参考系</b>：永远选主队 55.6%，公开模型一般 65-68%，博彩盘口约 68-70%。
+            {t('lab.build.clickRow')}<br />
+            <b>{t('lab.build.refLabel')}</b>{t('lab.build.refBody')}
           </p>
         </div>
       </div>
 
       {result && (
         <div className="card">
-          <h2>概率校准 <span className="sub">模型说 70% 的那些比赛，实际赢了多少</span></h2>
+          <h2>{t('lab.calib.title')} <span className="sub">{t('lab.calib.sub')}</span></h2>
           <DataTable
             rows={result.calibration}
             rowKey={(r) => r.lo}
             initialSort={{ key: 'lo', dir: 'asc' }}
             columns={[
-              { key: 'lo', label: '预测区间', width: 90, render: (r) => `${r.lo}–${r.hi}%` },
-              { key: 'n', label: '场次', width: 70 },
-              { key: 'predicted', label: '模型说', width: 80, render: (r) => pct(r.predicted, 1) },
-              { key: 'actual', label: '实际是', width: 80, render: (r) => pct(r.actual, 1) },
+              { key: 'lo', label: t('lab.calib.range'), width: 90, render: (r) => `${r.lo}–${r.hi}%` },
+              { key: 'n', label: t('lab.col.games'), width: 70 },
+              { key: 'predicted', label: t('lab.calib.says'), width: 80, render: (r) => pct(r.predicted, 1) },
+              { key: 'actual', label: t('lab.calib.actual'), width: 80, render: (r) => pct(r.actual, 1) },
               {
-                key: 'gap', label: '偏差', width: 80,
+                key: 'gap', label: t('lab.calib.gap'), width: 80,
                 value: (r) => r.actual - r.predicted,
                 render: (r) => {
                   const d = (r.actual - r.predicted) * 100;
@@ -238,8 +235,7 @@ function BuildTab({ meta }) {
             ]}
           />
           <p className="note" style={{ marginTop: 10 }}>
-            校准好的模型，「模型说」和「实际是」两列应该贴近。偏差持续为正说明模型过于保守，
-            持续为负说明过于自信。
+            {t('lab.calib.note')}
           </p>
         </div>
       )}
@@ -250,6 +246,7 @@ function BuildTab({ meta }) {
 // ---------------------------------------------------------------- 误差分析
 
 function ErrorsTab({ meta }) {
+  const { t } = useI18n();
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
   useEffect(() => {
@@ -257,63 +254,63 @@ function ErrorsTab({ meta }) {
   }, [meta]);
 
   if (err) return <ErrorBox error={err} />;
-  if (!data) return <Loading text="重放中…" />;
+  if (!data) return <Loading text={t('lab.replaying')} />;
+
+  const sliceName = (r) => t(`srv.lab.slice.${r.key}`);
 
   return (
     <>
       <div className="grid cols-4" style={{ marginBottom: 14 }}>
-        <StatTile label="整体命中率" value={pct(data.summary.accuracy, 2)} />
-        <StatTile label="整体 Brier" value={data.summary.brier.toFixed(4)} />
-        <StatTile label="最难的一类" value={data.slices[0]?.label ?? '—'} />
-        <StatTile label="最容易的一类" value={data.slices.at(-1)?.label ?? '—'} />
+        <StatTile label={t('lab.errors.overallAcc')} value={pct(data.summary.accuracy, 2)} />
+        <StatTile label={t('lab.errors.overallBrier')} value={data.summary.brier.toFixed(4)} />
+        <StatTile label={t('lab.errors.hardest')} value={data.slices[0] ? sliceName(data.slices[0]) : '—'} />
+        <StatTile label={t('lab.errors.easiest')} value={data.slices.at(-1) ? sliceName(data.slices.at(-1)) : '—'} />
       </div>
 
       <div className="card">
-        <h2>按比赛类型切片 <span className="sub">Brier 偏离为正 = 这类比赛模型更容易错</span></h2>
+        <h2>{t('lab.errors.sliceTitle')} <span className="sub">{t('lab.errors.sliceSub')}</span></h2>
         <DataTable
           rows={data.slices}
-          rowKey={(r) => r.label}
+          rowKey={(r) => r.key}
           initialSort={{ key: 'brierDelta', dir: 'desc' }}
           columns={[
-            { key: 'label', label: '比赛类型', align: 'left', width: 190 },
-            { key: 'n', label: '场次', width: 70 },
-            { key: 'accuracy', label: '命中率', width: 78, render: (r) => pct(r.accuracy, 1) },
+            { key: 'label', label: t('lab.col.gameType'), align: 'left', width: 190, value: sliceName },
+            { key: 'n', label: t('lab.col.games'), width: 70 },
+            { key: 'accuracy', label: t('lab.col.accuracy'), width: 78, render: (r) => pct(r.accuracy, 1) },
             { key: 'brier', label: 'Brier', width: 74, render: (r) => r.brier.toFixed(4) },
             {
-              key: 'brierDelta', label: '相对整体', width: 96,
+              key: 'brierDelta', label: t('lab.errors.vsOverall'), width: 96,
               render: (r) => (
                 <span className={r.brierDelta > 0 ? 'neg' : 'pos'}>
-                  {signed(r.brierDelta, 4)} {r.brierDelta > 0 ? '更难' : '更易'}
+                  {signed(r.brierDelta, 4)} {r.brierDelta > 0 ? t('lab.errors.harder') : t('lab.errors.easier')}
                 </span>
               ),
             },
             {
-              key: 'marginBias', label: '分差偏置', width: 86,
+              key: 'marginBias', label: t('lab.marginBias'), width: 86,
               render: (r) => <span className={signClass(-Math.abs(r.marginBias))}>{signed(r.marginBias, 2)}</span>,
             },
           ]}
         />
         <p className="note" style={{ marginTop: 10 }}>
-          这不是"模型有 bug"的清单，而是**难度分布**：实力接近的比赛本来就难猜，
-          模型没把握时它确实也不该有把握。真正值得警惕的是<b>分差偏置</b>——
-          某一类比赛上持续偏向一边，说明模型对这类情况有系统性误判，是可以修的。
+          {t('lab.errors.note1')}<b>{t('lab.marginBias')}</b>{t('lab.errors.note2')}
         </p>
       </div>
 
       <div className="card">
-        <h2>逐赛季表现</h2>
+        <h2>{t('lab.errors.bySeason')}</h2>
         <DataTable
           rows={data.bySeason}
           rowKey={(r) => r.season}
           initialSort={{ key: 'season', dir: 'asc' }}
           columns={[
-            { key: 'season', label: '赛季', align: 'left', width: 100 },
-            { key: 'n', label: '场次', width: 70 },
-            { key: 'accuracy', label: '命中率', width: 80, render: (r) => pct(r.accuracy, 2) },
+            { key: 'season', label: t('lab.col.season'), align: 'left', width: 100 },
+            { key: 'n', label: t('lab.col.games'), width: 70 },
+            { key: 'accuracy', label: t('lab.col.accuracy'), width: 80, render: (r) => pct(r.accuracy, 2) },
             { key: 'brier', label: 'Brier', width: 78, render: (r) => r.brier.toFixed(4) },
-            { key: 'marginMae', label: '分差误差', width: 82, render: (r) => r.marginMae.toFixed(2) },
+            { key: 'marginMae', label: t('lab.col.marginErr'), width: 82, render: (r) => r.marginMae.toFixed(2) },
             {
-              key: 'marginBias', label: '分差偏置', width: 86,
+              key: 'marginBias', label: t('lab.marginBias'), width: 86,
               render: (r) => <span className={Math.abs(r.marginBias) < 0.2 ? 'pos' : 'neg'}>{signed(r.marginBias, 2)}</span>,
             },
           ]}
@@ -326,12 +323,13 @@ function ErrorsTab({ meta }) {
 // ---------------------------------------------------------------- 逐年测量
 
 function MeasureTab({ meta }) {
+  const { t } = useI18n();
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
   useEffect(() => { api.labMeasure({}).then(setData).catch(setErr); }, []);
 
   if (err) return <ErrorBox error={err} />;
-  if (!data) return <Loading text="测量中…" />;
+  if (!data) return <Loading text={t('lab.measure.measuring')} />;
 
   const ha = data.homeAdvantage;
   const first = ha[0];
@@ -341,28 +339,28 @@ function MeasureTab({ meta }) {
   return (
     <>
       <div className="grid cols-4" style={{ marginBottom: 14 }}>
-        <StatTile label={`${first?.season} 主场优势`} value={`${first?.homeAdvantage.toFixed(2)} 分`} />
-        <StatTile label={`${last?.season} 主场优势`} value={`${last?.homeAdvantage.toFixed(2)} 分`} />
+        <StatTile label={t('lab.measure.haOf', { season: first?.season })} value={t('lab.pts', { v: first?.homeAdvantage.toFixed(2) })} />
+        <StatTile label={t('lab.measure.haOf', { season: last?.season })} value={t('lab.pts', { v: last?.homeAdvantage.toFixed(2) })} />
         <StatTile
-          label="四年变化"
+          label={t('lab.measure.change')}
           value={signed((last?.homeAdvantage ?? 0) - (first?.homeAdvantage ?? 0), 2)}
-          hint="主场优势在持续下降，这是 NBA 近年公认的现象"
+          hint={t('lab.measure.changeHint')}
         />
-        <StatTile label="模型当前采用" value={`${meta.defaults.homeAdv} 分`} />
+        <StatTile label={t('lab.measure.modelUses')} value={t('lab.pts', { v: meta.defaults.homeAdv })} />
       </div>
 
       <div className="grid cols-2">
         <div className="card">
-          <h2>主场优势逐年测量 <span className="sub">让分差偏置归零的那个值</span></h2>
+          <h2>{t('lab.measure.haTitle')} <span className="sub">{t('lab.measure.haSub')}</span></h2>
           <DataTable
             rows={ha}
             rowKey={(r) => r.season}
             initialSort={{ key: 'season', dir: 'asc' }}
             columns={[
-              { key: 'season', label: '赛季', align: 'left', width: 96 },
-              { key: 'n', label: '场次', width: 70 },
+              { key: 'season', label: t('lab.col.season'), align: 'left', width: 96 },
+              { key: 'n', label: t('lab.col.games'), width: 70 },
               {
-                key: 'homeAdvantage', label: '主场优势', width: 110,
+                key: 'homeAdvantage', label: t('lab.measure.colHa'), width: 110,
                 render: (r) => (
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                     <span className="mono" style={{ width: 40, textAlign: 'right' }}>{r.homeAdvantage.toFixed(2)}</span>
@@ -375,37 +373,36 @@ function MeasureTab({ meta }) {
                   </span>
                 ),
               },
-              { key: 'homeWinPct', label: '主场胜率', width: 88, render: (r) => pct(r.homeWinPct, 1) },
+              { key: 'homeWinPct', label: t('lab.measure.colHomeWin'), width: 88, render: (r) => pct(r.homeWinPct, 1) },
             ]}
           />
           <p className="note" style={{ marginTop: 10 }}>
-            这个测量直接改进了模型：原来写死的 2.4 分是 2022-23 的水平，
-            导致最近两个赛季系统性高估主队（分差偏置 +0.79）。改成 1.6 之后偏置归零。
+            {t('lab.measure.haNote')}
           </p>
         </div>
 
         <div className="card">
-          <h2>休息天数的真实收益 <span className="sub">实测 vs 模型里写的</span></h2>
+          <h2>{t('lab.measure.restTitle')} <span className="sub">{t('lab.measure.restSub')}</span></h2>
           <DataTable
             rows={data.rest.map((r) => ({ ...r, hard: hard[r.days] ?? 0.5 }))}
             rowKey={(r) => r.days}
             initialSort={{ key: 'days', dir: 'asc' }}
             columns={[
               {
-                key: 'days', label: '休息', align: 'left', width: 88,
-                render: (r) => (r.days === 0 ? <span className="neg">背靠背</span> : `休 ${r.days} 天`),
+                key: 'days', label: t('lab.measure.colRest'), align: 'left', width: 88,
+                render: (r) => (r.days === 0 ? <span className="neg">{t('lab.measure.b2b')}</span> : t('lab.measure.restDays', { count: r.days })),
               },
-              { key: 'n', label: '样本', width: 74 },
+              { key: 'n', label: t('lab.measure.colSample'), width: 74 },
               {
-                key: 'effect', label: '实测效应', width: 90,
-                render: (r) => <b className={signClass(r.effect)}>{signed(r.effect, 2)} 分</b>,
+                key: 'effect', label: t('lab.measure.colEffect'), width: 90,
+                render: (r) => <b className={signClass(r.effect)}>{t('lab.pts', { v: signed(r.effect, 2) })}</b>,
               },
               {
-                key: 'hard', label: '表里写的', width: 84,
+                key: 'hard', label: t('lab.measure.colHard'), width: 84,
                 render: (r) => <span className="dim">{signed(r.hard, 2)}</span>,
               },
               {
-                key: 'ratio', label: '低估倍数', width: 84,
+                key: 'ratio', label: t('lab.measure.colRatio'), width: 84,
                 value: (r) => (r.hard ? Math.abs(r.effect / r.hard) : 0),
                 render: (r) => (r.hard
                   ? <span className="mono">{(r.effect / r.hard).toFixed(2)}×</span>
@@ -414,8 +411,7 @@ function MeasureTab({ meta }) {
             ]}
           />
           <p className="note" style={{ marginTop: 10 }}>
-            表的<b>形状</b>是对的（背靠背是惩罚、多休息是收益、三天以后见顶），
-            但<b>幅度</b>普遍估小了约 1.8 倍。背靠背实测 −1.98 分，原来写的是 −1.1。
+            {t('lab.measure.restNote1')}<b>{t('lab.measure.shape')}</b>{t('lab.measure.restNote2')}<b>{t('lab.measure.magnitude')}</b>{t('lab.measure.restNote3')}
           </p>
         </div>
       </div>
@@ -426,8 +422,11 @@ function MeasureTab({ meta }) {
 // ---------------------------------------------------------------- 反事实
 
 function WhatIfTab({ meta, teams, teamById }) {
-  const sorted = useMemo(() => [...teams].sort((a, b) => a.cn.localeCompare(b.cn, 'zh')), [teams]);
-  const [teamId, setTeamId] = useState(sorted[0]?.teamId);
+  const { t, fmt } = useI18n();
+  // 下拉框按当前语言排序；默认球队仍取中文排序的第一支，保证中英文打开同一支
+  const sorted = useMemo(() => fmt.sortTeams(teams), [teams, fmt]);
+  const defaultTeam = useMemo(() => [...teams].sort((a, b) => a.cn.localeCompare(b.cn, 'zh'))[0], [teams]);
+  const [teamId, setTeamId] = useState(defaultTeam?.teamId);
   const [season, setSeason] = useState(meta.seasons.at(-1));
   const [delta, setDelta] = useState(3);
   const [res, setRes] = useState(null);
@@ -452,19 +451,19 @@ function WhatIfTab({ meta, teams, teamById }) {
       <div className="card">
         <div className="toolbar" style={{ marginBottom: 0 }}>
           <div className="field">
-            <label>球队</label>
+            <label>{t('lab.whatif.team')}</label>
             <select value={teamId} onChange={(e) => setTeamId(Number(e.target.value))} style={{ minWidth: 168 }}>
-              {sorted.map((t) => <option key={t.teamId} value={t.teamId}>{t.cn}</option>)}
+              {sorted.map((tm) => <option key={tm.teamId} value={tm.teamId}>{fmt.teamName(tm)}</option>)}
             </select>
           </div>
           <div className="field">
-            <label>赛季</label>
+            <label>{t('lab.col.season')}</label>
             <select value={season} onChange={(e) => setSeason(e.target.value)}>
               {meta.seasons.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
           <div className="field" style={{ flex: 1, minWidth: 240 }}>
-            <label>假如这支球队全季强 / 弱 <b className="mono">{signed(delta, 1)}</b> 分</label>
+            <label>{t('lab.whatif.ifPre')}<b className="mono">{signed(delta, 1)}</b>{t('lab.whatif.ifPost')}</label>
             <input
               type="range" min="-8" max="8" step="0.5"
               value={delta}
@@ -474,43 +473,38 @@ function WhatIfTab({ meta, teams, teamById }) {
         </div>
       </div>
 
-      {!res ? <Loading text={busy ? '重放整个赛季…' : '加载中…'} /> : (
+      {!res ? <Loading text={busy ? t('lab.whatif.replayingSeason') : t('common.loading')} /> : (
         <>
           <div className="grid cols-4" style={{ marginBottom: 14 }}>
             <div className="tile">
-              <div className="k">球队</div>
+              <div className="k">{t('lab.whatif.team')}</div>
               <div style={{ marginTop: 7 }}>
                 <TeamCell team={team} size={28} showAbbr={false} />
               </div>
             </div>
-            <StatTile label="真实评级下的期望胜场" value={res.baseExpectedWins} unit={` / ${res.n}`} />
+            <StatTile label={t('lab.whatif.baseWins')} value={res.baseExpectedWins} unit={` / ${res.n}`} />
             <StatTile
-              label={`强/弱 ${signed(delta, 1)} 分之后`}
+              label={t('lab.whatif.afterDelta', { delta: signed(delta, 1) })}
               value={res.altExpectedWins}
               unit={` / ${res.n}`}
             />
             <StatTile
-              label="胜场变化"
+              label={t('lab.whatif.winsChange')}
               value={signed(res.winsDelta, 1)}
-              hint={`${res.flippedGames} 场比赛的预测胜负方向被改变`}
+              hint={t('lab.whatif.flipped', { count: res.flippedGames })}
             />
           </div>
 
           <div className="card">
-            <h2>换算关系</h2>
+            <h2>{t('lab.whatif.convTitle')}</h2>
             <p className="note">
-              {team?.cn} 在 {season} 赛季，每 1 分净胜分约合{' '}
-              <b>{delta ? Math.abs(res.winsDelta / delta).toFixed(2) : '—'}</b> 个胜场。
-              公认的经验法则是 2.7 —— 这是我们用自己的数据独立测出来的，落在同一量级。
+              {t('lab.whatif.conv1', { team: fmt.teamName(team), season })}
+              <b>{delta ? Math.abs(res.winsDelta / delta).toFixed(2) : '—'}</b>{t('lab.whatif.conv2')}
             </p>
             <div className="divider" />
             <p className="note">
-              <b>这个结果要这样读</b>：它是「模型认为会怎样」，不是「历史真的会怎样」。
-              我们改的是模型对这支球队的评级，不是真实比赛结果——真实结果无法反事实。
-              把它当成「这么大的实力差距，在这份赛程下值多少胜场」的换算器，
-              而不是平行宇宙的预言。<br />
-              重放是全季持续的：加成加在每一场的实力计算里，而不是只在开赛日调一次评级
-              （那样会被赛季中的滚动更新冲掉，+3 分只剩 +2.4 胜）。
+              <b>{t('lab.whatif.readTitle')}</b>{t('lab.whatif.read1')}<br />
+              {t('lab.whatif.read2')}
             </p>
           </div>
         </>
@@ -529,6 +523,7 @@ function WhatIfTab({ meta, teams, teamById }) {
  * 所以三块内容都保留了对我们不利的数字。
  */
 function MarketTab({ meta }) {
+  const { t } = useI18n();
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
 
@@ -541,98 +536,100 @@ function MarketTab({ meta }) {
     return (
       <div className="card">
         <p className="note">
-          还没有历史盘口。运行一次 <code>npm run odds:history</code> 抓取，
-          再运行 <code>npm run dataset</code> 并进数据集即可。
-          数据来自 ESPN 的公开接口，不需要 api key。
+          {t('lab.market.noOdds1')}<code>npm run odds:history</code>{t('lab.market.noOdds2')}<code>npm run dataset</code>{t('lab.market.noOdds3')}
         </p>
       </div>
     );
   }
   if (err) return <ErrorBox error={err} />;
-  if (!data) return <Loading text="正在与历史收盘盘口对账…" />;
+  if (!data) return <Loading text={t('lab.market.loading')} />;
   if (!data.available) {
-    return <div className="card"><p className="note">这批比赛没有盘口数据。</p></div>;
+    return <div className="card"><p className="note">{t('lab.market.noGames')}</p></div>;
   }
 
   const { model, marketModel, agreement, ats } = data;
   const books = Object.entries(meta.odds.providers ?? {})
-    .sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v} 场`).join('、');
+    .sort((a, b) => b[1] - a[1]).map(([k, v]) => t('lab.market.bookGames', { name: k, count: v })).join(t('lab.listSep'));
 
   return (
     <>
       <div className="grid cols-4" style={{ marginBottom: 14 }}>
         <StatTile
-          abbr="模型" label="胜负命中率" value={pct(model.accuracy)}
-          hint={`${data.n} 场有盘口的比赛`}
+          abbr={t('lab.market.abbrModel')} label={t('lab.market.winAcc')} value={pct(model.accuracy)}
+          hint={t('lab.market.withLines', { count: data.n })}
         />
         <StatTile
-          abbr="盘口" label="胜负命中率" value={pct(marketModel.accuracy)}
-          hint="同一批比赛，用去抽水后的钱线判断胜负"
+          abbr={t('lab.market.abbrMarket')} label={t('lab.market.winAcc')} value={pct(marketModel.accuracy)}
+          hint={t('lab.market.sameGames')}
         />
         <StatTile
-          abbr="Δ" label="差距" value={signed(data.accuracyGap * 100, 1)} unit=" pp"
+          abbr="Δ" label={t('lab.market.gap')} value={signed(data.accuracyGap * 100, 1)} unit=" pp"
           hint={data.mcnemar.significant
-            ? `McNemar χ²=${data.mcnemar.chi2}，差异显著（p<0.05）`
-            : `McNemar χ²=${data.mcnemar.chi2}，差异不显著`}
+            ? t('lab.market.mcSig', { chi2: data.mcnemar.chi2 })
+            : t('lab.market.mcNotSig', { chi2: data.mcnemar.chi2 })}
         />
         <StatTile
-          abbr="MAE" label="分差误差差距" value={signed(data.maeGap, 2)} unit=" 分"
-          hint={`模型 ${model.marginMae} / 盘口 ${marketModel.marginMae}`}
+          abbr="MAE" label={t('lab.market.maeGap')} value={signed(data.maeGap, 2)} unit={t('lab.unit.pts')}
+          hint={t('lab.market.maeHint', { model: model.marginMae, market: marketModel.marginMae })}
         />
       </div>
 
       <div className="card" style={{ marginBottom: 14 }}>
-        <h2>结论 <span className="sub">先说难听的</span></h2>
+        <h2>{t('lab.market.verdict')} <span className="sub">{t('lab.market.verdictSub')}</span></h2>
         <p className="note" style={{ marginBottom: 10 }}>
-          在 {data.n} 场比赛上，收盘盘口的胜负命中率是 <b>{pct(marketModel.accuracy)}</b>，
-          我们的模型是 <b>{pct(model.accuracy)}</b>，
-          落后 {Math.abs(data.accuracyGap * 100).toFixed(1)} 个百分点。
+          {t('lab.market.v1a', { count: data.n })}<b>{pct(marketModel.accuracy)}</b>{t('lab.market.v1b')}<b>{pct(model.accuracy)}</b>{t('lab.market.v1c', { gap: Math.abs(data.accuracyGap * 100).toFixed(1) })}
+          {t('common.sentenceJoin')}
           {data.mcnemar.significant
-            ? `这个差距是显著的——只看两边判断不同的 ${data.mcnemar.onlyModel + data.mcnemar.onlyMarket} 场，模型独对 ${data.mcnemar.onlyModel} 场，盘口独对 ${data.mcnemar.onlyMarket} 场。`
-            : '不过这个差距在统计上不显著。'}
+            ? t('lab.market.sig', { count: data.mcnemar.onlyModel + data.mcnemar.onlyMarket, onlyModel: data.mcnemar.onlyModel, onlyMarket: data.mcnemar.onlyMarket })
+            : t('lab.market.notSig')}
         </p>
         <p className="note">
-          更要紧的是让分盘：模型相对盘口选边的命中率是 <b>{pct(ats.all.rate)}</b>
-          （{ats.all.win} 胜 {ats.all.lose} 负 {ats.all.push} 走盘），
-          低于 -110 抽水下 <b>{pct(ats.breakEven)}</b> 的打平线。
-          结论很直接——<b>模型相对市场没有可利用的优势，分歧不构成下注建议。</b>
-          盘口在这里的价值是当标尺，不是当提款机。
+          {t('lab.market.ats1')}<b>{pct(ats.all.rate)}</b>{t('lab.market.ats2', { win: ats.all.win, lose: ats.all.lose, push: ats.all.push })}<b>{pct(ats.breakEven)}</b>{t('lab.market.ats3')}<b>{t('lab.market.atsVerdict')}</b>
+          {t('common.sentenceJoin')}
+          {t('lab.market.ats4')}
         </p>
       </div>
 
       <div className="grid cols-2">
         <div className="card">
-          <h2>分歧时谁对 <span className="sub">共 {agreement.disagree} 场分歧</span></h2>
+          <h2>{t('lab.market.whoRight')} <span className="sub">{t('lab.market.disagreeCount', { count: agreement.disagree })}</span></h2>
           <div className="grid cols-3" style={{ marginBottom: 12 }}>
             <StatTile
-              label="意见一致" value={agreement.agree} unit=" 场"
-              hint={`这些比赛命中率 ${pct(agreement.agreeAccuracy)}`}
+              label={t('lab.market.agree')} value={agreement.agree} unit={t('common.unit.games', { count: agreement.agree })}
+              hint={t('lab.market.agreeAcc', { v: pct(agreement.agreeAccuracy) })}
             />
-            <StatTile label="模型对" value={agreement.modelRight} unit=" 场" />
-            <StatTile label="盘口对" value={agreement.marketRight} unit=" 场" />
+            <StatTile label={t('lab.market.modelRight')} value={agreement.modelRight} unit={t('common.unit.games', { count: agreement.modelRight })} />
+            <StatTile label={t('lab.market.marketRight')} value={agreement.marketRight} unit={t('common.unit.games', { count: agreement.marketRight })} />
           </div>
           <p className="note">
-            两边意见一致的 {agreement.agree} 场里命中率有 {pct(agreement.agreeAccuracy)}——
-            容易的比赛谁都会做。真正的分水岭是那 {pct(agreement.disagreeRate)} 的分歧场次，
-            模型在其中只赢下 {pct(agreement.modelWinsWhenDisagree)}。
+            {t('lab.market.agreeNote', {
+              count: agreement.agree,
+              acc: pct(agreement.agreeAccuracy),
+              rate: pct(agreement.disagreeRate),
+              win: pct(agreement.modelWinsWhenDisagree),
+            })}
           </p>
         </div>
 
         <div className="card">
-          <h2>按分歧大小看让分命中率</h2>
+          <h2>{t('lab.market.byEdge')}</h2>
           <DataTable
             rows={ats.byEdge}
-            rowKey={(r) => r.label}
+            rowKey={(r) => r.key}
             initialSort={{ key: 'label', dir: 'asc' }}
             columns={[
-              { key: 'label', label: '模型与盘口分歧', align: 'left', width: 116 },
-              { key: 'n', label: '场次', width: 56 },
               {
-                key: 'rate', label: '让分命中', width: 76,
+                key: 'label', label: t('lab.market.colEdge'), align: 'left', width: 116,
+                value: (r) => EDGE_ORDER.indexOf(r.key),
+                render: (r) => t(`srv.lab.edge.${r.key}`),
+              },
+              { key: 'n', label: t('lab.col.games'), width: 56 },
+              {
+                key: 'rate', label: t('lab.market.colCover'), width: 76,
                 render: (r) => <span className="mono">{pct(r.rate)}</span>,
               },
               {
-                key: 'edgeOverBreakEven', label: '相对打平线', width: 88,
+                key: 'edgeOverBreakEven', label: t('lab.market.colVsBreakEven'), width: 88,
                 render: (r) => (
                   <span className={signClass(r.edgeOverBreakEven)}>
                     {signed(r.edgeOverBreakEven * 100, 1)} pp
@@ -642,76 +639,73 @@ function MarketTab({ meta }) {
             ]}
           />
           <p className="note" style={{ marginTop: 8 }}>
-            如果模型真有优势，分歧越大的那几档应该越高于打平线。实际上没有这个趋势——
-            这正是"没有优势"的样子，而不是"优势藏在某一档里"。
+            {t('lab.market.edgeNote')}
           </p>
         </div>
       </div>
 
       <div className="card" style={{ marginTop: 14 }}>
-        <h2>逐年</h2>
+        <h2>{t('lab.market.byYear')}</h2>
         <DataTable
           rows={data.bySeason}
           rowKey={(r) => r.season}
           initialSort={{ key: 'season', dir: 'asc' }}
           columns={[
-            { key: 'season', label: '赛季', align: 'left', width: 86 },
-            { key: 'n', label: '场次', width: 60 },
-            { key: 'modelAccuracy', label: '模型', width: 70, render: (r) => pct(r.modelAccuracy) },
-            { key: 'marketAccuracy', label: '盘口', width: 70, render: (r) => pct(r.marketAccuracy) },
+            { key: 'season', label: t('lab.col.season'), align: 'left', width: 86 },
+            { key: 'n', label: t('lab.col.games'), width: 60 },
+            { key: 'modelAccuracy', label: t('lab.market.abbrModel'), width: 70, render: (r) => pct(r.modelAccuracy) },
+            { key: 'marketAccuracy', label: t('lab.market.abbrMarket'), width: 70, render: (r) => pct(r.marketAccuracy) },
             {
-              key: 'accuracyGap', label: '差距', width: 104,
+              key: 'accuracyGap', label: t('lab.market.gap'), width: 104,
               render: (r) => (
                 <span className={signClass(r.accuracyGap)}>
                   {signed(r.accuracyGap * 100, 1)} pp
-                  {!r.significant && <span className="dim" title="McNemar 检验不显著"> ·不显著</span>}
+                  {!r.significant && <span className="dim" title={t('lab.market.nsTip')}>{t('lab.market.ns')}</span>}
                 </span>
               ),
             },
-            { key: 'modelMae', label: '模型 MAE', width: 82, render: (r) => num(r.modelMae, 2) },
-            { key: 'marketMae', label: '盘口 MAE', width: 82, render: (r) => num(r.marketMae, 2) },
-            { key: 'ats', label: '让分命中', width: 78, render: (r) => pct(r.ats) },
+            { key: 'modelMae', label: t('lab.market.modelMae'), width: 82, render: (r) => num(r.modelMae, 2) },
+            { key: 'marketMae', label: t('lab.market.marketMae'), width: 82, render: (r) => num(r.marketMae, 2) },
+            { key: 'ats', label: t('lab.market.colCover'), width: 78, render: (r) => pct(r.ats) },
           ]}
         />
       </div>
 
       <div className="card" style={{ marginTop: 14 }}>
-        <h2>被盘口拉开差距的地方 <span className="sub">这才是能改进的线索</span></h2>
+        <h2>{t('lab.market.gapTitle')} <span className="sub">{t('lab.market.gapSub')}</span></h2>
         <DataTable
           rows={data.gapSlices}
-          rowKey={(r) => r.label}
+          rowKey={(r) => r.key}
           initialSort={{ key: 'accuracyGap', dir: 'asc' }}
           columns={[
-            { key: 'label', label: '比赛类型', align: 'left', width: 168 },
-            { key: 'n', label: '场次', width: 60 },
-            { key: 'modelAccuracy', label: '模型', width: 70, render: (r) => pct(r.modelAccuracy) },
-            { key: 'marketAccuracy', label: '盘口', width: 70, render: (r) => pct(r.marketAccuracy) },
             {
-              key: 'accuracyGap', label: '命中率差', width: 84,
+              key: 'label', label: t('lab.col.gameType'), align: 'left', width: 168,
+              value: (r) => t(`srv.lab.slice.${r.key}`),
+            },
+            { key: 'n', label: t('lab.col.games'), width: 60 },
+            { key: 'modelAccuracy', label: t('lab.market.abbrModel'), width: 70, render: (r) => pct(r.modelAccuracy) },
+            { key: 'marketAccuracy', label: t('lab.market.abbrMarket'), width: 70, render: (r) => pct(r.marketAccuracy) },
+            {
+              key: 'accuracyGap', label: t('lab.market.accGap'), width: 84,
               render: (r) => (
                 <span className={signClass(r.accuracyGap)}>{signed(r.accuracyGap * 100, 1)} pp</span>
               ),
             },
             {
-              key: 'maeGap', label: '分差误差差', width: 92,
+              key: 'maeGap', label: t('lab.market.maeGapCol'), width: 92,
               render: (r) => <span className={signClass(-r.maeGap)}>{signed(r.maeGap, 2)}</span>,
             },
           ]}
         />
         <p className="note" style={{ marginTop: 8 }}>
-          差距最大的那几类，就是模型里最该改的地方——盘口能看到我们看不到的东西
-          （当天的轮换安排、临场伤情、球队的动机），差距的大小等于这些信息值多少分。
+          {t('lab.market.gapNote')}
         </p>
       </div>
 
       <div className="card" style={{ marginTop: 14 }}>
-        <h2>数据来源</h2>
+        <h2>{t('lab.market.sourceTitle')}</h2>
         <p className="note">
-          盘口来自 ESPN 的公开接口（不需要 api key），覆盖 {meta.odds.games} 场
-          （{pct(data.coverage)}）。各年份的默认博彩商不同：{books || '—'}。
-          不同博彩商的让分通常差 0.5 以内，但这是真实存在的口径差异，不当作同一个源看待。
-          胜负判断优先用两边钱线去抽水后的概率，缺钱线时才退回让分折算——
-          两边用的是同一把尺子，比较才公平。
+          {t('lab.market.source', { count: meta.odds.games, cov: pct(data.coverage), books: books || '—' })}
         </p>
       </div>
     </>
