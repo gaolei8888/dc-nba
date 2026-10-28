@@ -83,9 +83,16 @@ export function submitLivePicks(db, playerId, picks, { games, quote, dataAt = nu
       const q = quote(g);
       const c = conf01(p.conf);
       const vals = [p.side, c, q.pHome, q.homeElo ?? null, q.awayElo ?? null, dataAt, at];
-      if (!Number(upd.run(...vals, playerId, gameId).changes)) {
-        ins.run(playerId, gameId, g.date, iso(Date.parse(g.dateTimeUtc)), g.homeId, g.awayId,
-          p.side, c, q.pHome, q.homeElo ?? null, q.awayElo ?? null, dataAt, at, at);
+      try {
+        if (!Number(upd.run(...vals, playerId, gameId).changes)) {
+          ins.run(playerId, gameId, g.date, iso(Date.parse(g.dateTimeUtc)), g.homeId, g.awayId,
+            p.side, c, q.pHome, q.homeElo ?? null, q.awayElo ?? null, dataAt, at, at);
+        }
+      } catch (e) {
+        // 库里按存下的开赛时间兜底（比赛改期、或恰好卡在开赛那一刻）：只拒这一场，不连累同批其他选择
+        if (!/开赛后不能改/.test(e.message)) throw e;
+        rejected.push({ gameId, reason: 'locked' });
+        continue;
       }
       saved += 1;
     }

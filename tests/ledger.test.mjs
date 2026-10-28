@@ -143,6 +143,7 @@ test('--late：已开赛的不记；赔率快照不新（> 2 小时）或晚于�
   const stale = new Date(LATE_NOW - 8.5 * 3600e3).toISOString();   // 前一晚 22:00 的快照（刷新失败时）
   assert.equal(captureRows(games, { now: LATE_NOW, run: 'late', oddsFetchedAt: stale }).length, 0);
   assert.equal(captureRows(games, { now: LATE_NOW, run: 'late', oddsFetchedAt: null }).length, 0, '不知道快照时间就不算临近收盘');
+  assert.equal(captureRows(games, { now: LATE_NOW, run: 'late', oddsFetchedAt: new Date(LATE_NOW + 60e3).toISOString() }).length, 0, '快照时间在未来（时钟错）不认');
   const afterTip = new Date(LATE_NOW + 3600e3).toISOString();
   assert.equal(captureRows([lateGame('g', 0.7, 0.5)], { now: LATE_NOW + 3600e3 - 1, run: 'late', oddsFetchedAt: afterTip }).length, 0, '开赛后的价是滚球价');
 });

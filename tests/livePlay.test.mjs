@@ -102,11 +102,17 @@ test('库里也锁：不能删；已开赛的行改不了（按真实时钟）�
   assert.throws(() => db.exec("DELETE FROM live_picks WHERE game_id = 'g1'"), /不能删除/);
   assert.throws(() => db.exec("UPDATE live_picks SET created_at = 'x'"), /开赛后不能改/);
   assert.throws(() => db.exec("UPDATE live_picks SET tipoff_utc = '2100-01-01T00:00:00.000Z'"), /开赛后不能改/);
-  db.exec(`INSERT INTO live_picks (player_id, game_id, game_date, tipoff_utc, home_id, away_id, side, conf, model_p_home,
-    created_at, updated_at) VALUES ('p1', 'old', '2020-01-01', '2020-01-02T00:00:00.000Z', 1, 2, 'home', 0.6, 0.5, 'a', 'a')`);
+  const oldRow = `INSERT INTO live_picks (player_id, game_id, game_date, tipoff_utc, home_id, away_id, side, conf, model_p_home,
+    created_at, updated_at) VALUES ('p1', 'old', '2020-01-01', '2020-01-02T00:00:00.000Z', 1, 2, 'home', 0.6, 0.5, 'a', 'a')`;
+  assert.throws(() => db.exec(oldRow), /开赛后不能改/, '已开赛的比赛连第一次插入都不行');
+  // 造一条已开赛的旧行（模拟开赛前存下、如今已过点），再把迁移重跑一遍——IF NOT EXISTS 幂等
+  db.exec('DROP TRIGGER live_picks_insert_locked');
+  db.exec(oldRow);
+  db.exec(LIVE_SCHEMA);
   assert.throws(() => db.exec("UPDATE live_picks SET side = 'away' WHERE game_id = 'old'"), /开赛后不能改/);
-  db.exec(`INSERT OR REPLACE INTO live_picks (player_id, game_id, game_date, tipoff_utc, home_id, away_id, side, conf, model_p_home,
-    created_at, updated_at) VALUES ('p1', 'old', '2020-01-01', '2020-01-02T00:00:00.000Z', 1, 2, 'away', 0.95, 0.5, 'b', 'b')`);
+  // 已开赛：被插入锁直接拒（或被防重复触发器忽略）——哪种都改不动原行
+  try { db.exec(`INSERT OR REPLACE INTO live_picks (player_id, game_id, game_date, tipoff_utc, home_id, away_id, side, conf, model_p_home,
+    created_at, updated_at) VALUES ('p1', 'old', '2020-01-01', '2020-01-02T00:00:00.000Z', 1, 2, 'away', 0.95, 0.5, 'b', 'b')`); } catch (e) { assert.match(e.message, /开赛后不能改/); }
   assert.equal(livePickRows(db, 'p1').find((x) => x.game_id === 'old').side, 'home', 'INSERT OR REPLACE 也绕不过去');
 });
 
@@ -155,4 +161,15 @@ test('比赛日：最早一个还有未开赛比赛的美东日期在前，当�
   const days = slateDays(sched, T0);
   assert.deepEqual(days.map((d) => [d.date, d.games, d.open]), [['2099-01-01', 2, 1], ['2099-01-02', 1, 1]]);
   assert.equal(days[0].nextTipoff, new Date(T0 + 2 * 3600e3).toISOString());
+});
+
+test('库里的锁拦下来的（比赛改期：存的开赛时间已过）只拒那一场，同批其他选择照存', () => {
+  const db = fresh();
+  db.exec('DROP TRIGGER live_picks_insert_locked');
+  db.exec(`INSERT INTO live_picks (player_id, game_id, game_date, tipoff_utc, home_id, away_id, side, conf, model_p_home,
+    created_at, updated_at) VALUES ('p1', 'g1', '2020-01-01', '2020-01-02T00:00:00.000Z', 1, 2, 'home', 0.6, 0.5, 'a', 'a')`);
+  db.exec(LIVE_SCHEMA);
+  const r = submit(db, [{ gameId: 'g1', side: 'away', conf: 0.9 }, { gameId: 'g2', side: 'home', conf: 0.6 }], T0 - 3600e3);
+  assert.deepEqual(r, { saved: 1, rejected: [{ gameId: 'g1', reason: 'locked' }] });
+  assert.equal(livePickRows(db, 'p1').find((x) => x.game_id === 'g1').side, 'home');
 });

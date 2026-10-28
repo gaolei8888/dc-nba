@@ -47,7 +47,7 @@ export function captureRows(slate, { now = Date.now(), run = 'early', windowH, o
   const rules = RULES.filter((r) => r.late === late);
   const win = (windowH ?? (late ? LATE_WINDOW_H : WINDOW_H)) * 3600e3;
   const oddsAt = Date.parse(oddsFetchedAt);
-  if (late && !(now - oddsAt <= LATE_MAX_ODDS_AGE_H * 3600e3)) return [];
+  if (late && !(now - oddsAt <= LATE_MAX_ODDS_AGE_H * 3600e3 && oddsAt <= now)) return [];
   const at = new Date(now).toISOString();
   const rows = [];
   for (const g of slate) {

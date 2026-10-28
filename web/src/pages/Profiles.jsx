@@ -19,9 +19,12 @@ export default function Profiles() {
   const [lbMode, setLbMode] = useState('practice');
 
   const reloadBoard = () => {
-    if (!leaderboardOn) return;
+    if (!leaderboardOn) return undefined;
+    let alive = true;
     setBoard(null);
-    fetchLeaderboard({ min: 1, mode: lbMode }).then(setBoard);
+    // 快速切换两个榜时，晚到的旧响应不能盖掉当前榜
+    fetchLeaderboard({ min: 1, mode: lbMode }).then((b) => alive && setBoard(b));
+    return () => { alive = false; };
   };
   useEffect(reloadBoard, [leaderboardOn, cloud?.playerId, lbMode]);
 

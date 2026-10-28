@@ -157,6 +157,9 @@ CREATE INDEX IF NOT EXISTS idx_live_picks_game ON live_picks(game_id);
 CREATE TRIGGER IF NOT EXISTS live_picks_dup BEFORE INSERT ON live_picks
 WHEN EXISTS (SELECT 1 FROM live_picks WHERE player_id = NEW.player_id AND game_id = NEW.game_id)
 BEGIN SELECT RAISE(IGNORE); END;
+CREATE TRIGGER IF NOT EXISTS live_picks_insert_locked BEFORE INSERT ON live_picks
+WHEN NEW.tipoff_utc <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+BEGIN SELECT RAISE(ABORT, 'live_picks：开赛后不能改'); END;
 CREATE TRIGGER IF NOT EXISTS live_picks_no_delete BEFORE DELETE ON live_picks
 BEGIN SELECT RAISE(ABORT, 'live_picks：不能删除'); END;
 CREATE TRIGGER IF NOT EXISTS live_picks_locked BEFORE UPDATE ON live_picks

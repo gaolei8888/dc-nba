@@ -23,7 +23,6 @@ export default function Play() {
   const { setAccent, meta, profileId, cloud } = useApp();
   const [tab, setTab] = useState(null);
   const [live, setLive] = useState(null);
-  const [error, setError] = useState(null);
   const headers = useMemo(() => ({
     'X-Local-Profile': profileId ?? '',
     ...(cloud?.token ? { Authorization: `Bearer ${cloud.token}` } : {}),
@@ -31,7 +30,9 @@ export default function Play() {
 
   useEffect(() => { setAccent(null); }, [setAccent]);
 
-  const loadLive = (date) => api.live({ date }, headers).then(setLive).catch(setError);
+  // 本季实战接口出错不能连累上季回放：降级成「不可用」，回放照常
+  const loadLive = (date) => api.live({ date }, headers).then(setLive)
+    .catch((e) => setLive((cur) => (cur?.available ? cur : { available: false, reason: `加载失败：${e.message}`, days: [] })));
   useEffect(() => { loadLive(live?.date); }, [headers]);
 
   // 默认模式只在第一次拿到数据时定，之后听用户的
@@ -41,7 +42,6 @@ export default function Play() {
     setTab(live.available && next && Date.parse(next) - Date.parse(live.now) < 24 * 3600e3 ? 'live' : 'replay');
   }, [live, tab]);
 
-  if (error) return <ErrorBox error={error} />;
   if (!tab) return <Loading />;
 
   return (
