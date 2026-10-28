@@ -66,9 +66,10 @@ export function scheduleEloGames(scheduleGames, teams) {
 /**
  * 538 风格 Elo：K=20，胜负分差放大系数抑制"垃圾时间"虚高。
  * 传入 initial 可以从已有评级继续迭代——赛季中吸收新结果就靠这个。
+ * homeAdv 只供实验对照（Elo 更新里假定的主场优势，单位 Elo），线上一律用默认值。
  * 返回 { 赛季末 Elo, 逐场轨迹 }。
  */
-export function computeElo(games, { k = 20, initial = null } = {}) {
+export function computeElo(games, { k = 20, initial = null, homeAdv = ELO_HOME_ADV } = {}) {
   const elo = new Map(initial ? Object.entries(initial).map(([id, v]) => [Number(id), v]) : []);
   const history = [];
   const get = (id) => elo.get(id) ?? ELO_BASE;
@@ -76,7 +77,7 @@ export function computeElo(games, { k = 20, initial = null } = {}) {
   for (const g of games) {
     const eh = get(g.home.teamId);
     const ea = get(g.away.teamId);
-    const diff = eh + (g.neutral ? 0 : ELO_HOME_ADV) - ea;
+    const diff = eh + (g.neutral ? 0 : homeAdv) - ea;
     const expHome = 1 / (1 + 10 ** (-diff / 400));
     const mov = Math.abs(g.home.pts - g.away.pts);
     const winnerEloDiff = g.home.win ? diff : -diff;
