@@ -13,6 +13,7 @@ import { fetchInjuries } from '../server/espnClient.mjs';
 import { fetchUpcomingOdds } from '../server/oddsClient.mjs';
 import { buildBacktestDataset } from '../server/dataset.mjs';
 import { impactOf, apply as spmOf, MIN_GP } from '../server/impact.mjs';
+import { shrinkByMinutes, populationMean, MINUTES_SHRINK } from '../server/impactShrink.mjs';
 import { decayedApm } from '../server/rapm.mjs';
 import { replaySeasonPicks } from '../server/replay.mjs';
 import {
@@ -528,6 +529,8 @@ const pick = (o, keys) => Object.fromEntries(keys.map((k) => [k, o[k]]));
  * 上赛季 IMP 本身含近 3 季衰减 APM，所以历史数据完整保留。K=20 的含义是
  * 本季打满 20 场时两季各占一半——这个值**没有验证过**，是按训练门槛取的。
  * 上赛季没有 IMP 的人（新秀等）没有先验兜底，仍要本季满 20 场才给分。
+ * 先验用的是**按上季分钟收缩后**的 IMP（见 main 里的 shrinkByMinutes），本季这一段未另做收缩：
+ * 本季分段统计栏没有历史缓存，验证不了（docs/impact-shrink-continuity-verdict.md）。
  */
 const IMP_PRIOR_GAMES = 20;
 function currentImpact(model, c, prior) {
@@ -591,15 +594,22 @@ async function main() {
     // IMP 是「统计栏模型」与「场上实测 APM」的混合，两半都要现算。
     // APM 用最近几季的五人组合数据做时间衰减，缺数据时退回纯统计栏模型。
     const apm = loadDecayedApm(impactModel);
+    // 按上季出场分钟向人群均值收缩（实验 1，docs/impact-shrink-continuity-verdict.md）：
+    // 480 分钟的 Thybulle 不该比 2300 分钟的东契奇高。收缩前的值留在 impactUnshrunk 供核对。
+    const mu = populationMean(players.map((p) => spmOf(impactModel, p)));
     let n = 0;
     let withApm = 0;
     for (const p of players) {
       const a = apm?.get(p.playerId)?.apm ?? null;
       const v = impactOf(impactModel, p, a);
-      if (v !== null) { p.impact = v; n += 1; if (a !== null) withApm += 1; }
+      if (v !== null) {
+        p.impactUnshrunk = v;
+        p.impact = Math.round(shrinkByMinutes(v, (p.gp ?? 0) * (p.min ?? 0), mu) * 100) / 100;
+        n += 1; if (a !== null) withApm += 1;
+      }
     }
     log(`综合影响力指标：${n} 名球员（其中 ${withApm} 人有实测 APM，`
-      + `模型训练于 ${(impactModel.seasons ?? []).join('、')}）`);
+      + `模型训练于 ${(impactModel.seasons ?? []).join('、')}；按分钟收缩 k=${MINUTES_SHRINK.k} 向均值 ${mu.toFixed(2)}）`);
     if (!apm) console.warn('  缺少 data/history/lineups_*.json，IMP 退化为纯统计栏模型');
   } else {
     console.warn('  缺少 data/impact-model.json，跳过综合影响力指标（跑 npm run impact:fit 生成）');
