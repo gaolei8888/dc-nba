@@ -175,7 +175,7 @@ cp data-prev/*.json data/ && docker compose build && docker compose up -d
 | 谁 | 何时（北京） | 做什么 |
 | --- | --- | --- |
 | 服务器 cron（已有三行，不改） | 22:00 / 06:30 / 14:30 | `refresh.sh` 收尾时 `docker exec dc-nba node scripts/shadow.mjs settle` + `capture [--late]`。22:00 / 06:30 各抓 **1 份**官方 PDF（`ak-static.cms.nba.com`，2026-10-28 实测服务器直连 200），镜像里的 `pdftotext` 解析，存进库表 `injury_reports`；14:30 那次不在时点窗口，只结算 |
-| 本机 launchd `cn.tzspace.dc-nba.player-values` | 每天北京 19:15–21:15（本地 04:15 与 05:15 各排一次，按北京日期去重） | `deploy/player-values.sh`：增量抓本季新结束比赛的 PBP（stats.nba.com 只能本机抓），每 7 天重拟合 RAPM，把 `player-values.json` 拿 `.refresh.lock` 推到服务器 `data/`，22:00 那次刷新烤进镜像 |
+| GB10 systemd 用户定时器 `dc-nba-player-values.timer` | 每天北京 19:15 与 20:15（按北京日期去重） | `deploy/player-values.sh`（GB10 `~/dc-nba`，开跑前快进到 origin/master）：增量抓本季新结束比赛的 PBP（stats.nba.com 只能家里宽带抓），每 7 天重拟合 RAPM，把 `player-values.json` 拿 `.refresh.lock` 推到服务器 `data/`，22:00 那次刷新烤进镜像 |
 
 - **冻结参数** `server/injury-params-v1.json`（`npm run injury:lab` 写出，影子期内不改）：λ=2000、minPoss 0.25、本季 1 + 上季 0.5 + 上上季 0.25、
   轮换 = 比赛日之前最近 10 场、β：22:00 **0.60** / 06:30 **0.65**（在 2022–26 四个评估季上合起来选；LOSO 各折 0.50–0.70）、
@@ -185,12 +185,12 @@ cp data-prev/*.json data/ && docker compose build && docker compose up -d
   **用到的报告标注时间必须比 `captured_at` 早至少 15 分钟**（不偷看未来）；某行被拒只丢那一行。报告链最早到前一天 06:30 那次那份（与实验同）。
 - **过期就只记基线**：`player-values.json` 的 RAPM 超过 9 天或轮换超过 3 天（本机几天没开），`r22`/`r0630` 不记，`base` 照记。
 - **请求量**：官方报告每次 capture ≤ 15、每天 ≤ 40（正常每次 1 个；S3 对不存在的文件回 403 AccessDenied XML，按「没有」跳过，别的 403 熔断），
-  熔断状态在 `data-db/injury-fetch-state.json`。本机 PBP：leaguegamelog 1 + commonallplayers 1 + 每场 2 个，
+  熔断状态在 `data-db/injury-fetch-state.json`。PBP：leaguegamelog 1 + commonallplayers 1 + 每场 2 个，
   一周约 50 场 ≈ 100 个，按天跑每天 15–30 个；显式上限每次 180 / 每天 500（与全量 ingest 共享单日计数），单次最多 80 场，剩下的下次续。
 - **页面**：预测总表 → 统计 最下面「影子模式（不影响显示的预测）」卡片，`/api/shadow`。
 - **切换（预注册）**：06:30 方案与基线配对满 300 场、Δ 对数损失 < 0（且没比基线差 0.005 以上）再提出切换，由高磊决定。
 
 演练（本地副本，不碰线上）：`DB_PATH=/tmp/x.db SHADOW_NOW=2026-10-28T14:05:00Z node scripts/shadow.mjs capture`，`… show`。
-本机 launchd：`launchctl list | grep dc-nba`；日志 `~/Library/Logs/dc-nba-player-values.log`。**本机要在本地 04:15–05:15（北京 19:15–21:15）醒着**（睡着会在醒来时补跑，赶不上 22:00 就用前一天的值）。
+GB10（`ssh lei@192.168.1.49`）：`systemctl --user list-timers dc-nba-player-values.timer`；日志 `~/dc-nba-logs/player-values.log`；手动跑 `systemctl --user start dc-nba-player-values.service`。单元文件在 `deploy/systemd/`，node 是用户级 `~/.local/opt/node`（v22）。关机错过的开机补跑，赶不上 22:00 就用前一天的值。Mac 上的 launchd 版已停用（macOS 不让 launchd 读 ~/Documents），plist 挪到 `~/Library/LaunchAgents/disabled/`。
 
 Docker 镜像多了 `poppler-utils`：服务器连 `dl-cdn.alpinelinux.org` 会挂住，Dockerfile 默认换成 `mirrors.aliyun.com`（`APK_MIRROR` 构建参数）。

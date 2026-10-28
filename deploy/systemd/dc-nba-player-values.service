@@ -1,0 +1,21 @@
+# GB10 用户级 systemd 服务：跑 deploy/player-values.sh（增量抓 PBP、每 7 天重拟合 RAPM、推 player-values.json）。
+# 安装（在 GB10 上，lei 已开 linger）：
+#   cp deploy/systemd/dc-nba-player-values.* ~/.config/systemd/user/ && systemctl --user daemon-reload \
+#     && systemctl --user enable --now dc-nba-player-values.timer
+# 手动跑一次：systemctl --user start dc-nba-player-values.service；日志 ~/dc-nba-logs/player-values.log
+[Unit]
+Description=dc-nba player-values (PBP + RAPM -> gpu.tzspace.cn)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/dc-nba
+# node 是用户级安装的 ~/.local/opt/node（官方 v22 tarball），不动系统软件
+Environment=PATH=%h/.local/opt/node/bin:/usr/local/bin:/usr/bin:/bin
+Environment=DC_NBA_AUTO_PULL=1
+Environment=DC_NBA_SSH_KEY=%h/.ssh/dc_nba
+ExecStart=/bin/sh %h/dc-nba/deploy/player-values.sh
+StandardOutput=append:%h/dc-nba-logs/player-values.log
+StandardError=append:%h/dc-nba-logs/player-values.log
+Nice=10
+TimeoutStartSec=3h

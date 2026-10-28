@@ -1,0 +1,12 @@
+# 北京 19:15 与 20:15 各一次（直接按 Asia/Shanghai 写，GB10 本机时区与夏令时都不影响）；
+# 脚本按北京日期去重，14:00 后推过就跳过第二次。Persistent：关机错过的开机后补跑。
+[Unit]
+Description=dc-nba player-values daily (Beijing 19:15 / 20:15)
+
+[Timer]
+OnCalendar=*-*-* 19:15:00 Asia/Shanghai
+OnCalendar=*-*-* 20:15:00 Asia/Shanghai
+Persistent=true
+
+[Install]
+WantedBy=timers.target
