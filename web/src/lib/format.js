@@ -98,11 +98,8 @@ export const bjDateOf = (utc) => (utc ? new Date(Date.parse(utc) + BJ_OFFSET_MS)
 /** 比赛开打时刻 -> 北京时间 "09:30" */
 export const bjTimeOf = (utc) => (utc ? new Date(Date.parse(utc) + BJ_OFFSET_MS).toISOString().slice(11, 16) : '');
 
-/** "YYYY-MM-DD" 加减天数 */
-export const shiftDate = (iso, days) => {
-  const [y, m, d] = iso.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
-};
+// shiftDate 已移到 i18n/fmt.js，这里保留导出给未迁移的页面
+export { shiftDate } from '../i18n/fmt.js';
 
 export const fmtDateShort = (iso) => {
   if (!iso) return '';
