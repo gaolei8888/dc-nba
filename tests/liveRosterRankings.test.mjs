@@ -1,13 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { liveRosterRankings, shrink, projectMinutes, MINUTES, IMPACT_K } from '../server/liveRosterRankings.mjs';
+import { liveRosterRankings, shrink, projectMinutes, MINUTES, IMPACT_K, INJURY_STALE_HOURS } from '../server/liveRosterRankings.mjs';
+import { conditionalMinutes, rotationProbability } from '../server/rotationMinutes.mjs';
 import { fitK, checkpointSamples } from '../scripts/roster-shrinkage.mjs';
 
+// 每队 12 人：真实名单 13–15 人，人太少时「轮换概率 × 上限 38」会凑不满 240，测的就不是常规情形了
+const N = 12;
 function store() {
   return {
     meta: { leagueAvg: { pace: 100 }, fetchedAt: '2026-10-27T15:00:00Z' },
     teams: [1, 2].map((teamId) => ({ teamId, adv: { pace: 100 } })),
-    players: [1, 2].flatMap((teamId) => Array.from({ length: 6 }, (_, i) => ({
+    players: [1, 2].flatMap((teamId) => Array.from({ length: N }, (_, i) => ({
       playerId: teamId * 10 + i, teamId, onRoster: true, name: `Player ${teamId}-${i}`,
       gp: 60, min: 20, impact: teamId === 1 ? 1 : 0,
       cur: { gp: 3, min: 40, impact: teamId === 1 ? 1 : 0 },
@@ -24,7 +27,7 @@ test('ranks the current roster independently of inherited team Elo', () => {
   assert.equal(rows[0].total, 2.5);
   assert.equal(rows[0].legacyTotal, -4);
   assert.equal(rows[0].legacyRank, 2);
-  assert.equal(rows[0].rosterProjection.rotation.reduce((s, p) => s + p.minutes, 0), 240);
+  assert.ok(Math.abs(rows[0].rosterProjection.rotation.reduce((s, p) => s + p.minutes, 0) - 240) < 1e-9);
 });
 
 test('departed players do not contribute and current roles change allocated minutes', () => {
@@ -44,15 +47,62 @@ test('reported absences and manual exclusions redistribute minutes against a fix
   s.injuries.players.push({ teamId: 1, playerId: 10, status: 'out' });
   const absent = liveRosterRankings(s, legacy);
   const a = absent.find((r) => r.teamId === 1);
-  assert.equal(a.rosterProjection.rotation.find((p) => p.playerId === 10).minutes, 0);
+  // ESPN out = 官方 Out：P(出场) ≈ 1%（冻结的 injury-params-v1），不是硬 0
+  const star = a.rosterProjection.rotation.find((p) => p.playerId === 10);
+  assert.ok(star.minutes > 0 && star.minutes < 1);
   assert.ok(a.total < healthy.find((r) => r.teamId === 1).total);
-  assert.equal(absent.find((r) => r.teamId === 2).total, healthy.find((r) => r.teamId === 2).total);
-  const manual = liveRosterRankings(s, legacy, { availability: 'healthy', out: { 1: [10] } });
-  assert.equal(manual.find((r) => r.teamId === 1).total, a.total);
+  assert.ok(a.rosterAdj < 0);
+  // 健康基准不随伤病变：两种模式下 healthyTotal 相同，且等于健康模式的 total
+  assert.equal(a.rosterProjection.healthyTotal, healthy.find((r) => r.teamId === 1).total);
+  // 手动缺阵记硬 0，且不牵动别队（去均值用不含手动缺阵的联盟均值）
+  const manual = liveRosterRankings(s, legacy, { out: { 1: [11] } });
+  assert.equal(manual.find((r) => r.teamId === 1).rosterProjection.rotation.find((p) => p.playerId === 11).minutes, 0);
+  assert.equal(manual.find((r) => r.teamId === 2).total, absent.find((r) => r.teamId === 2).total);
+  const healthyManual = liveRosterRankings(s, legacy, { availability: 'healthy', out: { 1: [10] } });
+  assert.equal(healthyManual.find((r) => r.teamId === 1).rosterProjection.rotation.find((p) => p.playerId === 10).minutes, 0);
+});
+
+test('day-to-day / doubtful players are weighted by the frozen P(plays | status), not treated as fully available', () => {
+  const s = store(); s.players[0].impact = 8; s.players[0].cur.impact = 8;
+  const minutesOf = (status) => {
+    const t = structuredClone(s);
+    if (status) t.injuries.players.push({ teamId: 1, playerId: 10, status });
+    return find(liveRosterRankings(t, legacy), 1, 10).minutes;
+  };
+  const [none, dtd, doubtful, out] = [null, 'dayToDay', 'doubtful', 'out'].map(minutesOf);
+  assert.ok(none > dtd && dtd > doubtful && doubtful > out);
+  assert.ok(Math.abs(dtd / none - 0.5416) < 0.05); // Questionable 0.54（σ 分配让比例不完全线性）
+});
+
+test('league mean of totals is zero in each mode and stale or missing injury snapshots are flagged', () => {
+  const s = store(); s.players[0].impact = 8; s.players[0].cur.impact = 8;
+  s.injuries.players.push({ teamId: 1, playerId: 10, status: 'out' });
+  for (const availability of ['reported', 'healthy']) {
+    const rows = liveRosterRankings(s, legacy, { availability });
+    assert.ok(Math.abs(rows.reduce((a, r) => a + r.total, 0)) < 0.011); // 每队保留两位小数
+  }
+  const fresh = liveRosterRankings(s, legacy)[0].rosterProjection;
+  assert.equal(fresh.injuryStale, false);
+  assert.equal(fresh.injuryLagHours, 0);
+  s.injuries.fetchedAt = new Date(Date.parse(s.meta.fetchedAt) - (INJURY_STALE_HOURS + 1) * 3600e3).toISOString();
+  assert.equal(liveRosterRankings(s, legacy)[0].rosterProjection.injuryStale, true);
+  s.injuries = { fetchedAt: null, players: [] };
+  assert.equal(liveRosterRankings(s, legacy)[0].rosterProjection.injuryStale, true);
+  assert.equal(liveRosterRankings(s, legacy, { availability: 'healthy' })[0].rosterProjection.injuryStale, false);
+});
+
+test('a missing impact model is surfaced instead of silently using the replacement prior', () => {
+  const s = store(); delete s.players[0].impact; s.players[0].cur.impact = null;
+  const r = liveRosterRankings(s, legacy).find((x) => x.teamId === 1);
+  assert.equal(r.rosterProjection.impactModelMissing, true);
+  assert.equal(find([r], 1, 10).impactSource, 'replacement-prior');
+  s.impactModel = { features: ['pts'], mu: [0], sd: [1], beta: [0.1], intercept: 0 };
+  assert.equal(liveRosterRankings(s, legacy)[0].rosterProjection.impactModelMissing, false);
 });
 
 test('marks missing impact and prior-season minutes instead of disguising them as measured forecasts', () => {
   const s = store(); delete s.players[0].impact; s.players[0].cur = null;
+  s.teams[0].cur = { wins: 1, losses: 0 }; // 球队只赛 1 场：0 出场还不算轮换外
   const r = liveRosterRankings(s, legacy).find((r) => r.teamId === 1);
   const p = r.rosterProjection.rotation.find((p) => p.playerId === 10);
   assert.equal(p.fromPrior, true);
@@ -61,15 +111,25 @@ test('marks missing impact and prior-season minutes instead of disguising them a
   assert.ok(r.rosterProjection.knownImpactPct < 1);
 });
 
-test('infeasible available rosters show an unavailable estimate without silently falling back to Elo', () => {
-  const s = store(); s.injuries.players = s.players.filter((p) => p.teamId === 1).slice(0, 2)
-    .map((p) => ({ teamId: 1, playerId: p.playerId, status: 'out' }));
+test('an exhausted rotation is filled at replacement level instead of pushing anyone past the cap', () => {
+  const s = store();
+  const out = { 1: s.players.filter((p) => p.teamId === 1).slice(0, N - 5).map((p) => p.playerId) };
+  const r = liveRosterRankings(s, legacy, { out }).find((x) => x.teamId === 1).rosterProjection;
+  assert.ok(r.rotation.every((p) => p.minutes <= 38 + 1e-9));
+  assert.ok(r.replacementMinutes > 0);
+  assert.ok(Math.abs(r.rotation.reduce((a, p) => a + p.minutes, 0) + r.replacementMinutes - 240) < 0.01); // replacementMinutes 保留两位小数
+});
+
+test('one team failing does not blank the rest of the league', () => {
+  const s = store(); s.players = s.players.filter((p) => p.teamId !== 1); // 队 1 没有名单
   const rows = liveRosterRankings(s, legacy);
-  const missing = rows.find((r) => r.teamId === 1);
-  assert.equal(missing.total, null);
-  assert.equal(missing.rank, null);
-  assert.match(missing.rosterProjection.error, /capacity/i);
-  assert.equal(rows.at(-1).teamId, 1);
+  const bad = rows.find((r) => r.teamId === 1); const ok = rows.find((r) => r.teamId === 2);
+  assert.equal(bad.total, null);
+  assert.equal(bad.rank, null);
+  assert.match(bad.rosterProjection.error, /rotation players/i);
+  assert.equal(ok.total, 0);
+  assert.equal(ok.rank, 1);
+  assert.equal(ok.rosterProjection.leagueTeams, 1);
 });
 
 // 极简 SPM 模型：SPM = 0.1 × 每 36 分钟得分，便于手算
@@ -98,17 +158,35 @@ test('projected minutes per team game = shrunk MPG x shrunk appearance rate', ()
   assert.equal(projectMinutes(null, null, 0, 4), 0);
 });
 
-test('live board uses team games played for the appearance rate', () => {
+test('live board projects minutes conditional on playing; appearances only move the rotation probability', () => {
   const s = store();
   s.teams[0].cur = { wins: 3, losses: 1 };
   s.players[1].cur = { gp: 2, min: 40, impact: 1 };
   s.players[2].gp = 2; s.players[2].cur = { gp: 2, min: 30, impact: 1 };
+  s.players[3].cur = { gp: 4, min: 34.6, impact: 1 };
   const rows = liveRosterRankings(s, legacy);
-  const a = find(rows, 1, 11); const b = find(rows, 1, 12);
+  const a = find(rows, 1, 11); const b = find(rows, 1, 12); const c = find(rows, 1, 13);
   assert.equal(a.minutesSource, 'current+prior');
-  assert.equal(a.projectedMinutes, projectMinutes(20, 40, 2, 4));
+  assert.equal(a.projectedMinutes, conditionalMinutes(20, 40, 2));
+  assert.equal(a.rotation, rotationProbability(conditionalMinutes(20, 40, 2), 2, 4));
   assert.equal(b.minutesSource, 'current+population');
-  assert.equal(b.projectedMinutes, projectMinutes(null, 30, 2, 4));
+  assert.equal(b.projectedMinutes, conditionalMinutes(null, 30, 2));
+  // 场场出场的人轮换概率接近 1，不再被「出场率向 0.60 收缩」压掉一截
+  assert.ok(c.rotation > 0.95);
+});
+
+test('healthy players with zero appearances after two team games lose their rotation minutes (DNP-CD)', () => {
+  const s = store();
+  s.teams[0].cur = { wins: 1, losses: 3 };
+  Object.assign(s.players[4], { gp: 13, min: 30.9, cur: null }); // 上季 13 场 30.9 分钟、本季 4 场一场没上
+  const benched = find(liveRosterRankings(s, legacy), 1, 14);
+  assert.equal(benched.minutesSource, 'dnp-benched');
+  assert.ok(benched.minutes < 1);
+  // 同样 0 出场，但在伤病名单上（伤停而非不用）：保留上季角色，按伤病概率打折
+  s.injuries.players.push({ teamId: 1, playerId: 14, status: 'dayToDay' });
+  const injured = find(liveRosterRankings(s, legacy), 1, 14);
+  assert.equal(injured.minutesSource, 'prior-season');
+  assert.ok(injured.minutes > 5);
 });
 
 test('players without any IMP get a data-derived estimate instead of the replacement prior', () => {
@@ -120,7 +198,7 @@ test('players without any IMP get a data-derived estimate instead of the replace
   s.players.push({ playerId: 500, teamId: 2, onRoster: false, exp: '1', gp: 50, min: 20, ...{ base: { pts: 10 } } });
   const rows = liveRosterRankings(s, legacy);
   const vet = find(rows, 1, 10); const rookie = find(rows, 1, 11);
-  const m = 4 / 10; // 上季有 IMP 球员的均值：队1 其余四人 IMP=1、队2 六人 IMP=0
+  const m = (N - 2) / (2 * N - 2); // 上季有 IMP 球员的均值：队1 其余 N−2 人 IMP=1、队2 N 人 IMP=0
   assert.equal(vet.impactSource, 'estimated-shrunk-spm');
   assert.ok(Math.abs(vet.impact - (IMPACT_K * m + 15 * 3.6 + 4 * 1.8) / (IMPACT_K + 19)) <= 0.005); // 与 ingest 一样保留两位小数
   assert.equal(rookie.impactSource, 'estimated-rookie-prior');

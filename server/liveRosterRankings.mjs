@@ -1,4 +1,5 @@
-import { projectRotation, rosterRating } from './rosterProjection.mjs';
+import { projectExpectedRotation, rosterRating, healthyRosterRating } from './rosterProjection.mjs';
+import { rotationMinutes, playProbability } from './rotationMinutes.mjs';
 import { REPLACEMENT_IMP } from './ratings.mjs';
 import { apply as spmOf } from './impact.mjs';
 
@@ -9,6 +10,9 @@ export const shrink = (target, k, value, n) => (k * target + n * value) / (k + n
 
 // 以下常数均由 scripts/roster-shrinkage.mjs 拟合（node scripts/roster-shrinkage.mjs 复现）。
 /**
+ * 【2026-10-28 起线上阵容榜不再用 projectMinutes】改用 server/rotationMinutes.mjs：出场时分钟 + 轮换概率 + 伤病出场概率
+ * （docs/roster-fixes-batch1-verdict.md）。projectMinutes 只留给实验室（continuityLab、roster-shrinkage）与新旧对照回测。
+ *
  * 预计分钟 = 每场球队比赛的期望分钟 = 出场时场均（MPG）× 出场率，两部分分别收缩。
  * 拟合（stints 2021-22…2025-26，按球队、本季前 T=1..10 场做检查点，目标是剩余场次）：
  * 训练 = 前 3 组相邻赛季，留出 = 2024-25→2025-26。
@@ -100,11 +104,23 @@ function shares(players, keyOf) {
   return out;
 }
 
-/** Current snapshot estimate; not a historically validated forecast. */
+/** 伤病快照比统计快照旧这么多小时就标「可能过期」（每天刷新一次，留半天余量） */
+export const INJURY_STALE_HOURS = 36;
+
+/**
+ * Current snapshot estimate; not a historically validated forecast.
+ * 分钟（roster-fixes-batch1）：出场时预计分钟 × 轮换概率 × 伤病出场概率，σ 分配到 240（见 rosterProjection / rotationMinutes）。
+ *   availability='reported'：伤病出场概率 = P(出场 | 状态)（冻结的 injury-params-v1）；'healthy'：全员无伤（轮换概率照用——那是教练决定）。
+ *   手动缺阵两种模式都记 0。
+ * 去均值：每种模式用**该模式**下（不含手动缺阵）全联盟阵容分的均值，所以联盟均值恒为 0，手动勾选不牵动别队。
+ *   healthyTotal 用健康均值；rosterAdj = （期望 − 健康）阵容分 × 节奏，是绝对的伤病代价（不去均值）。
+ * 某队算不出来只影响该队（total=null + error），其余照常排名；均值只用算得出的队。
+ */
 export function liveRosterRankings(store, legacyRows, { out = {}, availability = 'reported' } = {}) {
   if (!['reported', 'healthy'].includes(availability)) throw new Error('Unknown roster availability mode');
-  const reportedOut = new Set(availability === 'reported'
-    ? (store.injuries?.players ?? []).filter((p) => p.status === 'out').map((p) => p.playerId) : []);
+  const status = new Map(availability === 'reported'
+    ? (store.injuries?.players ?? []).map((p) => [p.playerId, p.status]) : []);
+  const listed = new Set((store.injuries?.players ?? []).map((p) => p.playerId));
   const projections = new Map();
   const priors = impactPriors(store);
   for (const t of store.teams) {
@@ -117,46 +133,58 @@ export function liveRosterRankings(store, legacyRows, { out = {}, availability =
       const impact = Number.isFinite(p.cur?.impact) ? p.cur.impact
         : Number.isFinite(p.impact) ? p.impact : null;
       const estimate = impact == null ? estimateImpact(p, priors) : null;
+      const rm = rotationMinutes({ priorMpg: priorRole ? p.min : null, curMpg: currentRole ? p.cur.min : null,
+        n: currentRole ? p.cur.gp : 0, teamGames, listed: listed.has(p.playerId) });
       return {
         playerId: p.playerId, name: p.name,
-        projectedMinutes: projectMinutes(priorRole ? p.min : null, currentRole ? p.cur.min : null, currentRole ? p.cur.gp : 0, teamGames),
-        minutesSource: currentRole ? (priorRole ? 'current+prior' : 'current+population') : priorRole ? 'prior-season' : 'replacement',
+        projectedMinutes: rm.minutes, rotation: rm.rotation, minutesSource: rm.minutesSource,
         impact, impactSource: Number.isFinite(p.cur?.impact) ? 'current-blended' : impact != null ? 'prior-season' : estimate.impactSource,
         impactPrior: estimate ? { value: estimate.value, source: estimate.source } : undefined,
-        availability: 1,
+        injuryStatus: status.get(p.playerId) ?? null, availability: playProbability(status.get(p.playerId)),
       };
     });
+    const pace = t.cur?.adv?.pace ?? t.adv?.pace ?? store.meta.leagueAvg.pace;
     try {
-      const healthy = projectRotation(players);
-      projections.set(t.teamId, { healthy, raw: rosterRating(healthy), players });
+      if (!Number.isFinite(pace) || pace <= 0) throw new Error('缺少有效节奏数据');
+      const rot = projectExpectedRotation(players);
+      // 折成每场分差（× 节奏 / 100）后再去均值，联盟均值才恰好是 0
+      projections.set(t.teamId, { players, pace, healthy: healthyRosterRating(rot) * pace / 100, expected: rosterRating(rot) * pace / 100 });
     } catch (error) {
       projections.set(t.teamId, { error: error.message });
     }
   }
   const valid = [...projections.values()].filter((p) => !p.error);
-  const mean = valid.reduce((s, p) => s + p.raw, 0) / valid.length;
-  const fullLeague = valid.length === store.teams.length;
+  const avg = (k) => valid.reduce((s, p) => s + p[k], 0) / valid.length;
+  const mean = { healthy: avg('healthy'), expected: availability === 'healthy' ? avg('healthy') : avg('expected') };
+  const injuryFetchedAt = store.injuries?.fetchedAt ?? null;
+  const lagH = injuryFetchedAt && store.meta.fetchedAt
+    ? (Date.parse(store.meta.fetchedAt) - Date.parse(injuryFetchedAt)) / 3600e3 : null;
+  const info = { experimental: true, fetchedAt: store.meta.fetchedAt, injuryFetchedAt, availability,
+    // 伤病快照比统计快照旧多少小时；缺失或超过阈值即 injuryStale（界面另按当前时间算一次）
+    injuryLagHours: lagH === null ? null : round(lagH),
+    injuryStale: availability === 'reported' && (lagH === null || lagH > INJURY_STALE_HOURS),
+    injuryStaleHours: INJURY_STALE_HOURS,
+    // 没有 IMP 模型（data/impact-model.json）时缺 IMP 的人全部退回替补级 −0.5——不再静默
+    impactModelMissing: !priors,
+    leagueTeams: valid.length };
   const rows = legacyRows.map((row) => {
-    const t = store.teams.find((team) => team.teamId === row.teamId);
     const projection = projections.get(row.teamId);
     const base = { ...row, legacyTotal: row.total, legacyRank: row.rank, model: 'roster',
       total: null, rank: null, rosterAdj: null, modelDelta: null };
-    const info = { experimental: true, fetchedAt: store.meta.fetchedAt,
-      injuryFetchedAt: store.injuries?.fetchedAt ?? null, availability };
-    if (!fullLeague || !projection || projection.error) return { ...base, rosterProjection: {
-      ...info, error: projection?.error ?? '完整联盟健康阵容数据不足，无法建立联盟平均基准',
+    if (!valid.length || !projection || projection.error) return { ...base, rosterProjection: {
+      ...info, error: projection?.error ?? '该队阵容数据不足，无法估计',
     } };
-    const excluded = new Set([...(out[row.teamId] ?? []), ...reportedOut]);
-    const pace = t.cur?.adv?.pace ?? t.adv?.pace ?? store.meta.leagueAvg.pace;
-    if (!Number.isFinite(pace) || pace <= 0) return { ...base, rosterProjection: { ...info, error: '缺少有效节奏数据' } };
+    const excluded = new Set(out[row.teamId] ?? []);
+    const { pace } = projection;
     try {
-      const expected = projectRotation(projection.players.map((p) => ({ ...p,
-        availability: excluded.has(p.playerId) ? 0 : 1 })));
-      const healthyTotal = (projection.raw - mean) * pace / 100;
-      const total = (rosterRating(expected) - mean) * pace / 100;
-      return { ...base, total: round(total), rosterAdj: round(total - healthyTotal), modelDelta: round(total - row.total),
+      const expected = projectExpectedRotation(projection.players.map((p) => ({ ...p,
+        availability: excluded.has(p.playerId) ? 0 : availability === 'healthy' ? 1 : p.availability })));
+      const pts = rosterRating(expected) * pace / 100;
+      const healthyTotal = projection.healthy - mean.healthy;
+      const total = pts - mean.expected;
+      return { ...base, total: round(total), rosterAdj: round(pts - projection.healthy), modelDelta: round(total - row.total),
         rosterProjection: { ...info, healthyTotal: round(healthyTotal),
-          priorMinutes: expected.priorMinutes,
+          priorMinutes: expected.priorMinutes, replacementMinutes: round(expected.replacementMinutes),
           knownImpactPct: shares(expected.players, (p) => (MEASURED_IMPACT.has(p.impactSource) ? 'measured' : 'estimated')).measured ?? 0,
           impactSourceShares: shares(expected.players, (p) => p.impactSource),
           minutesSourceShares: shares(expected.players, (p) => p.minutesSource),
