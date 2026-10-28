@@ -245,6 +245,8 @@ export async function fetchUpcomingOdds(games, opts = {}) {
       if (scanned % 25 === 0) onProgress?.(`  已扫 ${scanned}/${dateList.length} 个比赛日`);
       return { date, evs };
     } catch (e) {
+      // 熔断/上限：后面的日期也都会失败，整体抛出，让调用方保留旧盘口而不是写一份空的
+      if (e.code === 'BLOCKED' || e.code === 'CAP') throw e;
       onProgress?.(`  ${date} 抓取失败：${String(e.message).slice(0, 70)}`);
       return { date, evs: [] };
     }

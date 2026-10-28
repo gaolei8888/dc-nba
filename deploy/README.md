@@ -22,7 +22,7 @@ ESPN 两台服务器都能访问。所以分成两条线：
 
 | 谁 | 何时 | 做什么 | 依赖 |
 | --- | --- | --- | --- |
-| 服务器 cron | 每天 14:30、22:00（北京） | `refresh.sh --espn`：比分、Elo、赛前 Elo、战绩、伤病、盘口 | 只要 ESPN |
+| 服务器 cron | 每天 06:30、14:30、22:00（北京） | `refresh.sh --espn`：比分、Elo、赛前 Elo、战绩、伤病、盘口 | 只要 ESPN |
 | 本机计划任务「dc-nba 全量刷新」 | 每天 08:00 太平洋（北京 23:00），错过则开机补跑 | `push-refresh.sh`：本机全量 ingest → 推到服务器 `incoming/` → 远程 `refresh.sh --incoming` | 这台电脑开机 |
 
 本机计划任务默认用 Node 直接抓（`NBA_TRANSPORT=node`）。若 stats.nba.com 开始拦 Node 请求，
@@ -88,9 +88,18 @@ scp data/paper-backtest.json dev@gpu.tzspace.cn:/home/dev/work/works/dc-nba/data
 - 开关：`ENABLE_LEDGER=0` 关掉页面读取（与 `ENABLE_LEADERBOARD` 无关；账本不含用户数据）。
   服务器 compose 不需要改。
 
-**可选（需要高磊同意后再改 crontab）**：加一次北京 06:30（UTC 22:30，开赛前约半小时）的
-`refresh.sh --espn`，记录更接近收盘的价格。注意同一 (比赛, 规则, 博彩商) 只认第一次记录，
+**北京 06:30 那次（2026-10-28 高磊同意后加进 crontab）**：UTC 22:30，开赛前约半小时，
+`refresh.sh --espn`，盘口更接近收盘。注意同一 (比赛, 规则, 博彩商) 只认第一次记录：
+22:00 那次已记过的比赛，06:30 的价格会被忽略——它目前只是 22:00 失败时的补记。
 要并存两个时点得给晚的那次另起规则名（如 `edge3-late`），这需要改 `server/ledger.mjs`。
+
+**ESPN 请求量与熔断（2026-10-28 核过）**：每次 `--espn` 约 15 个请求（14 个比赛日的 scoreboard
++ 1 伤病 + 每个待补比分的日期 1 个），账本结算每场最多 1 个（3 天内没取到收盘价的会重试），
+一天三次合计 < 200，默认上限每次 3000 / 每天 12000（`ESPN_MAX_REQUESTS` / `ESPN_MAX_PER_DAY`）。
+熔断状态文件 `data/raw/fetch-state.json` 在取数的临时目录里，**不跨运行保存**：
+被拦（403/429/超时/非 JSON）时本次运行停手、`refresh.log` 里有 `!! [espn] 熔断：…`，
+下一次 cron 照常再试，不会把刷新冻住；代价是跨运行的指数退避和单日上限实际上只在单次运行内生效。
+404 不算被拦（盘口端点按「这场没盘口」处理）；扫盘口中途熔断时保留旧 `odds.json`，不写空。
 
 本地：`ENABLE_LEADERBOARD=0 node server/index.mjs` 也能看账本，库默认 `data/app.db`；
 `DB_PATH=/tmp/x.db node scripts/ledger.mjs capture|settle|show` 可在副本上演练。
@@ -122,7 +131,7 @@ cp data-prev/*.json data/ && docker compose build && docker compose up -d
 
 ## 停掉自动刷新
 
-- 服务器：`crontab -e`，删掉 `dc-nba/deploy/refresh.sh --espn` 那两行
+- 服务器：`crontab -e`，删掉 `dc-nba/deploy/refresh.sh --espn` 那三行
 - 本机：`Unregister-ScheduledTask -TaskName 'dc-nba 全量刷新'`（PowerShell），或在「任务计划程序」里删
 
 镜像和数据保持最后一次成功刷新时的样子。

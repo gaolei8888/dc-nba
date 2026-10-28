@@ -12,6 +12,7 @@
 #   加 --fetch-only                只取数据、体检，不动线上。
 #
 # cron（服务器时区 CST）：
+#   30 6 * * *  /home/dev/work/works/dc-nba/deploy/refresh.sh --espn >> /home/dev/work/works/dc-nba/refresh.log 2>&1
 #   30 14 * * * /home/dev/work/works/dc-nba/deploy/refresh.sh --espn >> /home/dev/work/works/dc-nba/refresh.log 2>&1
 #   0 22 * * *  /home/dev/work/works/dc-nba/deploy/refresh.sh --espn >> /home/dev/work/works/dc-nba/refresh.log 2>&1
 #
