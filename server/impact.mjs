@@ -53,7 +53,12 @@ export function features(p) {
   const dFga = per36(g('defend', 'dFga'), min);
   const diffPct = g('defend', 'diffPct') ?? 0;
 
+  // 拼抢表里没有这个人（ingest 里 num(undefined) = null）≠ 拼抢为 0。打分时这三项按人群均值处理（apply），
+  // 训练样本照旧记 0——每季只有 1–9 行缺，改训练会牵动已验证的 IMP 系数，不值得
+  const missing = ['deflections', 'contested', 'screenAstPts'].every((k) => g('hustle', k) == null)
+    ? ['defl', 'contest', 'screen'] : [];
   return {
+    missing,
     pts: per36(g('base', 'pts'), min),
     // 效率 × 出手量：单看命中率会把低出手的角色球员抬得过高
     tsAdd: (tsPct - TS_BASE) * fga,
@@ -280,6 +285,7 @@ export function apply(model, p, { minGp = MIN_GP } = {}) {
   if (!f) return null;
   let s = model.intercept;
   model.features.forEach((k, i) => {
+    if (f.missing.includes(k)) return; // 缺失 = 人群均值，标准化后为 0
     s += model.beta[i] * ((f[k] - model.mu[i]) / model.sd[i]);
   });
   return Math.round(s * 100) / 100;

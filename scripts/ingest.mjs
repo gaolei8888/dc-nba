@@ -742,13 +742,15 @@ async function main() {
     },
   };
 
-  // 伤病名单：NBA 官方只发 PDF，改用 ESPN 的结构化接口
-  let injuries = { source: 'ESPN', fetchedAt: null, counts: {}, matched: 0, unmatched: [], players: [] };
+  // 伤病名单：NBA 官方只发 PDF，改用 ESPN 的结构化接口。
+  // 抓取失败时 injuries 保持 null，**保留磁盘上已有的那份**（同 scripts/espn-refresh.mjs）：
+  // 之前这里写一份 fetchedAt=null 的空名单，阵容榜就会把所有人当作健康，且界面看不出来。
+  let injuries = null;
   try {
     log('伤病名单 (ESPN)');
     injuries = await fetchInjuries(players);
   } catch (e) {
-    console.warn(`  伤病抓取失败，跳过：${String(e.message).slice(0, 90)}`);
+    console.warn(`  伤病抓取失败，保留旧数据：${String(e.message).slice(0, 90)}`);
   }
 
   // 博彩盘口：ESPN 的公开接口带 DraftKings 的让分与总分，不需要 api key。
@@ -806,7 +808,7 @@ async function main() {
   // 6150 场约 480KB（brotli 后 46KB），换来服务端可以随时按需回测。
   buildBacktestDataset();
 
-  writeJson('injuries.json', injuries);
+  if (injuries) writeJson('injuries.json', injuries);
   writeJson('teams.json', teams);
   writeJson('players.json', players);
   writeJson('schedule.json', schedule);
@@ -817,7 +819,7 @@ async function main() {
   console.log(`  球队 ${teams.length} · 球员 ${players.length} · ${TARGET_SEASON} 赛程 ${schedule.games.length} 场`);
   console.log(`  轮换影响力回归 R²=${impactFit.r2.toFixed(3)}  b=${impactFit.b.toFixed(4)}`
     + `  口径=${basis.name.toUpperCase()}`);
-  if (injuries.matched) {
+  if (injuries?.matched) {
     console.log(`  伤病 ${injuries.matched} 条（确定缺阵 ${injuries.counts.out ?? 0}，每日观察 ${injuries.counts.dayToDay ?? 0}）`
       + (injuries.unmatched.length ? `，${injuries.unmatched.length} 条未匹配` : ''));
   }

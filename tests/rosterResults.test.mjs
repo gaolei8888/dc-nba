@@ -120,8 +120,9 @@ test('阵容榜：只计已完赛常规赛，季前赛与未开赛不算', () =>
 test('阵容榜：没有赛果时 total = priorTotal；有赛果时按 K 修正并可改变名次', () => {
   const before = liveRosterRankings(store(), legacy);
   assert.equal(before[0].teamId, 1);
-  assert.equal(before[0].total, 2.5);
-  assert.equal(before[0].priorTotal, 2.5);
+  // 先验数值由 roster-fixes-batch1 的分钟口径决定（6 人 × 40 分钟 → 单人上限 38），这里只验 total = priorTotal
+  assert.ok(before[0].priorTotal > 0);
+  assert.equal(before[0].total, before[0].priorTotal);
   assert.equal(before[0].resultsAdj, 0);
   assert.equal(before[0].rosterProjection.results.games, 0);
   assert.equal(before[0].rosterProjection.results.k, RESULTS.K);
@@ -132,7 +133,7 @@ test('阵容榜：没有赛果时 total = priorTotal；有赛果时按 K 修正�
   const after = liveRosterRankings(store(games), legacy, { results: { K: 2 } });
   const t1 = after.find((r) => r.teamId === 1); const t2 = after.find((r) => r.teamId === 2);
   assert.equal(after[0].teamId, 2);
-  assert.equal(t1.priorTotal, 2.5);
+  assert.equal(t1.priorTotal, before[0].priorTotal);
   close(t1.total, t1.priorTotal + t1.resultsAdj, 0.011);
   assert.ok(t1.resultsAdj < 0 && t2.resultsAdj > 0);
   assert.equal(t1.rosterProjection.results.games, 4);
@@ -148,4 +149,18 @@ test('阵容榜：线上近期加权以美东今天为基准，记录有效场�
   assert.equal(res.asOf, '2026-10-27');
   close(res.effectiveGames, 0.4 ** (60 / 60), 0.01);
   assert.equal(res.games, 1);
+});
+
+test('阵容榜：某队先验算不出来 → 该队 total/priorTotal 为 null，与它的比赛不进战绩修正，其余照常', () => {
+  const s = store([game({ homeScore: 130, awayScore: 100 })]);
+  s.teams.push({ teamId: 3, adv: { pace: 0 } }); // 节奏无效 → 该队先验失败
+  s.players.push({ playerId: 30, teamId: 3, onRoster: true, name: 'P3', gp: 60, min: 30, impact: 5, cur: { gp: 3, min: 30, impact: 5 } });
+  s.schedule.games.push(game({ homeId: 3, awayId: 1, homeScore: 140, awayScore: 90 }));
+  const rows = liveRosterRankings(s, [...legacy, { teamId: 3, elo: 1500, total: 0, rank: 3, turnoverAdj: 0 }]);
+  const t3 = rows.find((r) => r.teamId === 3); const t1 = rows.find((r) => r.teamId === 1);
+  assert.equal(t3.total, null); assert.equal(t3.priorTotal, null); assert.equal(t3.rank, null);
+  assert.ok(t3.rosterProjection.error);
+  assert.ok(Number.isFinite(t1.total));
+  assert.equal(t1.rosterProjection.results.games, 1, '与 3 队的比赛不计入');
+  assert.deepEqual(rows.filter((r) => r.rank != null).map((r) => r.rank).sort(), [1, 2]);
 });

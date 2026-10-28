@@ -9,7 +9,11 @@ import {
   bjToday, bjDateOf, bjTimeOf, shiftDate,
 } from '../lib/format.js';
 
-const MINUTES_SOURCE_CN = { 'current+prior': '本季→上季收缩', 'current+population': '本季→均值收缩', 'prior-season': '上季轮换' };
+const MINUTES_SOURCE_CN = { 'current+prior': '本季→上季收缩', 'current+population': '本季→均值收缩', 'prior-season': '上季轮换',
+  'dnp-benched': '轮换外（本季未出场）', replacement: '无分钟信息' };
+const STATUS_CN = { out: '缺阵', doubtful: '可能缺阵', dayToDay: '每日观察' };
+/** 伤病快照的年龄（小时，按当前时间算；服务端结果有缓存，所以在界面里算） */
+const ageHours = (iso) => (iso ? (Date.now() - Date.parse(iso)) / 3600e3 : null);
 const IMPACT_SOURCE_CN = { 'current-blended': '本季混合', 'prior-season': '上季', 'estimated-shrunk-spm': '小样本收缩估计',
   'estimated-rookie-prior': '新秀先验', 'estimated-population-prior': '低分钟人群先验', 'replacement-prior': '替补级先验' };
 
@@ -56,6 +60,17 @@ export default function Dashboard() {
   const mostImproved = [...validRankings].sort((a, b) => b[improvementField] - a[improvementField])[0];
 
   const grouped = groupBy !== 'league';
+  // 阵容榜的数据问题不再静默：IMP 模型缺失、伤病快照过期、个别球队算不出来
+  const rp = rankings.find((r) => r.rosterProjection)?.rosterProjection;
+  const injuryAge = ageHours(rp?.injuryFetchedAt);
+  const failedTeams = rankings.filter((r) => r.rosterProjection?.error);
+  const rosterNotices = !rp ? [] : [
+    rp.impactModelMissing && '缺少 IMP 模型：没有 IMP 的球员全部按替补级 −0.5 计。',
+    availability === 'reported' && !rp.injuryFetchedAt && '没有伤病快照：已报伤病未计入。',
+    availability === 'reported' && rp.injuryFetchedAt && (rp.injuryStale || injuryAge > rp.injuryStaleHours)
+      && `伤病快照已 ${num(injuryAge, 0)} 小时未更新，可能过期。`,
+    failedTeams.length > 0 && `${failedTeams.map((r) => r.cn ?? r.teamId).join('、')} 数据不足，未参与排名。`,
+  ].filter(Boolean);
 
   const cols = [
     {
@@ -79,7 +94,7 @@ export default function Dashboard() {
         { key: 'division', label: '赛区', width: 62, render: (r) => <span className="dim">{DIV_CN[r.division] ?? r.division}</span> },
       ]),
     {
-      key: "total", label: <Th abbr="RTG" cn={rosterMode ? '阵容+战绩' : '综合实力'} />, title: rosterMode ? '阵容先验 + 本季战绩修正：(K·阵容先验 + n·对手调整净胜分)/(K+n)，相对联盟平均的每场分差' : '综合实力 RTG — 相对联盟平均的每场净胜分预期', width: 92,
+      key: "total", label: <Th abbr="RTG" cn={rosterMode ? '阵容+战绩' : '综合实力'} />, title: rosterMode ? '阵容先验 + 本季战绩修正：(K·阵容先验 + n·对手调整净胜分)/(K+n)，相对联盟平均的每场分差，实验估计' : '综合实力 RTG — 相对联盟平均的每场净胜分预期', width: 92,
       render: (r) => <b className={signClass(r.total)}>{signed(r.total, 2)}</b>,
     },
     ...(rosterMode ? [
@@ -104,7 +119,7 @@ export default function Dashboard() {
       render: (r) => <span className={signClass(r.turnoverAdj)}>{signed(r.turnoverAdj, 2)}</span>,
     }] : []),
     {
-      key: "rosterAdj", label: <Th abbr="OUT" cn="缺阵修正" />, title: rosterMode ? '相对全员健康阵容的变化，缺阵分钟由队友顶上' : '缺阵修正 OUT — 勾掉的球员对实力的影响', width: 82,
+      key: "rosterAdj", label: <Th abbr="OUT" cn="缺阵修正" />, title: rosterMode ? '相对全员健康阵容的变化（按出场概率加权，空出的分钟主要由轮换中段与替补顶上）' : '缺阵修正 OUT — 勾掉的球员对实力的影响', width: 82,
       render: (r) => (r.rosterAdj
         ? <span className={signClass(r.rosterAdj)}>{signed(r.rosterAdj, 2)}</span>
         : <span className="dim">—</span>),
@@ -160,16 +175,15 @@ export default function Dashboard() {
             { value: 'reported', label: '计入已报缺阵' }, { value: 'healthy', label: '忽略已报伤病' },
           ]} />}
         </div>
+        {rosterMode && rosterNotices.length > 0 && <p className="note neg" style={{ marginBottom: 8 }}>{rosterNotices.join(' ')}</p>}
         {rosterMode && <p className="note" style={{ marginBottom: 14 }}>
-          实力 = 阵容先验 + 本季战绩修正：r = (K·阵容先验 + n·对手调整净胜分) / (K + n)，K = {rankings[0]?.rosterProjection?.results?.k ?? '—'}，
-          即阵容先验「值 {rankings[0]?.rosterProjection?.results?.k ?? '—'} 场比赛」，已赛 n 场时先验权重 K/(K+n)，战绩越多越看结果。
-          对手调整：净胜分先扣主场优势（中立场不扣），再加上对手在本榜的强度。
-          近期加权：每场按 0.4^(距今天数/60) 计权（约 60 天前的比赛按 0.4 场算），n 为加权场数。<br />
-          阵容先验：现役名单按本季场均分钟分配 240 分钟；尚未出场者沿用上季轮换分钟。IMP 缺失者用样本收缩估计，覆盖率见表。
-          球队旧 Elo 不参与本表评分。点击球队查看分钟与球员贡献。<br />
-          K 与近期加权由 2022-23~2025-26 留一赛季回测选出：胜率 log loss 比只看阵容低 0.031（显著）；比旧 Elo 低 0.004（留一赛季显著，最终留出季 −0.002 不显著）。
-          比赛预测与赛季模拟仍使用原 Elo 模型。
-          手动缺阵始终保留。统计时间：{meta.statsFetchedAt ?? meta.fetchedAt}；伤病时间：{rankings[0]?.rosterProjection?.injuryFetchedAt ?? '未知'}。
+          实力 = 阵容先验 + 本季战绩修正：r = (K·阵容先验 + n·对手调整净胜分) / (K + n)，K = {rp?.results?.k ?? '—'}，
+          即阵容先验「值 {rp?.results?.k ?? '—'} 场比赛」，战绩越多越看结果；对手调整 = 净胜分扣主场优势、加对手在本榜的强度；
+          近期加权：每场按 0.4^(距今天数/60) 计权，n 为加权场数。<br />
+          阵容先验：现役名单按「出场时分钟 × 轮换概率 × 伤病出场概率」分配 240 分钟（单人期望上限 38；缺阵≈1%、可能缺阵≈6%、每日观察≈54% 出场，冻结参数）；
+          本季一场未出、又不在伤病名单上的人视为轮换外；没有 IMP 的人用小样本收缩估计（未验证），覆盖率见表。球队旧 Elo 不参与本表评分。点击球队查看分钟与球员贡献。<br />
+          K 与近期加权由 2022-23~2025-26 留一赛季回测选出（docs/roster-results-update-verdict.md）。<b>比赛胜率与赛季模拟来自 Elo 模型</b>，不是本表。
+          手动缺阵始终保留。统计时间：{meta.statsFetchedAt ?? meta.fetchedAt}；伤病时间：{rp?.injuryFetchedAt ?? '未知'}{injuryAge != null ? `（${num(injuryAge, 0)} 小时前）` : ''}。
         </p>}
 
         {groupBy === 'league' ? (
@@ -213,16 +227,19 @@ export default function Dashboard() {
             阵容先验权重 {num(detail.rosterProjection.results.priorWeight * 100, 0)}%（K={detail.rosterProjection.results.k}），战绩权重 {num((1 - detail.rosterProjection.results.priorWeight) * 100, 0)}%。</p>}
           <p className="note">IMP 来源（占预计分钟）：{Object.entries(detail.rosterProjection.impactSourceShares ?? {})
             .map(([k, v]) => `${IMPACT_SOURCE_CN[k] ?? k} ${num(v * 100, 0)}%`).join('、')}。估计值未经回测验证。</p>
-          <p className="note">预计总分钟 240；{availability === 'reported' ? '已报缺阵和手动勾选' : '手动勾选'}球员的分钟由其余名单球员分担。
-            分钟是按现有角色归一化的估计，未加入新秀成长或阵容磨合假设。</p>
+          <p className="note">预计总分钟 240（含替补级 {num(detail.rosterProjection.replacementMinutes ?? 0, 1)}）；{availability === 'reported' ? '已报伤病按出场概率加权，手动勾选' : '手动勾选'}球员的分钟主要由轮换中段与替补分担。
+            分钟是按现有角色的估计，未加入新秀成长或阵容磨合假设。</p>
           <DataTable rows={detail.rosterProjection.rotation} rowKey={(p) => p.playerId}
             initialSort={{ key: 'minutes', dir: 'desc' }} maxHeight={360} columns={[
               { key: 'name', label: '球员', align: 'left' },
               { key: 'minutes', label: '预计分钟', render: (p) => num(p.minutes, 1) },
+              { key: 'play', label: '出场概率', title: '轮换概率 × 伤病出场概率', value: (p) => p.availability * (p.rotation ?? 1),
+                render: (p) => <span className="dim" title={p.injuryStatus ? STATUS_CN[p.injuryStatus] ?? p.injuryStatus : undefined}>
+                  {num(p.availability * (p.rotation ?? 1) * 100, 0)}%{p.injuryStatus ? `（${STATUS_CN[p.injuryStatus] ?? p.injuryStatus}）` : ''}</span> },
               { key: 'impact', label: 'IMP', render: (p) => <span title={p.impactPrior?.source}>{signed(p.impact, 2)}{p.fromPrior ? '（估计）' : ''}</span> },
               { key: 'contribution', label: '贡献 / 百回合', value: (p) => p.impact * p.minutes / 48,
                 render: (p) => signed(p.impact * p.minutes / 48, 2) },
-              { key: 'minutesSource', label: '分钟依据', render: (p) => p.availability === 0 ? '缺阵'
+              { key: 'minutesSource', label: '分钟依据', render: (p) => p.availability === 0 ? '缺阵（手动）'
                 : MINUTES_SOURCE_CN[p.minutesSource] ?? '替补分配' },
             ]} />
         </>}
@@ -232,7 +249,7 @@ export default function Dashboard() {
         <div className="card">
           <h2>
             {nextDay === bjToday() ? '今日比赛预测' : '下一个比赛日'}
-            <span className="sub">{fmtDate(nextDay)} · 北京时间 · {dayGames.length} 场</span>
+            <span className="sub">{fmtDate(nextDay)} · 北京时间 · {dayGames.length} 场 · 胜率来自 Elo 模型</span>
             <button className="btn" style={{ marginLeft: 'auto' }} onClick={() => go(`today/${nextDay}`)}>
               全部详情 ›
             </button>
