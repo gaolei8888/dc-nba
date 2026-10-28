@@ -66,7 +66,8 @@ export function nameIndex(people) {
  */
 export function matchName(reportName, idx, roster, nameOf) {
   const full = normalizeName(flipName(reportName));
-  const hits = idx.get(full) ?? [];
+  // 姓在前的名字（Yang Hansen、Cui Yongxi）NBA 名单里就按报告里的顺序写
+  const hits = idx.get(full) ?? idx.get(normalizeName(reportName.replace(',', ' '))) ?? [];
   if (hits.length === 1) return hits[0];
   const inTeam = hits.filter((id) => roster.has(id));
   if (inTeam.length === 1) return inTeam[0];

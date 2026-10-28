@@ -131,8 +131,9 @@ test('matchName：全名（去重音/后缀）、重名取本队、对不上就�
   const people = [
     { id: 1, name: 'Nikola Jokić' }, { id: 2, name: 'Vernon Carey Jr.' },
     { id: 3, name: 'Marcus Morris Sr.' }, { id: 4, name: 'Marcus Morris' },
-    { id: 5, name: 'Cameron Thomas' }, { id: 6, name: 'Herbert Jones' },
+    { id: 5, name: 'Cameron Thomas' }, { id: 6, name: 'Herbert Jones' }, { id: 7, name: 'Yang Hansen' },
   ];
+  assert.equal(matchName('Yang, Hansen', nameIndex(people), new Set(), () => null), 7);
   const idx = nameIndex(people);
   const nameOf = (i) => people.find((p) => p.id === i)?.name;
   assert.equal(matchName('Jokic, Nikola', idx, new Set(), nameOf), 1);
