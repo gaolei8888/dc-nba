@@ -32,7 +32,7 @@ CHECK_ONLY=0
 ok() { echo "  ✓ $*"; }
 fail() { echo "  ✗ $*"; exit 1; }
 
-echo "检查 GB10 数据刷新环境（$DIR）"
+echo "检查 GB10 数据刷新环境（${DIR}）"
 
 # 1. node（本机的，或 docker 里的）
 $NODE -v >/dev/null 2>&1 || fail "没有可用的 node ≥ 22，也跑不了 docker 里的 node:22-alpine（docker pull node:22-alpine 试试）"
@@ -47,9 +47,9 @@ $NODE --input-type=module -e '
 ok "stats.nba.com 返回 JSON"
 
 # 3. 专用密钥
-[ -f "$KEY" ] || fail "没有密钥 $KEY。生成：ssh-keygen -t ed25519 -f $KEY -N '' -C dc-nba-gb10，然后把 $KEY.pub 发给管理员加到服务器"
+[ -f "$KEY" ] || fail "没有密钥 ${KEY}。生成：ssh-keygen -t ed25519 -f $KEY -N '' -C dc-nba-gb10，然后把 $KEY.pub 发给管理员加到服务器"
 ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$KEY" "$REMOTE" true 2>/dev/null \
-  || fail "密钥 $KEY 还登录不了 $REMOTE（公钥还没加到服务器？）"
+  || fail "密钥 $KEY 还登录不了 ${REMOTE}（公钥还没加到服务器？）"
 ok "密钥能登录 $REMOTE"
 
 # 4. 历史数据
@@ -70,5 +70,5 @@ else
   { crontab -l 2>/dev/null; echo "# dc-nba：全量抓 NBA 数据并推到 gpu.tzspace.cn（GB10 只做数据刷新）"; echo "$LINE"; } | crontab -
   ok "cron 已安装：$LINE"
 fi
-echo "时区：$(date +%Z)，cron 时间「$CRON_TIME」按本机时区执行（DC_NBA_CRON_TIME 可改）"
+echo "时区：$(date +%Z)，cron 时间「${CRON_TIME}」按本机时区执行（DC_NBA_CRON_TIME 可改）"
 echo "立刻试跑一次：cd $DIR && DC_NBA_SSH_KEY=$KEY DC_NBA_NODE='$NODE' sh deploy/push-refresh.sh"

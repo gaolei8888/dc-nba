@@ -77,7 +77,7 @@ STAGE=$(mktemp -d)
 # --fetch-only 不碰线上，账本也不跑
 trap '[ "$FETCH_ONLY" = 1 ] || ledger; rm -rf "$STAGE"' EXIT
 
-log "开始刷新（$DIR）"
+log "开始刷新（${DIR}）"
 # 只拷取数据需要的东西：代码 + 快照。不拷 app.db、备份。
 mkdir -p "$STAGE/data"
 cp -r "$DIR/server" "$DIR/scripts" "$DIR/package.json" "$STAGE/"

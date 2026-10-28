@@ -23,7 +23,7 @@ NODE=${DC_NBA_NODE:-node}
 
 log() { echo "[$(date '+%F %T')] [push] $*"; }
 
-log "开始（推送到 $REMOTE）"
+log "开始（推送到 ${REMOTE}）"
 if [ ! -d data/history ]; then
   log "缺少 data/history/，ingest 算不出完整的 IMP，停止"
   exit 1
