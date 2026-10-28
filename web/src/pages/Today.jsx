@@ -5,9 +5,7 @@ import { TeamLogo, Loading, ErrorBox, ProbBar, StatTile } from '../components/co
 import { useI18n } from '../i18n/react.jsx';
 import { tzToday } from '../i18n/fmt.js';
 import { gameDates, gamesOn, fetchRangeFor } from '../lib/gameDays.js';
-import {
-  fmtDate, probColor, restLabel, snapshotAge,
-} from '../lib/format.js';
+import { probColor } from '../lib/format.js';
 
 /**
  * 今日比赛：按所选时区（默认随语言：中文北京、英文美东）取一天的比赛，逐场给出模型预测。
@@ -21,7 +19,7 @@ import {
  */
 export default function Today({ initial = [] }) {
   const { meta, teamById, injuries, out, params, setAccent } = useApp();
-  const { tz, fmt } = useI18n();
+  const { tz, t, fmt } = useI18n();
   const [dates, setDates] = useState(null);
   const [allGames, setAllGames] = useState(null);
   const [date, setDate] = useState(initial[0] || null);
@@ -86,7 +84,7 @@ export default function Today({ initial = [] }) {
   const sure = [...upcoming].sort((a, b) => conf(b) - conf(a))[0];
   const close = [...upcoming].sort((a, b) => conf(a) - conf(b))[0];
   const split = upcoming.filter((g) => g.market).sort((a, b) => Math.abs(b.market.edge) - Math.abs(a.market.edge))[0];
-  const age = snapshotAge(meta.fetchedAt, { staleDays: 1 });
+  const age = fmt.snapshotAge(meta.fetchedAt, { staleDays: 1 });
   const isToday = date === tzToday(tz);
   // 当天比赛全打完了：赛前指标没有对象，换成这一天的预测复盘
   const finished = games.filter((g) => g.hit !== undefined);
@@ -103,67 +101,64 @@ export default function Today({ initial = [] }) {
   return (
     <>
       <div className="page-head">
-        <h1>{isToday ? '今日比赛' : '比赛日'}预测</h1>
-        <p>按{fmt.zoneLabel()}分日，每场给出模型胜率、预测比分与让分。点击比赛进入详细预测与分差拆解。</p>
+        <h1>{isToday ? t('today.titleToday') : t('today.titleDay')}</h1>
+        <p>{t('today.intro', { zone: fmt.zoneLabel() })}</p>
       </div>
 
       <div className="toolbar">
-        <button className="btn" disabled={!prev} onClick={() => prev && pick(prev)}>‹ 前一个比赛日</button>
+        <button className="btn" disabled={!prev} onClick={() => prev && pick(prev)}>{t('today.prevDay')}</button>
         <div className="field" style={{ minWidth: 0 }}>
-          <b style={{ fontSize: 15 }}>{date ? fmtDate(date) : '—'}</b>
-          <span className="dim" style={{ marginLeft: 8 }}>{fmt.zoneLabel()}{isToday ? ' · 今天' : ''}</span>
+          <b style={{ fontSize: 15 }}>{date ? fmt.date(date) : '—'}</b>
+          <span className="dim" style={{ marginLeft: 8 }}>{isToday ? t('today.zoneToday', { zone: fmt.zoneLabel() }) : fmt.zoneLabel()}</span>
         </div>
-        <button className="btn" disabled={!next} onClick={() => next && pick(next)}>后一个比赛日 ›</button>
+        <button className="btn" disabled={!next} onClick={() => next && pick(next)}>{t('today.nextDay')}</button>
         {!isToday && dates?.length > 0 && (
           <button className="btn" onClick={() => pick(dates.find((d) => d >= tzToday(tz)) ?? dates[dates.length - 1])}>
-            回到今天
+            {t('today.backToToday')}
           </button>
         )}
       </div>
 
       {age && (
         <div className={age.stale ? 'market-stale' : 'note'} style={{ marginBottom: 12 }}>
-          数据截至 {meta.lastResultDate ?? '—'} 的比赛结果（{age.text}抓取）。评级、伤病和盘口都停在那一刻，
-          之后打完的比赛要等下次数据刷新才有比分。
+          {t('today.snapshot', { date: meta.lastResultDate ?? '—', age: age.text })}
         </div>
       )}
 
       {review ? (
         <div className="grid cols-4" style={{ marginBottom: 14 }}>
-          <StatTile label="比赛场次" value={games.length} unit=" 场" hint="已全部结束" />
-          <StatTile label="赛前预测猜对胜方" value={`${hits} / ${finished.length}`}
-            hint={`命中率 ${((hits / finished.length) * 100).toFixed(0)}%，单日样本很小`} />
-          <StatTile label="最大冷门" value={matchup(upset)}
-            hint={`赢球一方赛前胜率只有 ${(winProb(upset) * 100).toFixed(0)}%`} />
-          <StatTile label="分差预测最准" value={matchup(sharpest)}
-            hint={`预测与实际分差只差 ${marginErr(sharpest).toFixed(1)} 分`} />
+          <StatTile label={t('today.tile.games')} value={games.length} unit={t('common.unit.games', { count: games.length })} hint={t('today.tile.allFinished')} />
+          <StatTile label={t('today.tile.picksRight')} value={`${hits} / ${finished.length}`}
+            hint={t('today.tile.hitRate', { rate: hits / finished.length })} />
+          <StatTile label={t('today.tile.upset')} value={matchup(upset)}
+            hint={t('today.tile.upsetHint', { p: winProb(upset) })} />
+          <StatTile label={t('today.tile.sharpest')} value={matchup(sharpest)}
+            hint={t('today.tile.sharpestHint', { n: marginErr(sharpest) })} />
         </div>
       ) : (
         <div className="grid cols-4" style={{ marginBottom: 14 }}>
-          <StatTile label="比赛场次" value={games.length} unit=" 场"
-            hint={finished.length ? `其中 ${finished.length} 场已结束，猜对 ${hits} 场` : undefined} />
-          <StatTile label="最有把握" value={sure ? `${favorite(sure, teamById).cn} ${(conf(sure) * 100).toFixed(0)}%` : '—'} />
-          <StatTile label="最胶着" value={close ? matchup(close) : '—'}
-            hint={close ? `主队胜率 ${(close.prediction.homeWinProb * 100).toFixed(0)}%` : undefined} />
-          <StatTile label="与盘口分歧最大" value={split ? matchup(split) : '—'}
-            hint={split ? `模型比盘口${split.market.edge > 0 ? '更看好主队' : '更看好客队'} ${Math.abs(split.market.edge)} 分` : '暂无盘口'} />
+          <StatTile label={t('today.tile.games')} value={games.length} unit={t('common.unit.games', { count: games.length })}
+            hint={finished.length ? t('today.tile.someFinished', { n: finished.length, hits }) : undefined} />
+          <StatTile label={t('today.tile.sure')} value={sure ? `${fmt.teamName(favorite(sure, teamById))} ${fmt.pct(conf(sure), 0)}` : '—'} />
+          <StatTile label={t('today.tile.close')} value={close ? matchup(close) : '—'}
+            hint={close ? t('today.tile.closeHint', { p: close.prediction.homeWinProb }) : undefined} />
+          <StatTile label={t('today.tile.split')} value={split ? matchup(split) : '—'}
+            hint={split ? t(split.market.edge > 0 ? 'today.tile.splitHome' : 'today.tile.splitAway', { pts: Math.abs(split.market.edge) }) : t('today.tile.noMarket')} />
         </div>
       )}
 
       {data.loading || !date ? <Loading /> : games.length === 0 ? (
-        <div className="card"><div className="empty">这一天没有比赛</div></div>
+        <div className="card"><div className="empty">{t('today.empty')}</div></div>
       ) : (
         <div className="grid cols-2">
           {games.map((g) => (
-            <TodayCard key={g.gameId} game={g} teamById={teamById} outByTeam={outByTeam} out={out} fmt={fmt} />
+            <TodayCard key={g.gameId} game={g} teamById={teamById} outByTeam={outByTeam} out={out} fmt={fmt} t={t} />
           ))}
         </div>
       )}
 
       <p className="note" style={{ marginTop: 14 }}>
-        胜率与比分只把你在侧栏或球队页勾选的缺阵球员计入；伤病名单默认<b>不计入</b>正式预测。
-        侧栏「套用「确定缺阵」」是实验功能：按 IMP 估算缺阵影响，未经回测验证（伤病影响正在影子模式检验）。已结束比赛的预测用开打前的评级重算，且不套用缺阵勾选，
-        所以「猜对胜方」反映的是赛前判断；但名单和模型参数是现在的，并不是当时存档的那一份。
+        {t('today.note1')}<b>{t('today.noteBold')}</b>{t('today.note2', { applyOut: t('app.applyOut') })}
       </p>
     </>
   );
@@ -172,7 +167,7 @@ export default function Today({ initial = [] }) {
 const conf = (g) => Math.max(g.prediction.homeWinProb, 1 - g.prediction.homeWinProb);
 const favorite = (g, teamById) => teamById.get(g.prediction.homeWinProb >= 0.5 ? g.homeId : g.awayId) ?? {};
 
-function TodayCard({ game: g, teamById, outByTeam, out, fmt }) {
+function TodayCard({ game: g, teamById, outByTeam, out, fmt, t }) {
   const home = teamById.get(g.homeId);
   const away = teamById.get(g.awayId);
   const p = g.prediction;
@@ -185,16 +180,16 @@ function TodayCard({ game: g, teamById, outByTeam, out, fmt }) {
     <div className="game-card" onClick={() => go(`predict/${g.awayId}/${g.homeId}/${g.gameId}`)}>
       <div className="top">
         <span>
-          {fmt.timeZoned(g.dateTimeUtc)} 开打
+          {t('common.tipoff', { time: fmt.timeZoned(g.dateTimeUtc) })}
           {g.label && <span className="chip blue" style={{ marginLeft: 6 }}>{g.label}</span>}
         </span>
         <span>{g.national?.join(' / ') || g.arena}</span>
       </div>
 
-      <Row team={away} side="客" prob={1 - p.homeWinProb} rest={p.restAway}
+      <Row team={away} side={t('common.side.away')} fmt={fmt} prob={1 - p.homeWinProb} rest={p.restAway}
         score={final ? g.awayScore : p.awayScore} bold={final ? g.awayScore > g.homeScore : !homeFav} final={final} />
       <div style={{ height: 6 }} />
-      <Row team={home} side={g.neutral ? '中立' : '主'} prob={p.homeWinProb} rest={p.restHome}
+      <Row team={home} side={g.neutral ? t('common.side.neutral') : t('common.side.home')} fmt={fmt} prob={p.homeWinProb} rest={p.restHome}
         score={final ? g.homeScore : p.homeScore} bold={final ? g.homeScore > g.awayScore : homeFav} final={final} />
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
@@ -207,21 +202,21 @@ function TodayCard({ game: g, teamById, outByTeam, out, fmt }) {
       <div className="note" style={{ marginTop: 8, lineHeight: 1.7 }}>
         {final ? (
           <>
-            <span className="chip">终</span> 赛前预测{' '}
+            <span className="chip">{t('today.final')}</span> {t('today.preGame')}{' '}
             <b className="mono">{p.awayScore.toFixed(0)} - {p.homeScore.toFixed(0)}</b>
-            {' · '}实际 <b className="mono">{g.awayScore} - {g.homeScore}</b>{' '}
-            <span className={`chip ${g.hit ? 'hit' : 'miss'}`}>{g.hit ? '✓ 猜对胜方' : '✗ 猜错胜方'}</span>
+            {' · '}{t('today.actual')} <b className="mono">{g.awayScore} - {g.homeScore}</b>{' '}
+            <span className={`chip ${g.hit ? 'hit' : 'miss'}`}>{g.hit ? t('today.pickRight') : t('today.pickWrong')}</span>
           </>
         ) : (
           <>
-            {started && <><span className="chip injury-dtd">已开赛</span> 比分待数据刷新 · </>}
-            让分 主队 <b className="mono">{spread > 0 ? `+${spread.toFixed(1)}` : spread.toFixed(1)}</b>
-            {' · '}总分 <b className="mono">{p.total.toFixed(0)}</b>
+            {started && <><span className="chip injury-dtd">{t('today.started')}</span> {t('today.scorePending')} · </>}
+            {t('today.spreadHome')} <b className="mono">{spread > 0 ? `+${spread.toFixed(1)}` : spread.toFixed(1)}</b>
+            {' · '}{t('today.total')} <b className="mono">{p.total.toFixed(0)}</b>
             {g.market && (
               <>
-                {' · '}盘口 <b className="mono">{g.market.spread > 0 ? `+${g.market.spread}` : g.market.spread}</b>
+                {' · '}{t('today.line')} <b className="mono">{g.market.spread > 0 ? `+${g.market.spread}` : g.market.spread}</b>
                 <span className={Math.abs(g.market.edge) >= 3 ? 'pos' : 'dim'}>
-                  （分歧 {g.market.edge > 0 ? `+${g.market.edge}` : g.market.edge}）
+                  {t('today.gap', { edge: g.market.edge > 0 ? `+${g.market.edge}` : g.market.edge })}
                 </span>
               </>
             )}
@@ -229,14 +224,14 @@ function TodayCard({ game: g, teamById, outByTeam, out, fmt }) {
         )}
       </div>
 
-      {!final && [away, home].map((t) => (
-        <Injuries key={t?.teamId} team={t} list={outByTeam.get(t?.teamId) ?? []} applied={out?.[t?.teamId] ?? []} />
+      {!final && [away, home].map((tm) => (
+        <Injuries key={tm?.teamId} team={tm} list={outByTeam.get(tm?.teamId) ?? []} applied={out?.[tm?.teamId] ?? []} t={t} />
       ))}
     </div>
   );
 }
 
-function Row({ team, side, prob, rest, score, bold, final }) {
+function Row({ team, side, prob, rest, score, bold, final, fmt }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <TeamLogo team={team} size={24} />
@@ -244,11 +239,11 @@ function Row({ team, side, prob, rest, score, bold, final }) {
         flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         fontSize: 13, fontWeight: bold ? 700 : 400, color: bold ? 'var(--text)' : 'var(--text-dim)',
       }}>
-        {team?.cn}
+        {fmt.teamName(team)}
         <span className="dim" style={{ fontSize: 11, marginLeft: 6, fontWeight: 400 }}>
           {side} · {team?.wins}-{team?.losses}
         </span>
-        {rest === 0 && <span className="chip injury-dtd" style={{ marginLeft: 6 }}>{restLabel(rest)}</span>}
+        {rest === 0 && <span className="chip injury-dtd" style={{ marginLeft: 6 }}>{fmt.rest(rest)}</span>}
       </span>
       {!final && <span className="mono dim" style={{ fontSize: 11 }}>{(prob * 100).toFixed(0)}%</span>}
       <span className="mono" style={{ minWidth: 30, textAlign: 'right', fontWeight: bold ? 750 : 500, color: bold ? 'var(--text)' : 'var(--text-dim)' }}>
@@ -259,7 +254,7 @@ function Row({ team, side, prob, rest, score, bold, final }) {
 }
 
 /** 伤病名单：标出哪些人已经计入了预测（被勾选为缺阵） */
-function Injuries({ team, list, applied }) {
+function Injuries({ team, list, applied, t }) {
   const outs = list.filter((i) => i.status === 'out');
   const dtd = list.filter((i) => i.status !== 'out');
   if (!outs.length && !dtd.length) return null;
@@ -269,11 +264,11 @@ function Injuries({ team, list, applied }) {
       <b>{team?.abbr}</b>{' '}
       {outs.map((i) => (
         <span key={i.playerId} className="chip injury-out" style={{ marginRight: 4 }}
-          title={`${i.type ?? ''} ${i.detail ?? ''}${on.has(i.playerId) ? ' · 已计入预测' : ' · 未计入预测'}`}>
+          title={`${i.type ?? ''} ${i.detail ?? ''} · ${on.has(i.playerId) ? t('today.counted') : t('today.notCounted')}`}>
           {i.name}{on.has(i.playerId) ? ' ✓' : ''}
         </span>
       ))}
-      {dtd.length > 0 && <span className="dim">观察 {dtd.length} 人</span>}
+      {dtd.length > 0 && <span className="dim">{t('today.dtdCount', { count: dtd.length })}</span>}
     </div>
   );
 }

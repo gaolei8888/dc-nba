@@ -4,17 +4,13 @@ import { api, withOut } from '../lib/api.js';
 import { TeamCell, Loading, ErrorBox, ProbBar, StatTile } from '../components/common.jsx';
 import { useI18n } from '../i18n/react.jsx';
 import { groupByDay } from '../lib/gameDays.js';
-import { fmtDate, restLabel, probColor, num, snapshotAge } from '../lib/format.js';
+import { probColor, num } from '../lib/format.js';
 
-const TYPES = [
-  { value: 'regular', label: '常规赛' },
-  { value: 'preseason', label: '季前赛' },
-  { value: 'all', label: '全部' },
-];
+const TYPES = ['regular', 'preseason', 'all'];
 
 export default function Schedule() {
   const { meta, teams, teamById, out, params, setAccent } = useApp();
-  const { tz } = useI18n();
+  const { tz, t, fmt } = useI18n();
   const [type, setType] = useState('regular');
   const [teamFilter, setTeamFilter] = useState('all');
   const [from, setFrom] = useState('');
@@ -46,7 +42,7 @@ export default function Schedule() {
   // 比看不到盘口更容易被误导
   const withOdds = useMemo(() => (data.games ?? []).filter((g) => g.market), [data.games]);
   const oddsCount = withOdds.length;
-  const oddsAge = oddsCount ? snapshotAge(withOdds[0].market.fetchedAt) : null;
+  const oddsAge = oddsCount ? fmt.snapshotAge(withOdds[0].market.fetchedAt) : null;
 
   const byDate = useMemo(() => {
     if (!data.games) return [];
@@ -64,80 +60,80 @@ export default function Schedule() {
   return (
     <>
       <div className="page-head">
-        <h1>{meta.targetSeason} 赛程</h1>
-        <p>官方完整赛程，每场附模型预测胜率与比分。点击任意比赛进入详细预测。</p>
+        <h1>{t('schedule.title', { season: meta.targetSeason })}</h1>
+        <p>{t('schedule.intro')}</p>
       </div>
 
       <div className="toolbar">
         <div className="field">
-          <label>类型</label>
+          <label>{t('schedule.filter.type')}</label>
           <select value={type} onChange={(e) => setType(e.target.value)}>
-            {TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+            {TYPES.map((v) => <option key={v} value={v}>{t(`schedule.type.${v}`)}</option>)}
           </select>
         </div>
         <div className="field">
-          <label>球队</label>
+          <label>{t('schedule.filter.team')}</label>
           <select value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} style={{ minWidth: 150 }}>
-            <option value="all">全部球队</option>
-            {[...teams].sort((a, b) => a.cn.localeCompare(b.cn, 'zh')).map((t) => (
-              <option key={t.teamId} value={t.teamId}>{t.cn}</option>
+            <option value="all">{t('schedule.filter.allTeams')}</option>
+            {fmt.sortTeams(teams).map((tm) => (
+              <option key={tm.teamId} value={tm.teamId}>{fmt.teamName(tm)}</option>
             ))}
           </select>
         </div>
         <div className="field">
-          <label>起始日期（按美东日期）</label>
+          <label>{t('schedule.filter.from')}</label>
           <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
         </div>
         <div className="field">
-          <label>结束日期（按美东日期）</label>
+          <label>{t('schedule.filter.to')}</label>
           <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
         </div>
         <div className="field">
           <label>&nbsp;</label>
-          <button className="btn" onClick={() => { setFrom(''); setTo(''); setTeamFilter('all'); }}>重置</button>
+          <button className="btn" onClick={() => { setFrom(''); setTo(''); setTeamFilter('all'); }}>{t('schedule.filter.reset')}</button>
         </div>
       </div>
 
       <div className="grid cols-5" style={{ marginBottom: 14 }}>
-        <StatTile label="比赛场次" value={games.length} unit=" 场" />
+        <StatTile label={t('schedule.tile.games')} value={games.length} unit={t('common.unit.games', { count: games.length })} />
         <StatTile
-          label="赛前预测命中"
-          value={finished.length ? `${((hits / finished.length) * 100).toFixed(1)}%` : '—'}
-          hint={finished.length ? `已结束 ${finished.length} 场，猜对胜方 ${hits} 场` : '还没有已结束的比赛'}
+          label={t('schedule.tile.hitRate')}
+          value={finished.length ? fmt.pct(hits / finished.length, 1) : '—'}
+          hint={finished.length ? t('schedule.tile.hitHint', { n: finished.length, hits }) : t('schedule.tile.noneFinished')}
         />
-        <StatTile label="比赛日" value={byDate.length} unit=" 天" />
-        <StatTile label="日期范围" value={dateRange} />
-        <StatTile label="势均力敌" value={closeGames} unit=" 场" hint="双方胜率差距在 12 个百分点以内" />
+        <StatTile label={t('schedule.tile.days')} value={byDate.length} unit={t('common.unit.days', { count: byDate.length })} />
+        <StatTile label={t('schedule.tile.range')} value={dateRange} hint={fmt.zoneLabel()} />
+        <StatTile label={t('schedule.tile.close')} value={closeGames} unit={t('common.unit.games', { count: closeGames })} hint={t('schedule.tile.closeHint')} />
       </div>
 
       {data.loading ? <Loading /> : (
         <div className="card">
           <h2>
-            赛程列表
+            {t('schedule.list')}
             <span className="sub">
-              胜率为主队获胜概率；已结束的比赛显示赛前预测（用开打前的评级重算）
-              {oddsAge && ` · 盘口 ${oddsCount} 场，${oddsAge.text}`}
+              {t('schedule.listNote')}
+              {oddsAge && t('schedule.oddsNote', { count: oddsCount, age: oddsAge.text })}
             </span>
           </h2>
           {oddsAge?.stale && (
             <div className="market-stale" style={{ marginBottom: 10 }}>
-              盘口是 {oddsAge.days} 天前抓的，博彩商此后可能已经改线。以当前实际盘口为准。
+              {t('schedule.oddsStale', { days: oddsAge.days })}
             </div>
           )}
           <div className="table-wrap" style={{ maxHeight: 700, overflowY: 'auto' }}>
             <table className="data">
               <thead>
                 <tr>
-                  <th className="left" style={{ width: 112 }}>日期</th>
-                  <th className="left" style={{ width: 184 }}>客队</th>
-                  <th className="left" style={{ width: 184 }}>主队</th>
-                  <th style={{ width: 58 }}>休息</th>
-                  <th style={{ width: 122 }}>主队胜率</th>
-                  <th style={{ width: 84 }}>预测比分</th>
-                  <th style={{ width: 118 }} title="已结束比赛的真实比分，以及赛前预测的胜方是否猜对">实际 / 命中</th>
-                  <th style={{ width: 62 }}>总分</th>
-                  <th style={{ width: 96 }} title="博彩让分（主队），以及模型与它的分歧">盘口 / 分歧</th>
-                  <th className="left" style={{ width: 170 }}>场馆 / 备注</th>
+                  <th className="left" style={{ width: 112 }}>{t('schedule.col.date')} <span className="dim" style={{ fontWeight: 400 }}>{fmt.zoneLabel()}</span></th>
+                  <th className="left" style={{ width: 184 }}>{t('schedule.col.away')}</th>
+                  <th className="left" style={{ width: 184 }}>{t('schedule.col.home')}</th>
+                  <th style={{ width: 58 }}>{t('schedule.col.rest')}</th>
+                  <th style={{ width: 122 }}>{t('schedule.col.homeProb')}</th>
+                  <th style={{ width: 84 }}>{t('schedule.col.predScore')}</th>
+                  <th style={{ width: 118 }} title={t('schedule.col.actualTip')}>{t('schedule.col.actual')}</th>
+                  <th style={{ width: 62 }}>{t('schedule.col.total')}</th>
+                  <th style={{ width: 96 }} title={t('schedule.col.lineTip')}>{t('schedule.col.line')}</th>
+                  <th className="left" style={{ width: 170 }}>{t('schedule.col.venue')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -147,11 +143,11 @@ export default function Schedule() {
                     className="clickable"
                     onClick={() => go(`predict/${g.awayId}/${g.homeId}/${g.gameId}`)}
                   >
-                    <td className="left sched-date">{i === 0 ? fmtDate(date) : ''}</td>
+                    <td className="left sched-date">{i === 0 ? fmt.date(date) : ''}</td>
                     <td className="left"><TeamCell team={teamById.get(g.awayId)} size={20} showAbbr={false} /></td>
                     <td className="left"><TeamCell team={teamById.get(g.homeId)} size={20} showAbbr={false} /></td>
                     <td className="dim" style={{ fontSize: 10.5 }}>
-                      {restLabel(g.prediction.restAway)}<br />{restLabel(g.prediction.restHome)}
+                      {fmt.rest(g.prediction.restAway)}<br />{fmt.rest(g.prediction.restHome)}
                     </td>
                     <td>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
@@ -168,7 +164,7 @@ export default function Schedule() {
                       {g.homeScore != null ? (
                         <>
                           <b>{g.awayScore} - {g.homeScore}</b>{' '}
-                          <span className={`chip ${g.hit ? 'hit' : 'miss'}`}>{g.hit ? '✓ 命中' : '✗ 未中'}</span>
+                          <span className={`chip ${g.hit ? 'hit' : 'miss'}`}>{g.hit ? t('schedule.hit') : t('schedule.miss')}</span>
                         </>
                       ) : <span className="dim">—</span>}
                     </td>
@@ -192,7 +188,7 @@ export default function Schedule() {
               </tbody>
             </table>
           </div>
-          {games.length === 0 && <div className="empty">没有符合条件的比赛</div>}
+          {games.length === 0 && <div className="empty">{t('schedule.empty')}</div>}
         </div>
       )}
     </>
