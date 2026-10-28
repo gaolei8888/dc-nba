@@ -36,6 +36,9 @@ NBA_MAX_REQUESTS=${NBA_MAX_REQUESTS:-180} NBA_MAX_PER_DAY=${NBA_MAX_PER_DAY:-500
 if [ "$s" != 0 ] && [ "$s" != 3 ]; then log "生成失败（${s}），不推送"; exit 1; fi
 [ -s "$OUT" ] || { log "没有 $OUT"; exit 1; }
 
+# 本机的服务器密钥带口令，只能经 ssh-agent 用（launchd 会把会话的 SSH_AUTH_SOCK 传给本任务）；
+# 重启后 agent 是空的，先把钥匙串里存过口令的私钥装进去（装不上也不报错，ssh 失败时日志里看得到）
+ssh-add --apple-load-keychain -q 2>/dev/null || true
 # 拿服务器刷新同一把锁再替换，免得 refresh.sh 拷数据拷到一半
 $SSH "$REMOTE" "flock -w 900 $RDIR/.refresh.lock sh -c 'cat > $RDIR/data/player-values.json.tmp && mv $RDIR/data/player-values.json.tmp $RDIR/data/player-values.json'" < "$OUT"
 log "已推送到 ${REMOTE}:${RDIR}/data/player-values.json"
