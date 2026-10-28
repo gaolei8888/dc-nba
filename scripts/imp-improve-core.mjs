@@ -273,7 +273,7 @@ function statCurves(agePairs, { weight = 'harm', impute = false } = {}) {
  */
 const DEF = {
   k: 3200, mEff: false, pad: 0, lam: 3000, multi: null, src: 'apm', srcLam: 6000, span: 3, hl: 1, prior: null,
-  w: 0.35, c: 0, sides: false, age: 0, ageStat: 0, align: false, ageOpt: null,
+  w: 0.35, c: 0, sides: false, age: 0, ageStat: 0, align: false, ageOpt: null, apmAge: 0,
 };
 
 function predictor(ctx, cfgIn) {
@@ -300,7 +300,9 @@ function predictor(ctx, cfgIn) {
     }
     prior = { key: `${ctx.key}|${cfg.prior}|${cfg.lam}|${lamO}|${lamD}|${cfg.pad}`, o, d };
   }
-  const M = meas(s, { src: cfg.src, lam: cfg.srcLam, span: cfg.span, hl: cfg.hl, prior });
+  const M = cfg.apmAge
+    ? measAged(ctx, { span: cfg.span, hl: cfg.hl, alpha: cfg.apmAge, lam: cfg.srcLam })
+    : meas(s, { src: cfg.src, lam: cfg.srcLam, span: cfg.span, hl: cfg.hl, prior });
 
   // 每侧的 SPM（含多季）与人群均值
   const sideKeys = cfg.sides ? ['o', 'd'] : ['t'];
@@ -338,6 +340,43 @@ function predictor(ctx, cfgIn) {
     if (g) v += cfg.age * g.at(p.age);
     return v;
   };
+}
+
+/**
+ * 实验 9a：年龄对齐的衰减 APM。窗口内第 t 季每行组合的目标先对齐到各球员 N+1 岁：
+ *   off += α/2·Σ G_i，def −= α/2·Σ G_i，G_i = cumShift(g, age_{i,t}, age_{i,N+1})
+ * g 为总值年龄曲线（ageCurve，收缩前 IMP 单位 = APM 单位，只在 ctx.agePairs 上拟合）。
+ * 平移加在进岭回归之前的原始目标上，之后才收缩，所以没有实验 5 那种「加在收缩后」的 3 倍放大。
+ */
+const agedCache = new Map();
+function measAged(ctx, { span, hl, alpha, lam = 6000 }) {
+  const key = `${ctx.key}|${ctx.s}|${span}|${hl}|${alpha}|${lam}`;
+  if (!agedCache.has(key)) {
+    const g = ageCurve(ctx.train, ctx.agePairs);
+    const w = window(ctx.s, span);
+    const bySeason = w.map((t) => {
+      const k = idx(ctx.s) - idx(t); // 第 t 季距第 N 季几季
+      const memo = new Map();
+      const shiftOf = (id) => {
+        if (memo.has(id)) return memo.get(id);
+        const ageT = byId[t].get(id)?.age; const ageN = byId[ctx.s].get(id)?.age;
+        const a0 = Number.isFinite(ageT) ? ageT : (Number.isFinite(ageN) ? ageN - k : null);
+        const T = Number.isFinite(ageN) ? ageN + 1 : (a0 !== null ? a0 + k + 1 : null);
+        const v = a0 === null || T === null ? 0 : cumShift(g.at, a0, T);
+        memo.set(id, v);
+        return v;
+      };
+      return {
+        season: t,
+        rows: lineups[t].map((l) => {
+          const S = l.players.reduce((acc, id) => acc + shiftOf(id), 0);
+          return { ...l, off: l.off + (alpha * S) / 2, def: l.def - (alpha * S) / 2 };
+        }),
+      };
+    });
+    agedCache.set(key, decayedApm(bySeason, { span, halfLife: hl, lambda: lam }));
+  }
+  return agedCache.get(key);
 }
 
 /** 一个 cfg 在每个赛季对上的两尺（每对的 ctx 剔除该对的第 N 季） */

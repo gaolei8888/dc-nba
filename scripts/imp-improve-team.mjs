@@ -29,7 +29,8 @@ const CANDS = {
   base: {},                                  // 现行收缩 IMP
   combo: { span: 4, hl: 3, ageStat: 1 },     // 组合（8c × 5b，多数折选中的参数）
   apm8c: { span: 4, hl: 3 },                 // 仅 8c
-  age5b: { ageStat: 1 },                     // 仅 5b
+  age5b: { ageStat: 1 },                     // 仅 5b（线上采纳的配置，与 fit-impact 一致：APM 3 季/半衰期 1、k=3200）
+  exp9a: { ageStat: 1, span: 4, hl: 3, apmAge: 1 }, // 实验 9a 候选
 };
 
 /** 截至 upto 季（含）的球员价值，只用 ≤upto 季的数据（calibratedValues 见 imp-improve-core.mjs） */

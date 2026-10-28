@@ -162,3 +162,30 @@ export function verdict(dA, dO, { maxLose = Math.floor(dA.length / 2), eps = 1e-
   const loseA = dA.filter((v) => v < -eps).length; const loseO = dO.filter((v) => v < -eps).length;
   return { mA, mO, loseA, loseO, adopt: mA > 0 && mO > 0 && loseA <= maxLose && loseO <= maxLose };
 }
+
+/**
+ * 实验 9 子群检查：把预测线性映射到尺子目标（同一对内 OLS），返回残差 实际 − 映射值。
+ * 相关系数不定义「误差」，所以先校准再看残差；映射用该对全部评估球员。
+ */
+export function calibratedResiduals(x, y) {
+  const n = x.length;
+  const mx = x.reduce((a, v) => a + v, 0) / n; const my = y.reduce((a, v) => a + v, 0) / n;
+  let sxy = 0; let sxx = 0;
+  for (let i = 0; i < n; i++) { sxy += (x[i] - mx) * (y[i] - my); sxx += (x[i] - mx) ** 2; }
+  const b = sxx > 0 ? sxy / sxx : 0;
+  return y.map((v, i) => v - (my + b * (x[i] - mx)));
+}
+
+/** 子群的人数、平均带符号残差（<0 = 被高估）、平均绝对残差 */
+export function residualStats(res) {
+  const n = res.length;
+  if (!n) return { n: 0, bias: NaN, mae: NaN };
+  return { n, bias: res.reduce((a, v) => a + v, 0) / n, mae: res.reduce((a, v) => a + Math.abs(v), 0) / n };
+}
+
+/** 伤病/低迷季：第 N 季分钟 < frac × 前两季（有记录的）平均，且前两季至少一季 ≥ minPrior 分钟 */
+export function isSlumpSeason(mN, priorMinutes, { frac = 0.6, minPrior = 500 } = {}) {
+  const ok = priorMinutes.filter((m) => Number.isFinite(m) && m > 0);
+  if (!ok.length || !ok.some((m) => m >= minPrior)) return false;
+  return mN < frac * (ok.reduce((a, v) => a + v, 0) / ok.length);
+}

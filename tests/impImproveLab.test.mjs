@@ -114,3 +114,19 @@ test('multiSeasonAvg：向量里的缺失项只跳过那一季的那一项', asy
   assert.equal(r.mEff, 200);
   assert.ok(Number.isNaN(multiSeasonAvg([{ v: [1, NaN], m: 100 }], [1]).v[1]));
 });
+
+test('calibratedResiduals / residualStats / isSlumpSeason', async () => {
+  const { calibratedResiduals, residualStats, isSlumpSeason } = await import('../server/impImproveLab.mjs');
+  // y = 2x + 1 完全线性：残差全为 0；量纲不影响
+  const r = calibratedResiduals([1, 2, 3, 4], [3, 5, 7, 9]);
+  r.forEach((v) => assert.ok(Math.abs(v) < 1e-12));
+  const r2 = calibratedResiduals([0, 0, 1, 1], [0, 2, 1, 3]);
+  assert.deepEqual(r2, [-1, 1, -1, 1]);
+  assert.deepEqual(residualStats([-1, 1, -2]), { n: 3, bias: -2 / 3, mae: 4 / 3 });
+  // Morant 2025-26：568 分钟 vs 前两季 1520、318 → 平均 919 的 60% 是 551，按预注册定义**不算**（2023-24 也只打了 9 场）
+  assert.equal(isSlumpSeason(568, [1520, 318]), false);
+  assert.equal(isSlumpSeason(568, [1520, 1950]), true);
+  assert.equal(isSlumpSeason(1500, [1600, 1700]), false);
+  assert.equal(isSlumpSeason(100, [300, 400]), false);    // 前两季都不够 500 分钟
+  assert.equal(isSlumpSeason(100, []), false);
+});

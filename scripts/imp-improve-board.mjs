@@ -17,6 +17,7 @@ const last = seasons.at(-1);
 const CANDS = {
   '现行（v1）': {},
   '采纳 5b（逐项年龄）': { ageStat: 1 },
+  '9a 年龄对齐长记忆（候选，未接入）': { ageStat: 1, span: 4, hl: 3, apmAge: 1 },
   '8c×5b（通过但未接入）': { span: 4, hl: 3, ageStat: 1 },
   '仅 8c（未接入）': { span: 4, hl: 3 },
   '8d 年龄对齐多季 h=5 span5（未采纳）': { multi: { mode: 'exp', h: 5, level: 'feat', span: 5 }, ageStat: 1 },
