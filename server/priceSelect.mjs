@@ -2,7 +2,7 @@
  * 价格时点标注与博彩公司选择链。纯函数。
  *
  * 只用美国持牌博彩商（US_BOOKS；Betfair 等交易所不用于定价）。
- * 选价顺序：先按公司优先级挑一家，再在这家里取时点（close > current）。
+ * 选价顺序（M15 时点优先）：先定时点，再沿公司链找该时点的合格价；收盘情景 close 全链无合格价才退 current。
  * 「挑最优价」只作单独标注的敏感性情景。
  */
 import { cleanItems, US_BOOKS } from './books.mjs';
@@ -39,12 +39,14 @@ function chainOf(books) {
   return [...head, ...tail];
 }
 
-/** 某家在情景下的候选价：{ ml, at }，没有返回 null。收盘情景 close 优先、否则 current */
-function candidate(b, scenario) {
-  if (scenario === 'open') return b.open ? { ml: b.open, at: 'open' } : null;
-  if (b.close) return { ml: b.close, at: 'close' };
-  if (b.current) return { ml: b.current, at: 'current' };
-  return null;
+/**
+ * 时点优先（裁定 M15，spec 一.4）：
+ *   收盘情景：整条链找合格 close；链上没有任何合格 close 才再走一遍链找 current（标 currentAsClose）；
+ *   开盘情景：整条链找合格 open，不退到 close / current。
+ * 某家的价异常则顺延到下一家（同一时点）。
+ */
+function timepoints(scenario) {
+  return scenario === 'open' ? ['open'] : ['close', 'current'];
 }
 
 /**
@@ -62,13 +64,17 @@ export function selectPrice(books, scenario, { book = 'chain' } = {}) {
   }
 
   let skipped = false;
-  const valid = [];   // 通过异常检查的候选，按链顺序
-  for (const name of chain) {
-    const c = candidate(books[name], scenario);
-    if (!c) continue;
-    if (priceAnomaly(c.ml)) { skipped = true; continue; }
-    valid.push({ name, ...c });
-    if (book !== 'best') break;
+  let at = null;
+  let valid = [];   // 该时点上通过异常检查的候选，按链顺序
+  for (const t of timepoints(scenario)) {
+    for (const name of chain) {
+      const ml = books[name][t];
+      if (!ml) continue;
+      if (priceAnomaly(ml)) { skipped = true; continue; }
+      valid.push({ name, ml, at: t });
+      if (book !== 'best') break;
+    }
+    if (valid.length) { at = t; break; }
   }
   if (!valid.length) {
     if (skipped) return { missing: 'anomaly' };
@@ -83,7 +89,7 @@ export function selectPrice(books, scenario, { book = 'chain' } = {}) {
       if (decimal(v.ml[1]) > decimal(away.ml[1])) away = v;
     }
     flags.push('bestPrice');
-    if (valid.some((v) => v.at === 'current')) flags.push('currentAsClose');
+    if (at === 'current') flags.push('currentAsClose');
     if (skipped) flags.push('skippedAnomaly');
     return { ml: [home.ml[0], away.ml[1]], books: [home.name, away.name], priceAt: scenario, closeMl: null, flags };
   }

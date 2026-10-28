@@ -4,10 +4,19 @@ import fs from 'node:fs';
 import { selectPrice, compactBooks, BOOK_PRIORITY } from '../server/priceSelect.mjs';
 import { auditSeason } from '../server/dataIntegrity.mjs';
 
-test('选择链：先按博彩公司优先级取一家，再在这家里取时点（close > current）', () => {
+test('时点优先（M15）：DK 只有 current、ESPN BET 有 close -> 收盘情景取 ESPN BET close', () => {
   const books = { draftkings: { open: null, close: null, current: [-120, 100] }, espnbet: { open: null, close: [-130, 110], current: [-130, 110] } };
   const p = selectPrice(books, 'close', {});
-  assert.deepEqual([p.books, p.priceAt, p.ml, p.flags], [['draftkings', 'draftkings'], 'current', [-120, 100], ['currentAsClose']]);
+  assert.deepEqual([p.books, p.priceAt, p.ml, p.flags], [['espnbet', 'espnbet'], 'close', [-130, 110], []]);
+});
+test('时点优先（M15）：全链都没有合格 close 才退到 current，按链顺序并标 currentAsClose', () => {
+  const books = { draftkings: { open: null, close: [150, 130], current: [-120, 100] }, espnbet: { open: null, close: null, current: [-130, 110] } };
+  const p = selectPrice(books, 'close', {});
+  assert.deepEqual([p.books, p.priceAt, p.ml, p.flags], [['draftkings', 'draftkings'], 'current', [-120, 100], ['currentAsClose', 'skippedAnomaly']]);
+});
+test('时点优先（M15）：开盘情景只认 open，不退到 close / current', () => {
+  const books = { draftkings: { open: null, close: [-120, 100], current: [-120, 100] } };
+  assert.deepEqual(selectPrice(books, 'open', {}), { missing: 'noOpen' });
 });
 test('开盘情景：链上第一家有 open 的；CLV 用同一家的 close', () => {
   const books = { draftkings: { open: null, close: [-120, 100], current: null }, espnbet: { open: [-140, 120], close: [-130, 110], current: null } };
@@ -85,17 +94,15 @@ test('真实：滚球价（DK close/current ±9000）被拒；开盘价正常可
   const o = pick('0022501139', 'open');
   assert.deepEqual([o.ml, o.closeMl, o.flags], [[-4500, 1700], null, ['noCloseForClv']]);
 });
-test('真实：2022-23 没有 open；BetMGM current 低抽水价顺延，链上先取 DK current（收盘情景标 currentAsClose）', () => {
+test('真实：2022-23 没有 open；收盘情景 DK 只有 current，改取 ESPN BET 的 close', () => {
   assert.deepEqual(pick('0022200683', 'open'), { missing: 'noOpen' });
   const c = pick('0022200683', 'close');
-  assert.deepEqual([c.books[0], c.priceAt, c.ml, c.flags], ['draftkings', 'current', [-110, -110], ['currentAsClose']]);
+  assert.deepEqual([c.books[0], c.priceAt, c.ml, c.flags], ['espnbet', 'close', [-115, -115], []]);
   // 指定 BetMGM：current [110,-105] 是低抽水异常
   assert.deepEqual(pick('0022200683', 'close', { book: 'betmgm' }), { missing: 'anomaly' });
-  // 最优价里 BetMGM 的异常价不参与
+  // 最优价：全链只有 ESPN BET 有 close，其余只有 current（含 BetMGM 异常价）-> 只用 close
   const best = pick('0022200683', 'close', { book: 'best' });
-  assert.ok(best.flags.includes('skippedAnomaly'));
-  // BetRivers 主 -105、PointsBet 客 -105 各自最高；BetMGM 的主 +110 异常价不参与
-  assert.deepEqual([best.ml, best.books], [[-105, -105], ['betrivers', 'pointsbet']]);
+  assert.deepEqual([best.ml, best.books, best.flags], [[-115, -115], ['espnbet', 'espnbet'], ['bestPrice']]);
 });
 test('真实：审计与选价链共用 homeAwayStatus，翻转场数一致', () => {
   const a = auditSeason({ season: 'real', records: fx.records, cache: fx.cache });
