@@ -60,27 +60,43 @@ const PT_BASE = {
   TeamID: 0, VsConference: '', VsDivision: '', Weight: '',
 };
 
+/** 往前数 back 个赛季：'2025-26', 2 -> '2023-24' */
+const seasonBefore = (season, back) => {
+  const y = Number(season.slice(0, 4)) - back;
+  return `${y}-${String((y + 1) % 100).padStart(2, '0')}`;
+};
+
+/**
+ * IMP 的 APM 那一半要用的五人组合缓存：以 PRIOR_SEASON 为最后一季、往前共 decaySpan 季。
+ * 返回缺失的文件名（空数组 = 齐全）。
+ */
+function missingLineups(model) {
+  const span = model.decaySpan ?? 3;
+  const need = Array.from({ length: span }, (_, i) => seasonBefore(PRIOR_SEASON, span - 1 - i));
+  const dir = pathNode.join(DATA_DIR, 'history');
+  return {
+    need,
+    missing: need.filter((s) => !fsNode.existsSync(pathNode.join(dir, `lineups_${s}.json`))),
+  };
+}
+
 /**
  * 读最近几季的五人组合数据，算出时间衰减的 APM。
  * 文件不全就返回 null——IMP 会退回纯统计栏模型，而不是把 APM 当 0。
+ * 正式抓取在 main 开头就会因缺文件而停下（见 missingLineups），这里的 null 只在
+ * ALLOW_NO_APM=1 时才会出现。
  */
 function loadDecayedApm(model) {
+  const { need, missing } = missingLineups(model);
+  if (missing.length) return null;
   const dir = pathNode.join(DATA_DIR, 'history');
-  if (!fsNode.existsSync(dir)) return null;
-  const files = fsNode.readdirSync(dir)
-    .map((f) => f.match(/^lineups_(\d{4}-\d{2})\.json$/))
-    .filter(Boolean)
-    .map((m) => m[1])
-    .sort();
-  if (!files.length) return null;
-  const span = model.decaySpan ?? 3;
-  const bySeason = files.slice(-span).map((season) => ({
+  const bySeason = need.map((season) => ({
     season,
     rows: JSON.parse(fsNode.readFileSync(pathNode.join(dir, `lineups_${season}.json`), 'utf8')).rows,
   }));
   log(`  实测 APM 取自 ${bySeason.map((b) => b.season).join('、')}（越近权重越高）`);
   return decayedApm(bySeason, {
-    span,
+    span: need.length,
     halfLife: model.decayHalfLife ?? 1,
     lambda: model.apmLambda ?? 6000,
   });
@@ -565,6 +581,20 @@ async function main() {
   console.log(`\n抓取 NBA 数据   基准赛季=${PRIOR_SEASON}   预测赛季=${TARGET_SEASON}\n`);
   const t0 = Date.now();
 
+  // 先查本地缓存，再发任何请求：缺 lineups 时 IMP 会悄悄退化成纯统计栏模型（2026-10 线上就这样
+  // 跑了一阵，406 人 IMP 全等于 SPM）。现在直接停下；只做本地试验时可设 ALLOW_NO_APM=1 放行。
+  const impactModelPre = readJsonSafe('impact-model.json');
+  if (impactModelPre) {
+    const { need, missing } = missingLineups(impactModelPre);
+    if (missing.length && process.env.ALLOW_NO_APM !== '1') {
+      console.error(`缺少 data/history/${missing.map((s) => `lineups_${s}.json`).join('、')}`
+        + `（IMP 需要 ${need.join('、')} ${need.length} 季的五人组合数据算 APM）。`
+        + '\n从 GB10 拷：rsync -a lei@192.168.1.49:dc-nba-refresh/data/history/ data/history/'
+        + '\n只做本地试验、明知 IMP 会退化为纯 SPM：ALLOW_NO_APM=1 node scripts/ingest.mjs');
+      process.exit(2);
+    }
+  }
+
   // 先取赛程：它是 teamId -> 三字母缩写 的权威来源
   const schedule = await fetchSchedule(TARGET_SEASON);
   const tricodeById = new Map();
@@ -610,7 +640,11 @@ async function main() {
     }
     log(`综合影响力指标：${n} 名球员（其中 ${withApm} 人有实测 APM，`
       + `模型训练于 ${(impactModel.seasons ?? []).join('、')}；按分钟收缩 k=${MINUTES_SHRINK.k} 向均值 ${mu.toFixed(2)}）`);
-    if (!apm) console.warn('  缺少 data/history/lineups_*.json，IMP 退化为纯统计栏模型');
+    if (!apm) console.warn('  ALLOW_NO_APM=1：缺少 data/history/lineups_*.json，IMP 退化为纯统计栏模型');
+    // 文件在但读出来几乎没人有 APM（文件坏了、球员 ID 对不上），同样不能当正常结果写出去
+    else if (withApm < n * 0.5 && process.env.ALLOW_NO_APM !== '1') {
+      throw new Error(`只有 ${withApm}/${n} 名球员有实测 APM，lineups 缓存可能损坏，停止（未写任何文件）`);
+    }
   } else {
     console.warn('  缺少 data/impact-model.json，跳过综合影响力指标（跑 npm run impact:fit 生成）');
   }

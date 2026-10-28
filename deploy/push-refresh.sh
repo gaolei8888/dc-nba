@@ -28,6 +28,22 @@ if [ ! -d data/history ]; then
   log "缺少 data/history/，ingest 算不出完整的 IMP，停止"
   exit 1
 fi
+# 光有目录不够：IMP 的 APM 那一半要基准赛季及之前共 3 季的 lineups 缓存（impact-model.json 的
+# decaySpan）。2026-10 曾因本机缺这些文件，线上 IMP 全退化成纯 SPM 跑了一阵。ingest 自己也会查。
+y=$(date +%Y); m=$(date +%m); m=${m#0}
+if [ "$m" -ge 7 ]; then py=$((y - 1)); else py=$((y - 2)); fi
+[ -n "${PRIOR_SEASON:-}" ] && py=${PRIOR_SEASON%%-*}
+missing=""
+for back in 2 1 0; do
+  s=$((py - back))
+  f=$(printf 'data/history/lineups_%d-%02d.json' "$s" $(((s + 1) % 100)))
+  [ -s "$f" ] || missing="${missing} ${f}"
+done
+if [ -n "$missing" ]; then
+  log "缺少${missing}（IMP 会退化为纯 SPM），停止，线上未改动"
+  log "从 GB10 拷：rsync -a lei@192.168.1.49:dc-nba-refresh/data/history/ data/history/"
+  exit 1
+fi
 
 log "抓取数据（stats.nba.com）"
 $NODE scripts/ingest.mjs > "${TMPDIR:-/tmp}/dc-nba-ingest.log" 2>&1 || {

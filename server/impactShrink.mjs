@@ -1,5 +1,5 @@
 /**
- * IMP 按样本量收缩的实验（scripts/impact-shrink-lab.mjs 用，线上未接入）。
+ * IMP 按样本量收缩（实验在 scripts/impact-shrink-lab.mjs；形式 C 的 shrinkByMinutes 已由 ingest 接入线上）。
  *
  * 起因：小样本球员的 IMP 偏高，例如 Thybulle 2025-26 只打 30 场 × 16 分钟（480 分钟），
  * IMP +4.45 比东契奇还高。EPM / LEBRON 的做法是：实测（正负值）那一半按回合数
