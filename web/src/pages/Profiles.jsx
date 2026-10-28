@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../App.jsx';
-import { StatTile, DataTable, ErrorBox, Loading } from '../components/common.jsx';
+import { StatTile, DataTable, ErrorBox, Loading, Segmented } from '../components/common.jsx';
 import { pct } from '../lib/format.js';
 import { exportProfile } from '../lib/profiles.js';
 import { loadPlay, summarize } from '../lib/store.js';
@@ -10,17 +10,20 @@ export default function Profiles() {
   const {
     profiles, profileId, createProfile, renameProfile,
     switchProfile, deleteProfile, importProfile,
-    leaderboardOn, leaderboardReason, cloud, connectCloud, disconnectCloud,
+    leaderboardOn, leaderboardReason, cloud, connectCloud, disconnectCloud, meta,
   } = useApp();
 
   const [board, setBoard] = useState(null);
   const [busy, setBusy] = useState(false);
+  // 上季回放（练习）与本季实战分榜
+  const [lbMode, setLbMode] = useState('practice');
 
   const reloadBoard = () => {
     if (!leaderboardOn) return;
-    fetchLeaderboard({ min: 1 }).then(setBoard);
+    setBoard(null);
+    fetchLeaderboard({ min: 1, mode: lbMode }).then(setBoard);
   };
-  useEffect(reloadBoard, [leaderboardOn, cloud?.playerId]);
+  useEffect(reloadBoard, [leaderboardOn, cloud?.playerId, lbMode]);
 
   const [newName, setNewName] = useState('');
   const [code, setCode] = useState('');
@@ -264,6 +267,17 @@ export default function Profiles() {
             </span>
           </h2>
 
+          <div style={{ marginBottom: 10 }}>
+            <Segmented
+              value={lbMode}
+              onChange={setLbMode}
+              options={[
+                { value: 'season', label: `本季实战 · ${meta.targetSeason}` },
+                { value: 'practice', label: `上季回放 · ${meta.priorSeason}` },
+              ]}
+            />
+          </div>
+
           <div className="warn-box">
             排行榜数据没有备份。服务器重建或数据卷丢失时，全部战绩会一并消失且无法恢复。
             <b>本机存档不受影响</b>——即使榜单清空，你在这台浏览器上的进度仍然完整。
@@ -313,8 +327,17 @@ export default function Profiles() {
           )}
 
           <p className="note" style={{ marginTop: 10 }}>
-            <b>练习榜，不是竞技榜。</b>目前用的是已结束赛季的比赛，结果网上都能查到，
-            所以这个榜单无法防止作弊。等 {'2026-27'} 赛季开打后会有单独的实时榜单，那个才有意义。<br />
+            {lbMode === 'season' ? (
+              <>
+                <b>本季实战榜。</b>只算 {meta.targetSeason} 真实比赛、开赛前提交、比分已出的场次；
+                开赛即锁定，模型按提交那一刻的赛前预测计分。样本少的时候排名主要是运气。<br />
+              </>
+            ) : (
+              <>
+                <b>练习榜，不是竞技榜。</b>用的是 {meta.priorSeason} 已结束赛季的比赛，结果网上都能查到，
+                所以这个榜单无法防止作弊。要比真本事看「本季实战」榜。<br />
+              </>
+            )}
             身份是一个随机令牌，存在本档案里，没有密码也没有找回流程——
             令牌丢了就是一个新玩家。<b>导出存档码时不会带上令牌</b>，
             因为存档码可能被随手贴到聊天里。<br />

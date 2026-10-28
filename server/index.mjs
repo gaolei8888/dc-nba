@@ -15,6 +15,9 @@ import { liveRosterRankings } from './liveRosterRankings.mjs';
 import { buildBoard } from './predictionBoard.mjs';
 import { ledgerRows, ledgerReport } from './ledger.mjs';
 import {
+  scorePick, slateDays, submitLivePicks, livePickRows, settleLive, liveBoard, isLiveGame, isLocked,
+} from './livePlay.mjs';
+import {
   initPool, run as runInPool, poolAvailable, cached, clearCaches,
   cacheStats, pendingCount, sendCached,
 } from './pool.mjs';
@@ -200,6 +203,7 @@ app.get('/api/meta', wrap((req, res) => {
         ? db.getDisabledReason()
         : '本部署已关闭排行榜（ENABLE_LEADERBOARD=0），进度仅保存在浏览器本地',
       lottery: process.env.ENABLE_LOTTERY === '1',
+      livePlay: !!liveDb,
     },
     injuries: {
       fetchedAt: store.injuries?.fetchedAt ?? null,
@@ -412,18 +416,24 @@ app.get('/api/leaderboard', wrap((req, res) => {
   if (!db.isEnabled()) {
     return res.status(503).json({ error: '服务端存储不可用', reason: db.getDisabledReason() });
   }
-  const mode = req.query.mode === 'live' ? 'live' : 'practice';
+  const mode = ['live', 'season'].includes(req.query.mode) ? req.query.mode : 'practice';
   const min = Math.max(1, Math.min(200, Number(req.query.min) || 10));
   const key = `${mode}:${min}`;
   const now = Date.now();
   if (lbCache.data && lbCache.key === key && now - lbCache.at < LB_TTL) {
     return res.json({ ...lbCache.data, cached: true });
   }
+  // 本季实战单独成榜：live_picks 与回放的 picks 分表，比分来自赛程、读时现算
+  const season = mode === 'season' ? db.handle().prepare(
+    'SELECT lp.*, pl.name FROM live_picks lp JOIN players pl ON pl.id = lp.player_id ORDER BY lp.tipoff_utc',
+  ).all() : null;
   const data = {
     mode,
     min,
-    counts: db.counts(),
-    rows: db.leaderboard({ mode, min }),
+    counts: season
+      ? { players: new Set(season.map((r) => r.player_id)).size, picks: season.length }
+      : db.counts(),
+    rows: season ? liveBoard(season, scheduleById(), { min }) : db.leaderboard({ mode, min }),
     generatedAt: new Date().toISOString(),
   };
   lbCache = { at: now, key, data };
@@ -463,26 +473,84 @@ app.post('/api/picks', requireAuth, rateLimit({ max: 30 }), wrap((req, res) => {
     if (!g) continue;
     const side = p.side === 'home' ? 'home' : 'away';
     const conf = Math.min(0.95, Math.max(0.5, Number(p.conf) || 0.5));
-    const correct = (side === 'home') === g.homeWin;
-    const pHome = side === 'home' ? conf : 1 - conf;
-    const y = g.homeWin ? 1 : 0;
-    rows.push({
-      gameId: g.gameId,
-      mode: 'practice',
-      side,
-      conf,
-      correct,
-      points: Math.round((conf - 0.5) * 200) * (correct ? 1 : -1),
-      brier: (pHome - y) ** 2,
-      modelCorrect: (g.modelProb >= 0.5) === g.homeWin,
-      modelPoints: Math.round((Math.max(g.modelProb, 1 - g.modelProb) - 0.5) * 200)
-        * (((g.modelProb >= 0.5) === g.homeWin) ? 1 : -1),
-      modelBrier: (g.modelProb - y) ** 2,
-    });
+    rows.push({ gameId: g.gameId, mode: 'practice', side, conf, ...scorePick({ side, conf }, g.modelProb, g.homeWin) });
   }
   const inserted = rows.length ? db.savePicks(req.player.id, rows) : 0;
   lbCache = { at: 0, key: '', data: null };
   res.json({ received: list.length, inserted, stats: db.playerStats(req.player.id) });
+}));
+
+// ---------------------------------------------------------------- 本季实战
+
+/**
+ * 人机对赌「本季实战」：本季真实比赛开赛前下判断（见 server/livePlay.mjs）。
+ * 身份：排行榜开启时用排行榜令牌（Bearer）；本地开发（ENABLE_LEADERBOARD=0 且非 production）
+ * 用浏览器档案 id（X-Local-Profile），存进同一个 data/app.db。生产环境关了排行榜就不收任何用户数据。
+ */
+const scheduleById = () => new Map(store.schedule.games.map((g) => [g.gameId, g]));
+const livePlayerId = (req) => {
+  if (!liveDb) return null;
+  if (LEADERBOARD_ON) {
+    const auth = req.get('authorization') ?? '';
+    return (auth.startsWith('Bearer ') && db.authenticate(auth.slice(7)))?.id ?? null;
+  }
+  const local = req.get('x-local-profile') ?? '';
+  return /^[\w-]{1,48}$/.test(local) ? `local:${local}` : null;
+};
+/** 此刻的生产默认预测：默认参数、不套缺阵勾选——和预测页、账本记的是同一个数 */
+const liveQuote = (g) => {
+  const [p] = predictSchedule(getModel({}), [g], {});
+  const elo = (id) => store.teams.find((t) => t.teamId === id)?.elo ?? null;
+  return { pHome: p.prediction.homeWinProb, homeElo: elo(g.homeId), awayElo: elo(g.awayId), rest: p.prediction };
+};
+
+app.get('/api/live', wrap((req, res) => {
+  const now = clock();
+  const games = scheduleById();
+  const playerId = livePlayerId(req);
+  const mine = playerId ? settleLive(livePickRows(liveDb, playerId), games) : [];
+  const open = slateDays(store.schedule.games, now);
+  // 自己下过注、已经打完的最近 3 个比赛日也列出来，好翻牌看结果
+  const past = [...new Set(mine.map((r) => r.date))].filter((d) => !open.some((x) => x.date === d)).sort().slice(-3)
+    .map((d) => ({ date: d, games: store.schedule.games.filter((g) => g.date === d && isLiveGame(g)).length, open: 0, nextTipoff: null }));
+  const days = [...past, ...open];
+  const date = days.some((d) => d.date === req.query.date) ? req.query.date : open[0]?.date ?? days.at(-1)?.date ?? null;
+  const pickOf = new Map(mine.map((r) => [r.gameId, r]));
+  res.json({
+    available: !!liveDb,
+    reason: liveDb ? null : LIVE_REASON,
+    identity: liveDb ? (LEADERBOARD_ON ? 'cloud' : 'local') : null,
+    signedIn: !!playerId,
+    now: new Date(now).toISOString(),
+    dataAt: store.meta.fetchedAt ?? null,
+    season: store.meta.targetSeason,
+    days,
+    date,
+    games: store.schedule.games.filter((g) => g.date === date && isLiveGame(g)).map((g) => {
+      const q = liveQuote(g).rest;
+      return {
+        gameId: g.gameId, date: g.date, tipoff: g.dateTimeUtc, homeId: g.homeId, awayId: g.awayId,
+        neutral: !!g.neutral, label: g.label ?? null, restHome: q.restHome, restAway: q.restAway,
+        locked: isLocked(g, now), pick: pickOf.get(g.gameId) ?? null,
+      };
+    }),
+    // 全部记录（含已翻牌的），前端据此算战绩、连胜
+    history: mine,
+  });
+}));
+
+app.post('/api/live/picks', rateLimit({ max: 30 }), wrap((req, res) => {
+  if (!liveDb) return res.status(503).json({ error: '本季实战不可用', reason: LIVE_REASON });
+  const playerId = livePlayerId(req);
+  if (!playerId) {
+    return res.status(401).json({ error: LEADERBOARD_ON ? '令牌无效，请先用当前档案加入排行榜' : '缺少本地档案 id' });
+  }
+  const picks = Array.isArray(req.body?.picks) ? req.body.picks.slice(0, 40) : [];
+  const out = submitLivePicks(liveDb, playerId, picks, {
+    games: scheduleById(), quote: liveQuote, dataAt: store.meta.fetchedAt ?? null, now: clock(),
+  });
+  lbCache = { at: 0, key: '', data: null };
+  res.json(out);
 }));
 
 app.get('/api/rankings', wrap(async (req, res) => {
@@ -747,10 +815,27 @@ if (fs.existsSync(dist)) {
 // 让"要不要上线"变成一条 compose 配置而不是一次代码改动
 const LEADERBOARD_ON = process.env.ENABLE_LEADERBOARD !== '0';
 if (LEADERBOARD_ON) db.initDb();
-else console.log('排行榜已通过 ENABLE_LEADERBOARD=0 关闭，服务端不写任何用户数据');
+else {
+  console.log(process.env.NODE_ENV === 'production'
+    ? '排行榜已通过 ENABLE_LEADERBOARD=0 关闭，服务端不写任何用户数据'
+    : '排行榜已通过 ENABLE_LEADERBOARD=0 关闭；本地开发下「本季实战」仍按浏览器档案记在 DB_PATH（默认 data/app.db）');
+}
 // 模拟投注账本与排行榜无关、不含用户数据，单独开关；同一个库文件（DB_PATH，本地默认 data/app.db）
 const LEDGER_OFF = process.env.ENABLE_LEDGER === '0';
 const ledgerDb = LEDGER_OFF ? null : db.openLedger();
+// 本季实战：排行榜开着就和它共用一个库句柄与身份；本地开发（排行榜关、非 production）
+// 单独打开同一个库文件、按浏览器档案 id 记——这样 ENABLE_LEADERBOARD=0 本地也能玩。
+const PROD = process.env.NODE_ENV === 'production';
+const liveDb = LEADERBOARD_ON ? db.handle() : PROD ? null : db.openWith(db.LIVE_SCHEMA, '本季实战');
+const LIVE_REASON = LEADERBOARD_ON
+  ? db.getDisabledReason()
+  : '本部署关闭了排行榜（ENABLE_LEADERBOARD=0），不在服务端保存任何用户数据，本季实战需要服务端锁定，暂不可用';
+/**
+ * 服务端时钟。本地开发可用 PLAY_NOW=2026-10-29T00:30:00Z 把「现在」拨到某一刻（之后照常走），
+ * 用来演示开赛锁定；production 下忽略。
+ */
+const NOW_OFFSET = !PROD && process.env.PLAY_NOW ? Date.parse(process.env.PLAY_NOW) - Date.now() : 0;
+const clock = () => Date.now() + (Number.isFinite(NOW_OFFSET) ? NOW_OFFSET : 0);
 initPool();
 
 try {

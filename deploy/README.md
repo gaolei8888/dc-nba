@@ -147,3 +147,15 @@ cp data-prev/*.json data/ && docker compose build && docker compose up -d
 - 本机：`Unregister-ScheduledTask -TaskName 'dc-nba 全量刷新'`（PowerShell），或在「任务计划程序」里删
 
 镜像和数据保持最后一次成功刷新时的样子。
+
+## 人机对赌「本季实战」（2026-10-28 起，`server/livePlay.mjs`）
+
+- 存储：SQLite 新表 `live_picks`（`CREATE TABLE IF NOT EXISTS`，加法迁移，不动 `players` / `picks` / `paper_bets`），
+  线上与排行榜同库同句柄（`data-db/app.db`），身份就是排行榜令牌；排行榜「玩家档案」页可切「本季实战」榜（`/api/leaderboard?mode=season`）。
+- 每行：用户选择 + 提交那一刻模型的赛前预测（`model_p_home`、`home_elo`/`away_elo`、数据快照 `data_at`）。
+  开赛前可改（模型快照随之更新到改的那一刻）；到赛程开赛时间即锁：应用层用服务端时钟拒收，库里触发器按真实时钟兜底；不能删；
+  `INSERT OR REPLACE` 绕不过。结算不落库：比分来自 ESPN 刷新写的 `schedule.json`，读时现算。
+- 线上 `ENABLE_LEADERBOARD=1` 不用改 compose。`ENABLE_LEADERBOARD=0` 的 production 部署不收任何用户数据，本季实战显示不可用。
+- 本地：`ENABLE_LEADERBOARD=0 node server/index.mjs`（非 production）也能玩，选择按浏览器档案 id 记在 `DB_PATH`（默认 `data/app.db`）。
+  `PLAY_NOW=2026-10-29T00:30:00Z` 可把服务端「现在」拨到某一刻演示锁定（production 下忽略）。
+  在副本上演练：复制库要用 `sqlite3 app.db ".backup copy.db"`（WAL 模式，直接 cp 会漏掉 -wal 里的新行）。

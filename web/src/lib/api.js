@@ -63,6 +63,13 @@ export const api = {
     body: JSON.stringify({ picks }),
   }).then(json),
   leaderboard: (params) => get('/leaderboard', params),
+  // ---- 本季实战：两种身份头都带上，服务端按部署模式认其中一个
+  live: (params, headers) => get('/live', params, headers),
+  livePicks: (picks, headers) => fetch(`${API}/live/picks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body: JSON.stringify({ picks }),
+  }).then(json),
 
   // ---- 模型实验室
   labMeta: () => get('/lab/meta'),

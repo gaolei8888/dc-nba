@@ -126,23 +126,64 @@ BEGIN SELECT RAISE(ABORT, 'paper_bets 只追加：已记录的字段不能改');
 `;
 
 /**
- * 只为账本打开同一个库文件（不建排行榜的表）。和排行榜开关无关：
- * 本地 ENABLE_LEADERBOARD=0 时也能用，默认 data/app.db；线上是 data-db/ 卷里那份。
+ * 人机对赌「本季实战」（见 server/livePlay.mjs）。和回放的 picks 表分开：回放可立即结算、
+ * 题目答案早已公开，实战是开赛前下判断、赛后才知道结果，两边战绩不能混。
+ *   - 一人一场一行；开赛前可改（选择与模型快照一起改），开赛后改不了——触发器按真实时钟兜底，
+ *     应用层另有可注入时钟的同样检查；
+ *   - 不能删；同一 (player_id, game_id) 再插入一律忽略（INSERT OR REPLACE 也绕不过），修改只能走 UPDATE；
+ *   - 结算不落库：比分来自 schedule.json，读的时候现算。
+ * tipoff_utc 存成 toISOString() 的定长格式，和 strftime('%Y-%m-%dT%H:%M:%fZ','now') 直接按字符串比较。
+ */
+export const LIVE_SCHEMA = `
+CREATE TABLE IF NOT EXISTS live_picks (
+  player_id     TEXT NOT NULL,
+  game_id       TEXT NOT NULL,
+  game_date     TEXT NOT NULL,
+  tipoff_utc    TEXT NOT NULL,
+  home_id       INTEGER NOT NULL,
+  away_id       INTEGER NOT NULL,
+  side          TEXT NOT NULL CHECK (side IN ('home', 'away')),
+  conf          REAL NOT NULL CHECK (conf >= 0.5 AND conf <= 0.95),
+  model_p_home  REAL NOT NULL,
+  home_elo      REAL,
+  away_elo      REAL,
+  data_at       TEXT,
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL,
+  edits         INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (player_id, game_id)
+);
+CREATE INDEX IF NOT EXISTS idx_live_picks_game ON live_picks(game_id);
+CREATE TRIGGER IF NOT EXISTS live_picks_dup BEFORE INSERT ON live_picks
+WHEN EXISTS (SELECT 1 FROM live_picks WHERE player_id = NEW.player_id AND game_id = NEW.game_id)
+BEGIN SELECT RAISE(IGNORE); END;
+CREATE TRIGGER IF NOT EXISTS live_picks_no_delete BEFORE DELETE ON live_picks
+BEGIN SELECT RAISE(ABORT, 'live_picks：不能删除'); END;
+CREATE TRIGGER IF NOT EXISTS live_picks_locked BEFORE UPDATE ON live_picks
+WHEN OLD.tipoff_utc <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+  OR ${changed(['player_id', 'game_id', 'game_date', 'tipoff_utc', 'home_id', 'away_id', 'created_at'])}
+BEGIN SELECT RAISE(ABORT, 'live_picks：开赛后不能改'); END;
+`;
+
+/**
+ * 只为某个模块打开同一个库文件、只建它自己的表（不建排行榜的表）。和排行榜开关无关：
+ * 账本在本地 ENABLE_LEADERBOARD=0 时也能用，默认 data/app.db；线上是 data-db/ 卷里那份。
  * 失败返回 null 并打印原因，调用方据此降级。
  */
-export function openLedger(dbPath = DB_PATH) {
+export function openWith(schema, label, dbPath = DB_PATH) {
   try {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
     const h = new DatabaseSync(dbPath);
     h.exec('PRAGMA journal_mode = WAL');
     h.exec('PRAGMA busy_timeout = 4000');
-    h.exec(LEDGER_SCHEMA);
+    h.exec(schema);
     return h;
   } catch (e) {
-    console.warn(`模拟投注账本不可用: ${describeFailure(e)}`);
+    console.warn(`${label}不可用: ${describeFailure(e)}`);
     return null;
   }
 }
+export const openLedger = (dbPath = DB_PATH) => openWith(LEDGER_SCHEMA, '模拟投注账本', dbPath);
 
 /**
  * 打开数据库。任何失败都不抛，只记原因并让 isEnabled() 返回 false。
@@ -154,6 +195,8 @@ export function initDb() {
     db.exec('PRAGMA journal_mode = WAL');
     db.exec('PRAGMA busy_timeout = 4000');
     db.exec(SCHEMA);
+    // 本季实战的表与排行榜同库（加法迁移，不动已有表）
+    db.exec(LIVE_SCHEMA);
     // 真正写一次，确认不是只读挂载——只开成功不代表写得进去
     db.exec('CREATE TABLE IF NOT EXISTS _writecheck (x INTEGER)');
     db.exec('DROP TABLE _writecheck');
@@ -185,6 +228,8 @@ function describeFailure(e) {
 }
 
 export const isEnabled = () => db !== null;
+/** 排行榜那份库的句柄（本季实战在排行榜开启时与它共用） */
+export const handle = () => db;
 export const getDisabledReason = () => disabledReason;
 
 // ---------------------------------------------------------------- 玩家
