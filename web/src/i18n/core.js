@@ -2,12 +2,20 @@
 export const SOURCE_LANG = 'zh';
 export const UNMATCHED_LANG = 'en';
 
-const isPlural = (v) => v && typeof v === 'object' && typeof v.other === 'string';
+const PLURAL_CATS = new Set(['zero', 'one', 'two', 'few', 'many', 'other']);
+// 复数叶子：键全是 CLDR 类别、含 other、值全是字符串；否则视为普通命名空间
+export const isPlural = (v) => {
+  if (!v || typeof v !== 'object') return false;
+  const ks = Object.keys(v);
+  return ks.includes('other') && ks.every((k) => PLURAL_CATS.has(k) && typeof v[k] === 'string');
+};
 
 // 按点号路径查键；返回字符串、复数对象或 undefined
 export function lookup(dict, key) {
   let cur = dict;
-  for (const part of String(key).split('.')) {
+  const parts = String(key).split('.');
+  if (parts[0] === 'meta') return undefined;
+  for (const part of parts) {
     if (cur == null || typeof cur !== 'object' || !Object.hasOwn(cur, part)) return undefined;
     cur = cur[part];
   }
@@ -85,14 +93,14 @@ export function flattenKeys(dict) {
 export function detectLang({ search, stored, navigatorLanguages = [], locales }) {
   const valid = (l) => (typeof l === 'string' && Object.hasOwn(locales, l) ? l : null);
   const q = new URLSearchParams(search || '').get('lang');
-  const fromQ = valid(q);
+  const fromQ = valid(q) || valid(q && q.toLowerCase());
   if (fromQ) return fromQ;
   const fromStored = valid(stored);
   if (fromStored) return fromStored;
   for (const nl of navigatorLanguages) {
-    const low = String(nl).toLowerCase();
+    const primary = String(nl).toLowerCase().split(/[-_]/)[0];
     for (const [code, loc] of Object.entries(locales)) {
-      if ((loc.meta?.match || []).some((m) => low.startsWith(m.toLowerCase()))) return code;
+      if ((loc.meta?.match || []).some((m) => primary === m.toLowerCase())) return code;
     }
   }
   return UNMATCHED_LANG;

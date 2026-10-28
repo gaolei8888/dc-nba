@@ -63,18 +63,56 @@ test('flattenKeys：占位符集合，跳过 meta，复数取并集', () => {
   assert.deepEqual([...m.get('g')].sort(), ['count', 'z']);
 });
 
+// 返回 { missing, extra, badPlaceholders }
+function compareKeys(baseDict, otherDict) {
+  const base = flattenKeys(baseDict);
+  const cur = flattenKeys(otherDict);
+  const missing = [...base.keys()].filter((k) => !cur.has(k));
+  const extra = [...cur.keys()].filter((k) => !base.has(k));
+  const badPlaceholders = [...base].filter(([k, ph]) => cur.has(k)
+    && [...cur.get(k)].sort().join() !== [...ph].sort().join()).map(([k]) => k);
+  return { missing, extra, badPlaceholders };
+}
+const CLEAN = { missing: [], extra: [], badPlaceholders: [] };
+
 test('locales：每种语言的键集合与 zh 一致、占位符一致', () => {
-  const base = flattenKeys(locales.zh);
   for (const [code, loc] of Object.entries(locales)) {
     if (code === 'zh') continue;
-    const cur = flattenKeys(loc);
-    const missing = [...base.keys()].filter((k) => !cur.has(k));
-    const extra = [...cur.keys()].filter((k) => !base.has(k));
-    assert.deepEqual({ missing, extra }, { missing: [], extra: [] }, `${code} 键不一致`);
-    for (const [k, ph] of base) {
-      assert.deepEqual([...cur.get(k)].sort(), [...ph].sort(), `${code} 占位符不一致：${k}`);
-    }
+    assert.deepEqual(compareKeys(locales.zh, loc), CLEAN, `${code} 与 zh 不一致`);
   }
+});
+
+test('compareKeys：能检出缺键、多键、占位符不一致', () => {
+  const r = compareKeys({ a: '{n}', b: 'x', c: '{p}' }, { a: '{m}', c: '{p}', d: 'y' });
+  assert.deepEqual(r, { missing: ['b'], extra: ['d'], badPlaceholders: ['a'] });
+});
+
+test('isPlural：含 other 的普通命名空间不是复数叶子', () => {
+  const dict = { filters: { all: '全部', other: '其他' }, g: { one: '{count} a', other: '{count} bs' } };
+  const m = flattenKeys(dict);
+  assert.deepEqual([...m.keys()].sort(), ['filters.all', 'filters.other', 'g']);
+  assert.equal(lookup(dict, 'filters.all'), '全部');
+  assert.equal(lookup(dict, 'filters.other'), '其他');
+  assert.equal(typeof lookup(dict, 'g'), 'object');
+  assert.equal(lookup(dict, 'filters'), undefined);
+});
+
+test('lookup：meta 不作为译文', () => {
+  assert.equal(lookup({ meta: { intl: 'en-US' } }, 'meta.intl'), undefined);
+});
+
+test('createT：两个不同缺失键各告警一次', () => {
+  const warns = [];
+  const t = createT({ dict: {}, fallback: {}, lang: 'en', warn: (m) => warns.push(m) });
+  t('x.one'); t('x.two'); t('x.one');
+  assert.equal(warns.length, 2);
+});
+
+test('detectLang：?lang 大小写不敏感；主语言子标签精确匹配', () => {
+  assert.equal(detectLang({ search: '?lang=EN', navigatorLanguages: ['zh-CN'], locales }), 'en');
+  assert.equal(detectLang({ navigatorLanguages: ['enx', 'zh'], locales }), 'zh');
+  assert.equal(detectLang({ navigatorLanguages: ['enx'], locales }), 'en');
+  assert.equal(detectLang({ navigatorLanguages: ['zh_TW'], locales }), 'zh');
 });
 
 test('locales：en 的值里没有中文字符', () => {
@@ -83,7 +121,7 @@ test('locales：en 的值里没有中文字符', () => {
     for (const [k, v] of Object.entries(n)) {
       if (!p && k === 'meta') continue;
       if (typeof v === 'string') assert.ok(!re.test(v), `en 含中文：${p}${k}`);
-      else walk(v, `${p}${k}.`);
+      else if (v && typeof v === 'object') walk(v, `${p}${k}.`);
     }
   };
   walk(locales.en, '');
