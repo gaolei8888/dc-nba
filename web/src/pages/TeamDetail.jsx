@@ -13,7 +13,7 @@ import { useI18n } from '../i18n/react.jsx';
 
 export default function TeamDetail({ teamId }) {
   const { meta, teamById, out, toggleOut, params, setAccent } = useApp();
-  const { t, fmt } = useI18n();
+  const { t, fmt, lang } = useI18n();
   const [data, setData] = useState({ loading: true });
   const [statMode, setStatMode] = useState('base');
   const [month, setMonth] = useState('all');
@@ -70,7 +70,7 @@ export default function TeamDetail({ teamId }) {
           <h1>{fmt.teamName(tm)}</h1>
           <div className="en">
             {t('teamDetail.sub', {
-              name: fmt.teamName(tm) === tm.full ? tm.abbr : tm.full,
+              name: lang === 'zh' ? tm.full : tm.abbr,
               conf: fmt.conf(tm.conference),
               div: fmt.div(tm.division),
               season: meta.displayCurrent ? meta.targetSeason : meta.priorSeason,

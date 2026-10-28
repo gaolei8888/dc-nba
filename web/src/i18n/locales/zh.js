@@ -702,6 +702,6 @@ export default {
   team: {
     conf: { East: '东部', West: '西部' },
     div: { Atlantic: '大西洋', Central: '中部', Southeast: '东南', Northwest: '西北', Pacific: '太平洋', Southwest: '西南' },
-    pos: { G: '后卫', F: '前锋', C: '中锋', 'G-F': '后卫/前锋', 'F-G': '前锋/后卫', 'F-C': '前锋/中锋', 'C-F': '中锋/前锋' },
+    pos: { G: '后卫', F: '前锋', C: '中锋', 'G-F': '锋卫摇摆', 'F-G': '锋卫摇摆', 'F-C': '大前/中锋', 'C-F': '中锋/大前' },
   },
 };

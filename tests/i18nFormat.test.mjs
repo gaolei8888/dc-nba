@@ -79,7 +79,7 @@ test('球队名、分区、休息天数', () => {
   assert.equal(en.conf('East'), 'East'); assert.equal(zh.conf('East'), '东部'); assert.equal(zh.div('Atlantic'), '大西洋');
   assert.equal(en.div('Pacific'), 'Pacific'); assert.equal(zh.conf('Nope'), 'Nope');
   assert.deepEqual(zh.DIV_CODES, ['Atlantic', 'Central', 'Southeast', 'Northwest', 'Pacific', 'Southwest']);
-  assert.equal(zh.pos('G-F'), '后卫/前锋'); assert.equal(en.pos('G-F'), 'Guard-Forward'); assert.equal(en.pos('X'), 'X');
+  assert.equal(zh.pos('G-F'), '锋卫摇摆'); assert.equal(zh.pos('F-G'), '锋卫摇摆'); assert.equal(zh.pos('F-C'), '大前/中锋'); assert.equal(zh.pos('C-F'), '中锋/大前'); assert.equal(en.pos('G-F'), 'G-F'); assert.equal(en.pos('X'), 'X');
   assert.equal(zh.rest(0), '背靠背'); assert.equal(en.rest(0), 'B2B'); assert.equal(zh.rest(2), '休2天'); assert.equal(en.rest(1), '1 day rest'); assert.equal(en.rest(3), '3 days rest'); assert.equal(en.rest(null), '—');
 });
 test('球队 formatter 与排序', () => {
