@@ -83,6 +83,15 @@ test('解析：比赛/球队往下沿用、跨页沿用，折行原因里的球�
   assert.ok(r.notSubmitted.some((x) => x.team === 'Houston Rockets' && x.matchup === 'OKC@HOU'));
 });
 
+test('解析：队名和球员名之间只剩一个空格时把队名拆出来，不记到对手头上', () => {
+  const text = [
+    '01/14/2026   07:00 (ET)   CLE@PHI   Cleveland Cavaliers         Strus, Max               Out              Injury',
+    '                                    Philadelphia 76ers Embiid, Joel             Probable         Injury',
+  ].join('\n');
+  const r = parseReportText(text);
+  assert.deepEqual(r.rows.map((x) => [x.team, x.player]), [['Cleveland Cavaliers', 'Strus, Max'], ['Philadelphia 76ers', 'Embiid, Joel']]);
+});
+
 test('flipName：Last, First -> First Last，后缀跟着姓走', () => {
   assert.equal(flipName('Carey Jr., Vernon'), 'Vernon Carey Jr.');
   assert.equal(flipName("Moore, E'Twaun"), "E'Twaun Moore");
@@ -90,11 +99,11 @@ test('flipName：Last, First -> First Last，后缀跟着姓走', () => {
 
 // ---------------------------------------------------------------- 实验纯逻辑
 
-test('开赛时间：10、11 点上午，12 点中午，其余下午', () => {
+test('开赛时间：12 点中午，其余（含 10:30 西部夜场）下午', () => {
   assert.equal(tipMinutes('07:00 (ET)'), 19 * 60);
   assert.equal(tipMinutes('03:30 (ET)'), 15 * 60 + 30);
   assert.equal(tipMinutes('12:00 (ET)'), 12 * 60);
-  assert.equal(tipMinutes('11:00 (ET)'), 11 * 60);
+  assert.equal(tipMinutes('10:30 (ET)'), 22 * 60 + 30);
   assert.equal(tipMinutes(undefined), null);
 });
 

@@ -46,12 +46,13 @@ for (const s of ALL) {
     return { gid, date: dateOf.get(gid), home, away, st, mins: { [home]: mh, [away]: ma } };
   }).filter((g) => g.date).sort((a, b) => a.date.localeCompare(b.date) || a.gid.localeCompare(b.gid));
 }
-const rosters = new Map();   // `${赛季}|${队}` -> 本季为该队上过场的 id
+const firstGame = new Map();   // `${赛季}|${队}` -> Map(id -> 本季第一次为该队上场的日期)；姓名消歧只用比赛日之前的
 for (const s of ALL) for (const g of games[s]) for (const t of [g.home, g.away]) {
   const k = `${s}|${t}`;
-  if (!rosters.has(k)) rosters.set(k, new Set());
-  for (const id of g.mins[t].keys()) rosters.get(k).add(id);
+  if (!firstGame.has(k)) firstGame.set(k, new Map());
+  for (const id of g.mins[t].keys()) if (!firstGame.get(k).has(id)) firstGame.get(k).set(id, g.date);
 }
+const rosterBefore = (season, team, date) => new Set([...(firstGame.get(`${season}|${team}`) ?? [])].filter(([, d]) => d < date).map(([id]) => id));
 
 // ---------------------------------------------------------------- 常规轮换 + 当时的 RAPM（与 oracle 同一套，缓存）
 const dayNum = (d) => Math.round(Date.parse(`${d}T00:00:00Z`) / 86400000);
@@ -104,7 +105,10 @@ else {
 }
 
 // ---------------------------------------------------------------- 报告 -> 每场每队每个时点的状态
-const index = read(path.join(DIR, 'index.json'));
+const LAG_MIN = Number(process.env.INJURY_LAG_MIN ?? 15);   // 与 injury-history.mjs 同一个延迟口径
+const indexFile = read(path.join(DIR, 'index.json'));
+const index = { missing: indexFile.missing, picks: indexFile[`picks_lag${LAG_MIN}`] ?? (LAG_MIN === 0 ? indexFile.picks : null) };
+if (!index.picks) throw new Error(`还没有延迟 ${LAG_MIN} 分钟的报告选择：先 INJURY_LAG_MIN=${LAG_MIN} node scripts/injury-history.mjs`);
 const reportCache = new Map();
 const report = (name) => {
   if (!reportCache.has(name)) reportCache.set(name, read(path.join(DIR, 'json', `${name}.json`)));
@@ -148,7 +152,7 @@ for (const [gid, c] of Object.entries(ctx)) {
       cover[slot][k === 0 ? 'direct' : 'fallback']++;
       const st = new Map();
       for (const row of report(chain[k]).rows.filter((x) => x.gameDate === c.date && x.team === fullOf.get(t))) {
-        const id = matchName(row.player, idx, rosters.get(`${c.season}|${t}`) ?? new Set(), (i) => nameById.get(i));
+        const id = matchName(row.player, idx, rosterBefore(c.season, t, c.date), (i) => nameById.get(i));
         if (slot === '22') { match.rows++; if (id) match.matched++; else match.unmatched.set(row.player, (match.unmatched.get(row.player) ?? 0) + 1); }
         if (id) st.set(id, row.status);
       }
@@ -234,7 +238,7 @@ function evaluate(variant) {
   return { prob, betas };
 }
 
-console.log(`伤病报告实验  W=${W} λ=${LAMBDA} 每 ${REFIT_DAYS} 天重拟合  比赛 ${recs.length}`);
+console.log(`伤病报告实验  W=${W} λ=${LAMBDA} 每 ${REFIT_DAYS} 天重拟合  比赛 ${recs.length}  报告延迟 ${LAG_MIN} 分钟`);
 const picks = Object.values(index.picks);
 console.log(`报告：时点 ${picks.length} 个，找到 ${picks.filter(Boolean).length}；PDF ${fs.readdirSync(path.join(DIR, 'pdf')).length} 份；已确认不存在 ${index.missing.length} 个文件名`);
 console.log(`姓名匹配（22:00 报告、我们数据里的比赛）：${match.matched}/${match.rows} = ${(100 * match.matched / match.rows).toFixed(1)}%`);

@@ -37,12 +37,15 @@ export function reportAdj(usual, statusOf, pPlay, val, opts) {
   return Math.min(0, rotValue(scaled, val, opts) - rotValue(usual, val, opts));
 }
 
-/** 报告的开赛时间 '07:00 (ET)' 不带上下午：10、11 点按上午，12 点中午，其余按下午。返回美东当天第几分钟 */
+/**
+ * 报告的开赛时间 '07:00 (ET)' 不带上下午：12 点是中午，其余（含 10:00、10:30 的西部夜场）一律下午。
+ * 上午 11 点开的场极少，算成晚上只会让它不被当作「06:30 时已开打」。返回美东当天第几分钟
+ */
 export function tipMinutes(gameTime) {
   const m = /^(\d\d):(\d\d)/.exec(gameTime ?? '');
   if (!m) return null;
   const h = Number(m[1]);
-  return ((h >= 10 ? h : h + 12) * 60) + Number(m[2]);
+  return ((h === 12 ? 12 : h + 12) * 60) + Number(m[2]);
 }
 
 /** people: [{ id, name:'First Last' }] -> Map(规范化姓名 -> [id…]) */

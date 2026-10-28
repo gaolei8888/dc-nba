@@ -97,6 +97,9 @@ export function parseReportText(text) {
     if (md) { gameDate = `${md[3]}-${md[1]}-${md[2]}`; i++; }
     if (/^\d\d:\d\d \(ET\)$/.test(cells[i] ?? '')) { gameTime = cells[i]; i++; }
     if (/^[A-Z]{2,3}@[A-Z]{2,3}$/.test(cells[i] ?? '')) { matchup = cells[i]; team = null; i++; }
+    // pdftotext 偶尔只给队名和球员名之间留一个空格：把队名拆出来，免得这些行记到上一支队（对手）头上
+    const glued = TEAM_NAMES.find((t) => cells[i]?.startsWith(`${t} `));
+    if (glued) cells.splice(i, 1, glued, cells[i].slice(glued.length + 1));
     if (TEAM_SET.has(cells[i])) { team = cells[i]; i++; }
     if (/NOT YET SUBMITTED/.test(raw)) {
       if (team) notSubmitted.push({ gameDate, gameTime, matchup, team });
