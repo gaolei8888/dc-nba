@@ -216,3 +216,17 @@ export function paperHeadlineMsg(headline) {
 
 /** 预测总表总结的最后一句：「模拟投注（DraftKings、edge ≥ 3% 平注）」+ 头条结论（params.verdict 是嵌套消息） */
 export const PAPER_LINE_CODE = 'srv.board.paperLine';
+
+/**
+ * 预测总表总结里的回测结论句：中文原句（summary）与消息码（summaryMsg）必须成对出现。
+ * 条件相同：headline 同时有中文 verdict 与消息码 verdictMsg 才追加，否则两边都不追加，
+ * 不会出现只有一边带诚实声明的情况。
+ */
+export function paperSummaryLines(paper, board) {
+  const h = paper?.headline;
+  if (!h?.verdict || !h?.verdictMsg) return { summary: board.summary, summaryMsg: board.summaryMsg };
+  return {
+    summary: [...board.summary, `模拟投注（DraftKings、edge ≥ 3% 平注）${h.verdict}`],
+    summaryMsg: [...board.summaryMsg, msg(PAPER_LINE_CODE, { verdict: h.verdictMsg })],
+  };
+}

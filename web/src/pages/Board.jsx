@@ -99,7 +99,7 @@ function Stats({ d, teamById }) {
     <>
       <div className="grid cols-2">
         <div className="card">
-          <h2>{t('board.stats.baselines')}<span className="sub">{t('board.stats.baselinesSub', { n: d.overall.n })}</span></h2>
+          <h2>{t('board.stats.baselines')}<span className="sub">{t('board.stats.baselinesSub', { count: d.overall.n })}</span></h2>
           <Mini
             rowKey={(r) => r.key}
             rows={d.baselines}
@@ -135,7 +135,7 @@ function Stats({ d, teamById }) {
             [t('board.stats.conf'), (r) => r.label, true],
             [t('board.stats.games'), (r) => r.n],
             [t('board.stats.predAvg'), (r) => pct(r.conf)],
-            [t('board.stats.actualHits'), (r) => (r.n ? <span style={{ display: 'inline-flex', gap: 7, alignItems: 'center' }}><ProbBar p={r.acc} width={52} />{t('board.stats.hitsGames', { n: r.hits })} · {pct(r.acc)}</span> : '—')],
+            [t('board.stats.actualHits'), (r) => (r.n ? <span style={{ display: 'inline-flex', gap: 7, alignItems: 'center' }}><ProbBar p={r.acc} width={52} />{t('board.stats.hitsGames', { count: r.hits })} · {pct(r.acc)}</span> : '—')],
           ]}
         />
       </div>
@@ -158,7 +158,7 @@ function Stats({ d, teamById }) {
       </div>
 
       <div className="card">
-        <h2>{t('board.stats.misses')}<span className="sub">{t('board.stats.missesSub', { n: d.misses.length })}</span></h2>
+        <h2>{t('board.stats.misses')}<span className="sub">{t('board.stats.missesSub', { count: d.misses.length })}</span></h2>
         <Mini
           rowKey={(r) => r.gameId}
           rows={d.misses}
@@ -222,7 +222,7 @@ function ShadowCard() {
     <div className="card">
       <h2>{t('board.shadow.title')}
         <span className="sub">{t('board.shadow.sub', { progress: s.progress, target: s.target })}
-          {s.rrProgress != null ? t('board.shadow.subRr', { n: s.rrProgress, target: s.target }) : ''}{s.pending ? t('board.shadow.subPending', { n: s.pending }) : ''}</span>
+          {s.rrProgress != null ? t('board.shadow.subRr', { n: s.rrProgress, target: s.target }) : ''}{s.pending ? t('board.shadow.subPending', { count: s.pending }) : ''}</span>
       </h2>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '4px 0 10px' }}>
         <ProbBar p={Math.min(1, s.progress / s.target)} width={160} />
@@ -310,7 +310,7 @@ function PaperBetting({ teamById }) {
   return (
     <>
       <div className="warn-box">
-        <p style={{ margin: '2px 0' }}><b>{bt ? renderMsg(bt.headline.verdictMsg, t) : t('board.paper.noBacktest')}</b></p>
+        <p style={{ margin: '2px 0' }}><b>{bt ? (renderMsg(bt.headline.verdictMsg, t) || t('board.paper.verdictMissing')) : t('board.paper.noBacktest')}</b></p>
         <p style={{ margin: '2px 0' }}>
           {t('board.paper.disclaimer')}
         </p>
@@ -338,7 +338,7 @@ function PaperBetting({ teamById }) {
             <p className="note">
               {t('board.ledger.settledPre')}<b>{main.bets}</b>{t('board.ledger.settledPost', { pending: main.pending, first: lg.firstDate ?? '—', captured: lg.captured })}
               {main.bets < MIN_LEDGER
-                ? t('board.ledger.small', { n: main.bets })
+                ? t('board.ledger.small', { count: main.bets })
                 : t('board.ledger.roi', { roi: roi(main.roi), ci: ciRoi(main.ci) })}
             </p>
           )}
@@ -358,7 +358,7 @@ function PaperBetting({ teamById }) {
               [t('board.ledger.record'), (r) => (r.bets ? `${r.wins}-${r.bets - r.wins}` : '—')],
               [t('board.ledger.pl'), (r) => (r.bets ? t('board.unitsVal', { v: signed(r.units) }) : '—')],
               ['ROI', (r) => (r.bets ? roi(r.roi) : '—')],
-              [t('board.ledger.clv'), (r) => (r.clv ? t('board.ledger.clvVal', { v: signed(r.clv.mean * 100, 2), n: r.clv.n }) : '—')],
+              [t('board.ledger.clv'), (r) => (r.clv ? t('board.ledger.clvVal', { v: signed(r.clv.mean * 100, 2), count: r.clv.n }) : '—')],
             ]}
           />
           <p className="note">
@@ -520,7 +520,7 @@ export default function Board() {
       </div>
 
       <div className="grid cols-5" style={{ margin: '14px 0' }}>
-        <StatTile label={t('board.tile.record')} value={o.n ? `${o.hits}-${o.n - o.hits}` : '—'} hint={t('board.tile.recordHint', { n: o.n })} />
+        <StatTile label={t('board.tile.record')} value={o.n ? `${o.hits}-${o.n - o.hits}` : '—'} hint={t('board.tile.recordHint', { count: o.n })} />
         <StatTile label={t('board.tile.acc')} value={o.n ? pct(o.acc) : '—'} hint={t('board.tile.accHint', { ci: ci(o.ci), n: o.n })} />
         <StatTile label={t('board.tile.brier')} value={o.n ? `${num(o.brier, 3)} / ${num(o.logLoss, 3)}` : '—'} hint={t('board.tile.brierHint')} />
         <StatTile label={t('board.tile.marginMae')} value={num(d.errors.marginMae)} unit={t('board.ptsUnit')} hint={`n = ${d.errors.n}`} />
@@ -543,7 +543,7 @@ export default function Board() {
           <h2>
             {t('board.done.title')}
             <span className="sub">
-              {t('board.done.sub', { n: o.n })}
+              {t('board.done.sub', { count: o.n })}
               {!d.market.shown && t('board.done.fewMarket', { n: d.market.n })}
             </span>
           </h2>

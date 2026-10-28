@@ -54,7 +54,7 @@ export function I18nProvider({ children }) {
       dict: locales[lang], fallback: locales[SOURCE_LANG], lang, formatters: fmt.formatters, warn,
     });
     return {
-      lang, tz, tzFollowsLang: explicitTz === null, setLang, setTz, setTeams, t, fmt, langs, timezones: TIMEZONES,
+      lang, meta, tz, tzFollowsLang: explicitTz === null, setLang, setTz, setTeams, t, fmt, langs, timezones: TIMEZONES,
     };
   }, [lang, tz, explicitTz, teamById, setLang, setTz, setTeams]);
 

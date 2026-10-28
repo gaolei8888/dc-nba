@@ -183,3 +183,18 @@ test('paperHeadlineMsg：样本外前缀写 TUNING_SEASON', () => {
   assert.equal(m.params.verdict.code, 'srv.paper.verdict.negative');
   assert.deepEqual(m.params.verdict.params, { seasons: 2, bets: 1596, roi: -0.1182, lo: -0.1926, hi: -0.0457 });
 });
+
+test('paperSummaryLines：中文句与消息码同条件成对追加', async () => {
+  const { paperSummaryLines } = await import('../server/paperBetting.mjs');
+  const board = { summary: ['a'], summaryMsg: [{ code: 'x', params: {} }] };
+  const both = paperSummaryLines({ headline: { verdict: '结论', verdictMsg: { code: 'v', params: {} } } }, board);
+  assert.equal(both.summary.length, 2);
+  assert.equal(both.summaryMsg.length, 2);
+  // 缺任一边：两边都不追加
+  for (const headline of [{ verdict: '结论' }, { verdictMsg: { code: 'v', params: {} } }, null]) {
+    const r = paperSummaryLines({ headline }, board);
+    assert.deepEqual(r.summary, board.summary);
+    assert.deepEqual(r.summaryMsg, board.summaryMsg);
+  }
+  assert.deepEqual(paperSummaryLines(null, board).summary, board.summary);
+});

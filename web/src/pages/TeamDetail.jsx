@@ -13,7 +13,7 @@ import { useI18n } from '../i18n/react.jsx';
 
 export default function TeamDetail({ teamId }) {
   const { meta, teamById, out, toggleOut, params, setAccent } = useApp();
-  const { t, fmt, lang } = useI18n();
+  const { t, fmt, meta: i18nMeta } = useI18n();
   const [data, setData] = useState({ loading: true });
   const [statMode, setStatMode] = useState('base');
   const [month, setMonth] = useState('all');
@@ -70,7 +70,7 @@ export default function TeamDetail({ teamId }) {
           <h1>{fmt.teamName(tm)}</h1>
           <div className="en">
             {t('teamDetail.sub', {
-              name: lang === 'zh' ? tm.full : tm.abbr,
+              name: i18nMeta.teamSubName === 'full' ? tm.full : tm.abbr,
               conf: fmt.conf(tm.conference),
               div: fmt.div(tm.division),
               season: meta.displayCurrent ? meta.targetSeason : meta.priorSeason,
@@ -170,7 +170,7 @@ export default function TeamDetail({ teamId }) {
           }}
           extraColumns={[
             { key: 'number', label: t('teamDetail.col.number'), width: 36, render: (p) => <span className="dim">{p.number}</span> },
-            { key: 'posCn', label: t('teamDetail.col.pos'), width: 72, align: 'left', render: (p) => <span className="dim">{p.pos ? fmt.pos(p.pos) : '—'}</span> },
+            { key: 'pos', label: t('teamDetail.col.pos'), width: 72, align: 'left', render: (p) => <span className="dim">{p.pos ? fmt.pos(p.pos) : '—'}</span> },
             { key: 'age', label: t('teamDetail.col.age'), width: 44, render: (p) => num(p.age, 0) },
           ]}
         />

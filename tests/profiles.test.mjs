@@ -68,3 +68,11 @@ test('errorText：非 err. 开头的本地 code 不被当成译文键', () => {
   const e = Object.assign(new Error('x'), { code: 'ENOENT' });
   assert.equal(errorText(e, tFor('en')), tFor('en')('err.unknown'));
 });
+
+test('importProfile：存档码里名字为空时用 defaultName', () => {
+  const code = btoa(JSON.stringify({ v: 1, name: '', games: {} }));
+  const s = { version: 1, activeId: null, profiles: [] };
+  const en = tFor('en');
+  const next = importProfile(s, code, (n) => en('profiles.imported', { name: n }), 'Player 1');
+  assert.equal(next.profiles[0].name, 'Player 1 (imported)');
+});

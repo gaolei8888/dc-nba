@@ -134,6 +134,9 @@ test('locales：meta 字段齐全，defaultTz 是 TIMEZONES 之一', () => {
       assert.ok(loc.meta?.[f], `${code}.meta.${f} 缺失`);
     }
     assert.ok(Array.isArray(loc.meta.match) && loc.meta.match.length > 0);
+    // 组件里不按语言代码分支，行为差异由 meta 标志给出
+    assert.equal(typeof loc.meta.thAbbrOnly, 'boolean', `${code}.meta.thAbbrOnly`);
+    assert.ok(['full', 'abbr'].includes(loc.meta.teamSubName), `${code}.meta.teamSubName`);
     assert.ok(['America/New_York', 'Asia/Shanghai'].includes(loc.meta.defaultTz));
   }
 });

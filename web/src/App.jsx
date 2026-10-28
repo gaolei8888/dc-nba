@@ -163,7 +163,7 @@ export default function App() {
       deleteProfile: (id) => setProf((s2) => deleteP(s2, id)),
       // 不能放进 setProf 的更新函数：坏存档码会抛错，在更新函数里抛会直接让整个应用白屏；
       // 这里同步抛给调用方（Profiles 页的 try/catch）显示具体原因
-      importProfile: (code) => setProf(importP(prof, code, (n) => t('profiles.imported', { name: n }))),
+      importProfile: (code) => setProf(importP(prof, code, (n) => t('profiles.imported', { name: n }), t('profiles.defaultName'))),
 
       // ---- 排行榜（服务端可能未启用，这里全部容错）
       leaderboardOn: !!state.meta?.features?.leaderboard,

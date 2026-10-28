@@ -1,5 +1,5 @@
 export default {
-  meta: { name: '中文', short: '中文', intl: 'zh-CN', htmlLang: 'zh-CN', defaultTz: 'Asia/Shanghai', match: ['zh'] },
+  meta: { name: '中文', short: '中文', intl: 'zh-CN', htmlLang: 'zh-CN', defaultTz: 'Asia/Shanghai', match: ['zh'], thAbbrOnly: false, teamSubName: 'full' },
   common: {
     // 多条服务端消息拼成一段时的分隔
     sentenceJoin: '',
@@ -47,6 +47,7 @@ export default {
     reloadFailed: '抓取完成但重新载入数据失败',
     badRequest: '请求有误',
     internal: '服务端出错了，请稍后重试',
+    labDataMissing: '缺少回测数据：请先运行回测数据构建。',
     profileCode: '存档码无法识别，请确认复制完整',
     profileVersion: '存档码版本不支持',
   },
@@ -701,7 +702,7 @@ export default {
     tab: { stats: '统计', done: '已结束比赛', next: '接下来', bet: '模拟投注' },
     hit: '✓ 命中', miss: '✗ 未中',
     tile: {
-      record: '战绩（猜对-猜错）', recordHint: '已结束 {n} 场',
+      record: '战绩（猜对-猜错）', recordHint: { other: '已结束 {count} 场' },
       acc: '赛前预测命中', accHint: '95% 区间 {ci}，n = {n}',
       brier: 'Brier / 对数损失', brierHint: '越低越好；每场都报 50% 是 0.250 / 0.693',
       marginMae: '分差平均误差',
@@ -716,7 +717,7 @@ export default {
       market: '盘口胜率', marketTip: '去抽水后的市场主队胜率（仅作参考）', matchup: '对阵', team: '球队',
     },
     stats: {
-      baselines: '基准线', baselinesSub: '同一批 {n} 场比赛，看我们比最简单的猜法强多少',
+      baselines: '基准线', baselinesSub: { other: '同一批 {count} 场比赛，看我们比最简单的猜法强多少' },
       method: '方法', hitsN: '猜对 / 场数', acc: '准确率', hits: '猜对', games: '场数',
       errors: '误差', errorsSub: '预测 − 实际，n = {n}',
       coinBrier: '每场都报 50% = 0.250', logLoss: '对数损失', coinLogLoss: '每场都报 50% = 0.693',
@@ -725,8 +726,8 @@ export default {
       scoreMae: '单队得分 MAE', scoreMaeNote: '主客两队各算一次',
       metric: '指标', value: '数值', note: '说明',
       calib: '校准', calibSub: '按赛前信心分档：说七成的比赛，真的赢了七成吗？每档样本都很小',
-      conf: '信心', predAvg: '预测平均', actualHits: '实际命中', hitsGames: '{n} 场',
-      misses: '看走眼的比赛', missesSub: '赛前信心 ≥65% 却猜错，共 {n} 场', ourPick: '我们看好', actual: '实际',
+      conf: '信心', predAvg: '预测平均', actualHits: '实际命中', hitsGames: { other: '{count} 场' },
+      misses: '看走眼的比赛', missesSub: { other: '赛前信心 ≥65% 却猜错，共 {count} 场' }, ourPick: '我们看好', actual: '实际',
       byDate: '逐日', byDateSub: '累计准确率随样本变化，早期的起伏大多是噪声',
       day: '当日', cum: '累计', cumAcc: '累计准确率',
       byTeam: '按球队', byTeamSub: '涉及该队的比赛猜对多少；每队只有三四场，点表头排序',
@@ -735,7 +736,7 @@ export default {
       title: '影子模式（不影响显示的预测）',
       sub: '多套赛前预测同时记录：06:30 伤病方案已结算 {progress} / {target} 场',
       subRr: '，阵容+战绩（06:30）{n} / {target} 场',
-      subPending: '，待结算 {n} 场',
+      subPending: { other: '，待结算 {count} 场' },
       rule: '伤病方案：满 {target} 场且 06:30 方案的 Δ 对数损失 < 0 才考虑切换；前 20 场本来就没有收益',
       variantCol: '方案', settled: '已结算', dLogLoss: 'Δ 对数损失 vs 基线（95% 区间）', progress: '进度（配对场数）',
       variant: {
@@ -748,6 +749,7 @@ export default {
     curve: { tooFew: '还没有足够的已结算注单画曲线', range: '最高 {hi} · 最低 {lo} · 最终 ' },
     paper: {
       noBacktest: '历史回测还没生成（node scripts/paper-backtest.mjs）。',
+      verdictMissing: '回测结论暂不可用；不要把它当作模型能赢盘口的证据。',
       disclaimer: '这是模拟，不是建议。规则事先固定：模型胜率比 DraftKings 去水胜率高 3 个百分点以上就押那一边 1 注，按真实（含水）赔率结算； 0% / 6% 门槛、挑最优价、各家逐一回测都一起列出，不挑最好的报。',
       oosBets: '样本外注数（DK, ≥3%）',
       winRate: '胜率 / 保本胜率', winRateHint: '胜率要高过保本线才不亏',
@@ -760,13 +762,13 @@ export default {
       curve: '累计盈亏 · 本季账本', curveSub: '开赛前记录、赛后结算，记录后不可改', curveLabel: '本季账本累计盈亏',
       none: '暂无本季账本数据',
       settledPre: '已结算 ', settledPost: ' 注、待结算 {pending} 注，自 {first} 起共记录 {captured} 场。',
-      small: ' 样本只有 {n} 注，太小，不下结论。',
+      small: { other: ' 样本只有 {count} 注，太小，不下结论。' },
       roi: ' ROI {roi}（95% 区间 {ci}）。',
       pair: '本季账本 · 早记 vs 临近开赛', pairSub: '同一规则（edge ≥ 3%、DK、平注 1 单位），只是记录时点不同',
       rule: '规则', at: '记录时点',
       atLate: '北京 06:30（开赛前约 0.5–4 小时）', atEarly: '北京 22:00（开赛前 9–12 小时）',
       settledPending: '已结算 / 待结算', record: '战绩', pl: '盈亏',
-      clv: '平均 CLV（对收盘）', clvVal: '{v} 个百分点（{n} 注）',
+      clv: '平均 CLV（对收盘）', clvVal: { other: '{v} 个百分点（{count} 注）' },
       pairSmall: '两边各不足 {n} 注，差别是噪声，不下结论。',
       pairBig: '样本已过 100 注，但早晚两条下的大多是同几场，差别仍要看区间。',
       pairNote: '临近开赛的价更接近收盘，所以它的 CLV 天然接近 0；早记的 CLV 为正也不等于赚钱（历史回测里 CLV 为正、ROI 仍为负）。 晚规则只在 06:30 那次刷新新抓到盘口时记录，刷新失败那天不补；已开赛的比赛不记。',
@@ -804,7 +806,7 @@ export default {
       note: '模型概率是生产参数的逐场赛前 Elo 重放（2021-22 只作预热）。每家每场取最接近收盘的价：有 close 用 close，否则用 current（2021-22、2022-23 多数只有 current）， 从不用开盘价冒充收盘。已剔除 in-game Live Odds、聚合源与离当场中位让分超过 3 分的离谱线；Caesars 各州 id 合并为一家。',
     },
     done: {
-      title: '已结束比赛', sub: '{n} 场，最新的在上；胜率为主队获胜概率',
+      title: '已结束比赛', sub: { other: '{count} 场，最新的在上；胜率为主队获胜概率' },
       fewMarket: ' · 有盘口的只有 {n} 场，不单列盘口',
     },
     next: {
@@ -964,7 +966,7 @@ export default {
       title: '我的本季实战记录', sub: '共 {total} · 已翻牌 {n} · 等比分 {waiting}',
       date: '日期（{tz}）', matchup: '对阵', pick: '你押', score: '比分', you: '你', modelAtPick: '模型（提交时）', model: '模型',
       waiting: '等比分', homeProb: '主队 {p}%', afterReveal: '翻牌后显示',
-      small: '才 {n} 场，输赢里运气占大头，别急着下结论。',
+      small: { other: '才 {count} 场，输赢里运气占大头，别急着下结论。' },
       boardNote: '本季实战有单独的排行榜，在「玩家档案」页切换查看。',
     },
     footer: '数据快照 {at} · 服务器时间 {now} · 模型是 {season} 生产默认预测（不套缺阵勾选）',

@@ -87,6 +87,7 @@ export function createFormat({ locale, fallback, tz, intl, teamById } = {}) {
   const utcParts = (iso) => {
     const [y, m, d] = iso.split('-').map(Number);
     const dt = new Date(Date.UTC(y, m - 1, d));
+    if (!Number.isFinite(dt.getTime())) return null;
     return {
       y, m, d, dt,
       wd: dtf('wd', loc, { timeZone: 'UTC', weekday: 'short' }).format(dt),
@@ -95,7 +96,9 @@ export function createFormat({ locale, fallback, tz, intl, teamById } = {}) {
   };
   const dateWith = (key) => (iso) => {
     if (!iso) return '';
-    const { y, m, d, wd, mon } = utcParts(iso);
+    const p = utcParts(iso);
+    if (!p) return String(iso); // 格式不对的日期原样返回，不抛 RangeError
+    const { y, m, d, wd, mon } = p;
     return t(key, { y, m, d, wd, mon });
   };
   const date = dateWith('fmt.date');

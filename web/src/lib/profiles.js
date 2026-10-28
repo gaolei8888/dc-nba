@@ -168,10 +168,10 @@ export function exportProfile(profileId, profiles) {
 }
 
 /**
- * 导入存档码，作为一个新档案落地。
+ * 导入存档码，作为一个新档案落地；存档码里名字为空时用 defaultName（调用方按当前语言给）。
  * importedName(name) 给出带「导入」后缀的档案名（后缀随语言，由调用方给）；缺省只用原名。
  */
-export function importProfile(state, code, importedName = (n) => n) {
+export function importProfile(state, code, importedName = (n) => n, defaultName = '') {
   let payload;
   try {
     const bin = atob(code.trim());
@@ -182,7 +182,7 @@ export function importProfile(state, code, importedName = (n) => n) {
   }
   if (payload?.v !== 1 || !payload.games) throw codedError('err.profileVersion', 'unsupported save code version');
 
-  const next = createProfile(state, importedName(payload.name));
+  const next = createProfile(state, importedName(payload.name || defaultName), defaultName);
   const id = next.activeId;
   for (const g of GAMES) {
     if (payload.games[g]) write(gameKey(g, id), payload.games[g]);

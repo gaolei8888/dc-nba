@@ -34,10 +34,12 @@ test('errorText：未知 code 也不回显中文', () => {
   assert.doesNotMatch(errorText(e, t), CJK);
 });
 
-test('errorText：网络错误与未知异常', () => {
-  assert.equal(errorText(new TypeError('Failed to fetch'), t), t('err.network'));
-  assert.equal(errorText(new Error('随便'), t), t('err.unknown'));
-  assert.doesNotMatch(errorText(new Error('随便'), t), CJK);
+test('errorText：未知异常不回显原文', () => {
+  const orig = console.error; console.error = () => {};
+  try {
+    assert.equal(errorText(new Error('随便'), t), t('err.unknown'));
+    assert.doesNotMatch(errorText(new Error('随便'), t), CJK);
+  } finally { console.error = orig; }
 });
 
 test('toApiError：读取 body 的 code / params / error', async () => {
@@ -55,4 +57,17 @@ test('toApiError：body 不是 JSON 时 code 为 null', async () => {
   assert.equal(e.status, 502);
   assert.equal(e.code, null);
   assert.deepEqual(e.params, {});
+});
+
+test('errorText：普通 TypeError 是 err.unknown，不当成网络错误', () => {
+  const orig = console.error; console.error = () => {};
+  try {
+    assert.equal(errorText(new TypeError('x is undefined'), t), t('err.unknown'));
+  } finally { console.error = orig; }
+});
+
+test('errorText：ApiError status 0 + err.network 显示网络文案', () => {
+  const e = new ApiError({ status: 0, code: 'err.network' });
+  assert.equal(errorText(e, t), t('err.network'));
+  assert.notEqual(t('err.network'), t('err.unknown'));
 });

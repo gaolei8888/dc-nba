@@ -162,7 +162,7 @@ export default function Players() {
               key: 'teamAbbr', label: t('players.team'), align: 'left', width: 142,
               render: (p) => <TeamCell team={teamById.get(p.teamId)} size={20} showAbbr={false} />,
             },
-            { key: 'posCn', label: t('players.pos'), align: 'left', width: 72, render: (p) => <span className="dim">{p.pos ? fmt.pos(p.pos) : '—'}</span> },
+            { key: 'pos', label: t('players.pos'), align: 'left', width: 72, render: (p) => <span className="dim">{p.pos ? fmt.pos(p.pos) : '—'}</span> },
             { key: 'age', label: t('players.age'), width: 44, render: (p) => num(p.age, 0) },
           ]}
         />

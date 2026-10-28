@@ -494,7 +494,7 @@ function LiveMode({ live, reload, headers }) {
               </tbody>
             </table>
           </div>
-          {total.n > 0 && total.n < 30 && <p className="note">{t('play.hist.small', { n: total.n })}</p>}
+          {total.n > 0 && total.n < 30 && <p className="note">{t('play.hist.small', { count: total.n })}</p>}
           {leaderboardOn && cloud?.token && <p className="note">{t('play.hist.boardNote')}</p>}
         </div>
       )}

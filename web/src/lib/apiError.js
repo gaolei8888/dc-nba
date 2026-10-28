@@ -38,6 +38,7 @@ export function errorText(err, t) {
     const s = t(err.code, err.params);
     if (s && s !== err.code) return s;
   }
-  if (err instanceof TypeError) return t('err.network');
+  // 未知错误只记日志，不当成网络错误（TypeError 也可能是代码缺陷）
+  console.error(err);
   return t('err.unknown');
 }

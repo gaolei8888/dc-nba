@@ -12,6 +12,7 @@ import { parentPort } from 'node:worker_threads';
 import { readJson } from './nbaClient.mjs';
 import { buildModel, simulateSeason, powerRankings, predictSchedule } from './predict.mjs';
 import * as lab from './lab.mjs';
+import { codedError } from './messages.mjs';
 
 // 每个 worker 自己加载一份快照。数据约 1MB，几个 worker 的内存开销可以接受，
 // 换来的是完全不需要跨线程传数据。
@@ -35,7 +36,7 @@ const getModel = (overrides) => {
 const HANDLERS = {
   /** 回测一组参数，返回指标 + 校准 + 误差切片 */
   labBacktest({ seasons, params }) {
-    if (!labData) throw new Error('缺少 data/backtest.json，请先运行 npm run ingest');
+    if (!labData) throw codedError('err.labDataMissing', '缺少 data/backtest.json，请先运行 npm run ingest');
     const rows = lab.replay(labData, seasons, params);
     return {
       seasons,
@@ -48,13 +49,13 @@ const HANDLERS = {
 
   /** 对标博彩收盘盘口 */
   labMarket({ seasons, params }) {
-    if (!labData) throw new Error('缺少 data/backtest.json');
+    if (!labData) throw codedError('err.labDataMissing', '缺少 data/backtest.json');
     return lab.market(lab.replay(labData, seasons, params));
   },
 
   /** 逐年测量：主场优势与休息效应 */
   labMeasure({ seasons, params }) {
-    if (!labData) throw new Error('缺少 data/backtest.json');
+    if (!labData) throw codedError('err.labDataMissing', '缺少 data/backtest.json');
     return {
       homeAdvantage: lab.homeAdvantageBySeason(labData, seasons, params),
       rest: lab.restEffect(labData, seasons, params),
@@ -63,7 +64,7 @@ const HANDLERS = {
 
   /** 反事实：某队全季强/弱 N 分 */
   labCounterfactual({ seasons, teamId, deltaPts, params }) {
-    if (!labData) throw new Error('缺少 data/backtest.json');
+    if (!labData) throw codedError('err.labDataMissing', '缺少 data/backtest.json');
     return lab.counterfactual(labData, seasons, teamId, deltaPts, params);
   },
 

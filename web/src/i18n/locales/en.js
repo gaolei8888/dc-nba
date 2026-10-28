@@ -1,5 +1,5 @@
 export default {
-  meta: { name: 'English', short: 'EN', intl: 'en-US', htmlLang: 'en', defaultTz: 'America/New_York', match: ['en'] },
+  meta: { name: 'English', short: 'EN', intl: 'en-US', htmlLang: 'en', defaultTz: 'America/New_York', match: ['en'], thAbbrOnly: true, teamSubName: 'abbr' },
   common: {
     // 多条服务端消息拼成一段时的分隔
     sentenceJoin: ' ',
@@ -47,6 +47,7 @@ export default {
     reloadFailed: 'Fetch finished but reloading the data failed',
     badRequest: 'Bad request',
     internal: 'Server error. Please try again later.',
+    labDataMissing: 'Backtest data missing: run the backtest data build first.',
     profileCode: 'Save code not recognized. Check that you copied all of it.',
     profileVersion: 'This save code version is not supported',
   },
@@ -701,7 +702,7 @@ export default {
     tab: { stats: 'Stats', done: 'Finished games', next: 'Upcoming', bet: 'Paper betting' },
     hit: '✓ Hit', miss: '✗ Miss',
     tile: {
-      record: 'Record (right-wrong)', recordHint: '{n} games finished',
+      record: 'Record (right-wrong)', recordHint: { one: '{count} game finished', other: '{count} games finished' },
       acc: 'Pregame accuracy', accHint: '95% CI {ci}, n = {n}',
       brier: 'Brier / log loss', brierHint: 'Lower is better; saying 50% every game gives 0.250 / 0.693',
       marginMae: 'Mean margin error',
@@ -716,7 +717,7 @@ export default {
       market: 'Market prob.', marketTip: 'The market\'s home win probability with the vig removed (for reference only)', matchup: 'Matchup', team: 'Team',
     },
     stats: {
-      baselines: 'Baselines', baselinesSub: 'The same {n} games: how much better we do than the simplest guesses',
+      baselines: 'Baselines', baselinesSub: { one: 'The same {count} game: how much better we do than the simplest guesses', other: 'The same {count} games: how much better we do than the simplest guesses' },
       method: 'Method', hitsN: 'Right / games', acc: 'Accuracy', hits: 'Right', games: 'Games',
       errors: 'Errors', errorsSub: 'Predicted − actual, n = {n}',
       coinBrier: '50% every game = 0.250', logLoss: 'Log loss', coinLogLoss: '50% every game = 0.693',
@@ -725,8 +726,8 @@ export default {
       scoreMae: 'Team score MAE', scoreMaeNote: 'Counted once for each team',
       metric: 'Metric', value: 'Value', note: 'Note',
       calib: 'Calibration', calibSub: 'Grouped by pregame confidence: did the games we called at 70% really go our way 70% of the time? Every bucket is a small sample',
-      conf: 'Confidence', predAvg: 'Predicted avg.', actualHits: 'Actual hits', hitsGames: '{n} games',
-      misses: 'Bad misses', missesSub: 'Pregame confidence ≥65% but wrong: {n} games', ourPick: 'Our pick', actual: 'Actual',
+      conf: 'Confidence', predAvg: 'Predicted avg.', actualHits: 'Actual hits', hitsGames: { one: '{count} game', other: '{count} games' },
+      misses: 'Bad misses', missesSub: { one: 'Pregame confidence ≥65% but wrong: {count} game', other: 'Pregame confidence ≥65% but wrong: {count} games' }, ourPick: 'Our pick', actual: 'Actual',
       byDate: 'By date', byDateSub: 'Cumulative accuracy as the sample grows; early swings are mostly noise',
       day: 'Day', cum: 'Cumulative', cumAcc: 'Cumulative accuracy',
       byTeam: 'By team', byTeamSub: 'How often we were right in games involving each team; only three or four games per team. Click a header to sort',
@@ -735,7 +736,7 @@ export default {
       title: 'Shadow mode (predictions not shown on the site)',
       sub: 'Several pregame predictions are recorded in parallel: 06:30 injury variant settled {progress} / {target} games',
       subRr: ', roster + results (06:30) {n} / {target} games',
-      subPending: ', {n} games pending',
+      subPending: { one: ', {count} game pending', other: ', {count} games pending' },
       rule: 'Injury variant: only considered for a switch after {target} games and only if the 06:30 variant\'s Δ log loss < 0; the first 20 games have no gain by design',
       variantCol: 'Variant', settled: 'Settled', dLogLoss: 'Δ log loss vs baseline (95% CI)', progress: 'Progress (paired games)',
       variant: {
@@ -748,6 +749,7 @@ export default {
     curve: { tooFew: 'Not enough settled bets to draw a curve yet', range: 'High {hi} · Low {lo} · Final ' },
     paper: {
       noBacktest: 'The historical backtest has not been generated yet (node scripts/paper-backtest.mjs).',
+      verdictMissing: 'Backtest verdict unavailable; do not treat this as evidence the model beats the market.',
       disclaimer: 'This is a simulation, not advice. The rule is fixed in advance: when the model\'s win probability beats DraftKings\' no-vig probability by more than 3 percentage points, bet 1 unit on that side, settled at the real (with-vig) odds. The 0% / 6% thresholds, best price, and every sportsbook backtested one by one are all listed together. We do not report only the best result.',
       oosBets: 'Out-of-sample bets (DK, ≥3%)',
       winRate: 'Win rate / break-even win rate', winRateHint: 'The win rate must beat the break-even line to avoid a loss',
@@ -760,13 +762,13 @@ export default {
       curve: 'Cumulative P/L · this season\'s live ledger', curveSub: 'Recorded before tip-off, settled after the game, never edited once recorded', curveLabel: 'Live ledger cumulative P/L',
       none: 'No live ledger data for this season yet',
       settledPre: 'Settled: ', settledPost: ' bets; {pending} pending; {captured} games recorded since {first}.',
-      small: ' Only {n} bets so far. That is too small a sample to conclude anything.',
+      small: { one: ' Only {count} bet so far. That is too small a sample to conclude anything.', other: ' Only {count} bets so far. That is too small a sample to conclude anything.' },
       roi: ' ROI {roi} (95% CI {ci}).',
       pair: 'Live ledger · early vs. near tip-off', pairSub: 'Same rule (edge ≥ 3%, DK, flat 1 unit); only the recording time differs',
       rule: 'Rule', at: 'Recorded at',
       atLate: '06:30 Beijing time (about 0.5–4 hours before tip-off)', atEarly: '22:00 Beijing time (9–12 hours before tip-off)',
       settledPending: 'Settled / pending', record: 'Record', pl: 'P/L',
-      clv: 'Avg. CLV (vs. close)', clvVal: '{v} pp ({n} bets)',
+      clv: 'Avg. CLV (vs. close)', clvVal: { one: '{v} pp ({count} bet)', other: '{v} pp ({count} bets)' },
       pairSmall: 'Each side has fewer than {n} bets. The difference is noise, so no conclusion.',
       pairBig: 'The sample is past 100 bets, but the early and late rules mostly bet the same games, so look at the intervals before reading anything into the difference.',
       pairNote: 'Prices near tip-off are closer to the close, so their CLV is naturally near 0. A positive CLV on early bets does not mean making money either (in the historical backtest, CLV was positive and ROI was still negative). The late rule only records when the 06:30 refresh picks up new lines; days when that refresh fails are not filled in, and games already started are not recorded.',
@@ -804,7 +806,7 @@ export default {
       note: 'Model probabilities are a game-by-game pregame Elo replay with production parameters (2021-22 is warm-up only). For each sportsbook and game we take the price closest to the close: close if available, otherwise current (2021-22 and 2022-23 mostly have only current). The opening price is never passed off as the close. In-game Live Odds, aggregators and outlier lines more than 3 points from the game\'s median spread are removed; Caesars\' per-state ids are merged into one sportsbook.',
     },
     done: {
-      title: 'Finished games', sub: '{n} games, newest first; win probability is for the home team',
+      title: 'Finished games', sub: { one: '{count} game, newest first; win probability is for the home team', other: '{count} games, newest first; win probability is for the home team' },
       fewMarket: ' · Only {n} games have a betting line, so the market is not shown separately',
     },
     next: {
@@ -965,7 +967,7 @@ export default {
       title: 'My current-season record', sub: '{total} in all · {n} revealed · {waiting} awaiting score',
       date: 'Date ({tz})', matchup: 'Matchup', pick: 'Your pick', score: 'Score', you: 'You', modelAtPick: 'Model (at submit)', model: 'Model',
       waiting: 'Awaiting score', homeProb: 'Home {p}%', afterReveal: 'Shown after reveal',
-      small: 'Only {n} games so far. Luck dominates the wins and losses, so do not draw conclusions yet.',
+      small: { one: 'Only {count} game so far. Luck dominates the wins and losses, so do not draw conclusions yet.', other: 'Only {count} games so far. Luck dominates the wins and losses, so do not draw conclusions yet.' },
       boardNote: 'The current-season record has its own leaderboard; switch to it on the Profiles page.',
     },
     footer: 'Data snapshot {at} · Server time {now} · The model is the {season} production default prediction (no Out selections applied)',
@@ -1051,8 +1053,8 @@ export default {
       biasHint: 'Only a value near 0 means no systematic over- or underestimate',
       params: 'Parameters',
       paramsSub: {
-        one: 'After changing them, click "Backtest" to score them on {count} real game',
-        other: 'After changing them, click "Backtest" to score them on {count} real games',
+        one: 'After changing them, click "Backtest these parameters" to score them on {count} real game',
+        other: 'After changing them, click "Backtest these parameters" to score them on {count} real games',
       },
       run: 'Backtest these parameters',
       reset: 'Reset to defaults',

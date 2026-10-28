@@ -126,9 +126,9 @@ export function InjuryBadge({ injury }) {
  * 英文界面缩写本身就是通用语言，只显示缩写，label 放进悬停说明。
  */
 export function Th({ abbr, label }) {
-  const { lang } = useI18n();
+  const { meta } = useI18n();
   if (!abbr) return label;
-  if (lang === 'en') {
+  if (meta.thAbbrOnly) {
     return (
       <span className="th-label" title={typeof label === 'string' ? label : undefined}>
         <b>{abbr}</b>

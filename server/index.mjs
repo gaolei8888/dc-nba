@@ -10,11 +10,11 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readJson, DATA_DIR } from './nbaClient.mjs';
 import * as db from './db.mjs';
-import { sendError, publicCode, msg } from './messages.mjs';
+import { sendError, publicCode, msg, codedError } from './messages.mjs';
 import * as lab from './lab.mjs';
 import { liveRosterRankings } from './liveRosterRankings.mjs';
 import { buildBoard } from './predictionBoard.mjs';
-import { paperHeadlineMsg, PAPER_LINE_CODE } from './paperBetting.mjs';
+import { paperHeadlineMsg, paperSummaryLines } from './paperBetting.mjs';
 import { ledgerRows, ledgerReport } from './ledger.mjs';
 import { shadowAll, shadowSummary } from './injuryShadow.mjs';
 import { rrAll } from './rosterResultsShadow.mjs';
@@ -404,12 +404,8 @@ app.get('/api/predictions/summary', wrap(async (req, res) => {
       ...board,
       // 总结里也要直说投注回测的结论，不能只藏在「模拟投注」那一栏。
       // summary 是中文原句（脚本 / 日志），summaryMsg 是同内容的消息码，前端按语言渲染
-      summary: store.paper?.headline?.verdict
-        ? [...board.summary, `模拟投注（DraftKings、edge ≥ 3% 平注）${store.paper.headline.verdict}`]
-        : board.summary,
-      summaryMsg: store.paper?.headline?.verdictMsg
-        ? [...board.summaryMsg, msg(PAPER_LINE_CODE, { verdict: store.paper.headline.verdictMsg })]
-        : board.summaryMsg,
+      // 两条同条件（要有消息码）才追加，保证中文句与消息码永远成对，不会一边有一边无
+      ...paperSummaryLines(store.paper, board),
     };
   });
 }));
@@ -690,7 +686,7 @@ const runLab = async (type, payload) => {
   }
   // 兜底：主线程直接算。会卡事件循环，但功能不能因优化失效
   const labData = readJson('backtest.json');
-  if (!labData) throw new Error('缺少 data/backtest.json，请先运行 npm run ingest');
+  if (!labData) throw codedError('err.labDataMissing', '缺少 data/backtest.json，请先运行 npm run ingest');
   const { seasons, params } = payload;
   if (type === 'labBacktest') {
     const rows = lab.replay(labData, seasons, params);

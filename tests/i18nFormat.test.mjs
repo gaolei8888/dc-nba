@@ -105,3 +105,9 @@ test('snapshotAge：文字随语言，stale 判定不变', () => {
   assert.equal(en.snapshotAge('2026-10-25T09:00:00Z', { now }).stale, true);
   assert.equal(zh.snapshotAge(null, { now }), null);
 });
+
+test('日期格式化：畸形 ISO 原样返回，不抛 RangeError', () => {
+  for (const f of [zh, en]) {
+    for (const k of ['date', 'dateFull', 'dateMD']) assert.equal(f[k]('xyz'), 'xyz');
+  }
+});

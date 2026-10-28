@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
@@ -86,11 +87,16 @@ test('服务端出现的每个消息码在所有语言里都有', () => {
 
 test('接口：错误响应带 code/params 且保留中文 error（真实进程）', async (t) => {
   const port = 20000 + Math.floor(Math.random() * 20000);
+  // 独占的临时库：不继承 shell 里的 DB_PATH，避免污染真实数据
+  const dbPath = path.join(os.tmpdir(), `dc-nba-msg-${process.pid}-${port}.db`);
   const child = spawn(process.execPath, ['server/index.mjs'], {
-    env: { ...process.env, PORT: String(port), ENABLE_LEADERBOARD: '0', ENABLE_LEDGER: '0', NODE_ENV: 'test' },
-    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, DB_PATH: dbPath, PORT: String(port), ENABLE_LEADERBOARD: '0', ENABLE_LEDGER: '0', NODE_ENV: 'test' },
+    stdio: 'ignore',
   });
-  t.after(() => child.kill());
+  t.after(() => {
+    child.kill();
+    for (const suf of ['', '-wal', '-shm']) fs.rmSync(dbPath + suf, { force: true });
+  });
   let ready = false;
   for (let i = 0; i < 100 && !ready; i++) {
     try { ready = (await fetch(`http://127.0.0.1:${port}/api/health`)).ok; } catch { await new Promise((r) => setTimeout(r, 200)); }

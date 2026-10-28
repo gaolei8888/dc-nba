@@ -1,4 +1,9 @@
-import { toApiError } from './apiError.js';
+import { ApiError, toApiError } from './apiError.js';
+
+// fetch 自身失败（断网、DNS、CORS）统一成 status 0 的网络错误；其它 TypeError 不在此列
+const request = (url, init) => fetch(url, init).catch(() => {
+  throw new ApiError({ status: 0, code: 'err.network' });
+});
 
 const json = async (res) => {
   if (!res.ok) {
@@ -21,8 +26,8 @@ const qs = (params) => {
 const API = `${import.meta.env.BASE_URL}api`.replace(/\/{2,}/g, '/');
 
 const get = (path, params, headers) =>
-  fetch(`${API}${path}${qs(params)}`, headers ? { headers } : undefined).then(json);
-const post = (path, body) => fetch(`${API}${path}`, {
+  request(`${API}${path}${qs(params)}`, headers ? { headers } : undefined).then(json);
+const post = (path, body) => request(`${API}${path}`, {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(body),
@@ -54,12 +59,12 @@ export const api = {
   // ---- 排行榜（服务端可能未启用，调用方需容错）
   createPlayer: (name) => post('/players', { name }),
   me: (token) => get('/me', null, { Authorization: `Bearer ${token}` }),
-  renameMe: (token, name) => fetch(`${API}/me/name`, {
+  renameMe: (token, name) => request(`${API}/me/name`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ name }),
   }).then(json),
-  pushPicks: (token, picks) => fetch(`${API}/picks`, {
+  pushPicks: (token, picks) => request(`${API}/picks`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ picks }),
@@ -67,7 +72,7 @@ export const api = {
   leaderboard: (params) => get('/leaderboard', params),
   // ---- 本季实战：两种身份头都带上，服务端按部署模式认其中一个
   live: (params, headers) => get('/live', params, headers),
-  livePicks: (picks, headers) => fetch(`${API}/live/picks`, {
+  livePicks: (picks, headers) => request(`${API}/live/picks`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...headers },
     body: JSON.stringify({ picks }),
