@@ -26,7 +26,9 @@
     "lineups:fetch": "node scripts/lineups-history.mjs",
     "pbp:fetch": "node scripts/pbp-history.mjs",
     "rapm:lab": "node scripts/rapm-lab.mjs",
-    "impact:lab": "node scripts/impact-lab.mjs"
+    "impact:lab": "node scripts/impact-lab.mjs",
+    "injury:fetch": "node scripts/injury-history.mjs",
+    "injury:lab": "node scripts/injury-lab.mjs"
   },
   "dependencies": {
     "compression": "^1.8.1",

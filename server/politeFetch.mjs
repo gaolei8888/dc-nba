@@ -99,14 +99,15 @@ export class CapError extends Error {
 }
 const timeoutError = (ms) => Object.assign(new Error(`${ms}ms 内没有响应`), { code: 'TIMEOUT' });
 
-/** 默认传输：Node 自带 fetch。返回 { status, text, setCookie }，超时抛 code=TIMEOUT */
+/** 默认传输：Node 自带 fetch。返回 { status, text, bytes, setCookie }，超时抛 code=TIMEOUT */
 export const nodeTransport = {
   async request(url, { headers, timeoutMs }) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
       const res = await fetch(url, { headers, signal: ctrl.signal });
-      return { status: res.status, text: await res.text(), setCookie: res.headers.getSetCookie?.() ?? [] };
+      const bytes = Buffer.from(await res.arrayBuffer());
+      return { status: res.status, text: bytes.toString('utf8'), bytes, setCookie: res.headers.getSetCookie?.() ?? [] };
     } catch (e) {
       throw ctrl.signal.aborted ? timeoutError(timeoutMs) : e;
     } finally {
@@ -195,7 +196,7 @@ export function createPoliteClient(cfg) {
     save();
   }
 
-  async function once(url, { notFoundOk, timeout }) {
+  async function once(url, { notFoundOk, timeout, parse }) {
     admit();
     transport ??= typeof cfg.transport === 'function' ? cfg.transport() : (cfg.transport ?? nodeTransport);
     const cookie = jar.header();
@@ -208,12 +209,12 @@ export function createPoliteClient(cfg) {
       throw Object.assign(e, { retry: true });   // 连接被重置之类，可以缓一缓再试
     }
     jar.store(res.setCookie);
-    if (res.status === 404 && notFoundOk) return null;
+    if (notFoundOk && (res.status === 404 || (typeof notFoundOk === 'function' && notFoundOk(res)))) return null;
     if ([0, 401, 403, 429].includes(res.status)) trip(res.status ? `HTTP ${res.status}` : '浏览器里请求失败（被拦或 CORS 不通过，详见专用 Chrome 的控制台）');
     if (res.status >= 500) throw Object.assign(new Error(`HTTP ${res.status}`), { retry: true });
     if (res.status < 200 || res.status >= 300) throw new Error(`HTTP ${res.status}`);
     let json;
-    try { json = JSON.parse(res.text); } catch { trip(`返回的不是 JSON（${String(res.text).slice(0, 60).replace(/\s+/g, ' ')}…）`); }
+    try { json = parse(res); } catch { trip(`返回的内容不对（${String(res.text).slice(0, 60).replace(/\s+/g, ' ')}…）`); }
     const s = loadState();
     if (s.failures) { s.failures = 0; s.lastReason = null; save(); }
     return json;
@@ -251,10 +252,14 @@ export function createPoliteClient(cfg) {
   }
 
   return {
-    /** GET 一个 JSON。notFoundOk：404 返回 null 而不是报错 */
-    get(url, { tries: t = tries, timeoutMs: timeout = timeoutMs, notFoundOk = false } = {}) {
+    /**
+     * GET 一个 JSON。notFoundOk：404 返回 null 而不是报错；也可传 (res) => bool，
+     * 认出站点自己「没有这个文件」的其他写法（如 S3 对不存在的对象回 403 AccessDenied XML）。
+     * parse：换掉默认的 JSON 解析（如取 PDF 时校验 res.bytes），抛错按「内容不对」熔断
+     */
+    get(url, { tries: t = tries, timeoutMs: timeout = timeoutMs, notFoundOk = false, parse = (r) => JSON.parse(r.text) } = {}) {
       return new Promise((resolve, reject) => {
-        waiting.push({ fn: () => withRetry(url, { tries: t, timeout, notFoundOk }), resolve, reject });
+        waiting.push({ fn: () => withRetry(url, { tries: t, timeout, notFoundOk, parse }), resolve, reject });
         pump();
       });
     },
