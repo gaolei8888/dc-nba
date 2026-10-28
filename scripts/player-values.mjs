@@ -72,7 +72,9 @@ const cur = Object.entries(data.games).map(([gid, [home, away, st]]) => ({ gid, 
 // ---------------------------------------------------------------- 3. RAPM：每 7 天重拟合
 const prev = fs.existsSync(OUT) ? JSON.parse(fs.readFileSync(OUT, 'utf8')) : null;
 let { rapm, fittedAt, fitThrough } = prev?.season === SEASON ? prev : {};
-if (process.env.FORCE_REFIT || !rapm || now - Date.parse(fittedAt) >= PARAMS.refitDays * 86400e3) {
+// 按美东日期数天（与实验 dn − lastFit ≥ 7 同），不按毫秒：launchd 抖几秒、夏令时差一小时都会让它拖成 8 天
+const dayNum = (d) => Math.round(Date.parse(`${d}T00:00:00Z`) / 86400e3);
+if (process.env.FORCE_REFIT || !rapm || dayNum(today) - dayNum(toEt(Date.parse(fittedAt)).date) >= PARAMS.refitDays) {
   const parts = PARAMS.seasonWeights.map((w, a) => {
     if (a === 0) return { w, games: cur };
     const f = readJsonAuto(`history/stints_${seasonOf(y0 - a)}.json.gz`);

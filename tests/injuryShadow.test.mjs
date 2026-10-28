@@ -36,7 +36,11 @@ test('reportChain：只要标注时间 ≤ 截止的，从新到旧；30 小时�
   const cut = Date.parse('2026-10-28T13:50:00Z');
   const all = [rep('a', '2026-10-28T13:45:00.000Z'), rep('future', '2026-10-28T14:00:00.000Z'),
     rep('b', '2026-10-27T22:15:00.000Z'), rep('old', '2026-10-27T06:00:00.000Z')];
-  assert.deepEqual(reportChain(all, cut).map((r) => r.name), ['a', 'b']);
+  assert.deepEqual(reportChain(all, cut).map((r) => r.name), ['a', 'b', 'old']);
+  assert.deepEqual(reportChain(all, cut, Date.parse('2026-10-27T21:00:00Z')).map((r) => r.name), ['a', 'b'], '比前一天 06:30 那份更早的不用');
+  const prev22 = rep('prev22', '2026-10-27T13:45:00.000Z', [row('New York Knicks', 'Brunson, Jalen', 'Out')]);
+  const rows = shadowRows({ slate: slate('2026-10-28T23:30:00Z'), slot: '22', now: Date.parse('2026-10-28T14:05:00Z'), params: PARAMS, values: VALUES, reports: [prev22], teams: TEAMS });
+  assert.equal(rows.find((r) => r.variant === 'r22').home_report, null, '前一天 22:00 那份实验里看不到，这里也不用');
 });
 
 test('teamReport：新的那份里这队「还没交」就往前找它交过的那份；都没有返回 null', () => {
@@ -152,7 +156,7 @@ test('球员价值缺失或过期：只记基线，不记方案', () => {
 
 const capture = (db, slot, now, tipoff = '2026-10-28T23:30:00Z') => insertShadow(db, shadowRows({
   slate: slate(tipoff), slot, now: Date.parse(now), params: PARAMS, values: VALUES, reports: REPORTS, teams: TEAMS,
-}));
+})).n;
 
 test('影子表只追加：重复插入忽略（含 OR REPLACE）、不能删、预测字段不能改、开赛后/偷看未来的插不进', () => {
   const db = fresh();
@@ -166,7 +170,16 @@ test('影子表只追加：重复插入忽略（含 OR REPLACE）、不能删、
     VALUES (?, 'r22', 1, ?, '2026-10-28', ?, 10, 20, 0, 0, 0.5, ?)`).run(`x${tip}${cap}`, cap, tip, asOf);
   assert.throws(() => ins('2020-01-01T00:00:00.000Z', '2019-12-31T00:00:00.000Z', null), /开赛/);
   assert.throws(() => ins('2099-01-01T00:00:00.000Z', '2099-01-02T00:00:00.000Z', null), /开赛/);
-  assert.throws(() => ins('2099-01-01T00:00:00.000Z', '2098-01-01T00:00:00.000Z', '2098-01-01T00:00:00.000Z'), /未来/);
+  assert.throws(() => ins('2099-01-01T00:00:00.000Z', '2098-01-01T00:00:00.000Z', '2097-12-31T23:50:00.000Z'), /未来/, '离记录不到 15 分钟也算未来');
+  ins('2099-01-01T00:00:00.000Z', '2098-01-01T00:00:00.000Z', '2097-12-31T23:45:00.000Z');
+});
+
+test('一行被触发器拒（运行中恰好开赛）只丢这一行，其余照记', () => {
+  const db = fresh();
+  const rows = shadowRows({ slate: slate('2026-10-28T23:30:00Z'), slot: '22', now: Date.parse('2026-10-28T14:05:00Z'), params: PARAMS, values: VALUES, reports: REPORTS, teams: TEAMS });
+  const res = insertShadow(db, [{ ...rows[0], game_id: 'tipped', tipoff_utc: '2020-01-01T00:00:00.000Z' }, ...rows]);
+  assert.equal(res.n, 2);
+  assert.deepEqual(res.rejected.map((r) => r.game_id), ['tipped']);
 });
 
 test('结算：比分只写一次；结算后改不了', () => {

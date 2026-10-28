@@ -23,8 +23,8 @@ export const CAPTURE_TOL_H = 2;
 /** 球员价值：RAPM 每周重拟合，给 2 天余量；轮换分钟每天推，给 2 天余量 */
 export const MAX_FIT_AGE_D = 9;
 export const MAX_BUILD_AGE_D = 3;
-/** 报告链往前找多久：实验里最早用到「前一天傍晚」那份，约 16 小时前 */
-const CHAIN_BACK_H = 30;
+/** 报告链最早到「前一天 06:30 那次」那份（实验的 pPrev），给 cron 迟到留 1 小时 */
+const CHAIN_SLACK_MS = 3600e3;
 
 /** 美东日期 + 当天第几分钟 -> UTC 毫秒（美东只有 −4 / −5 两种偏移，试出对的那个） */
 export function etToUtc(date, min) {
@@ -44,9 +44,12 @@ export function captureDate(now, slot, tolH = CAPTURE_TOL_H) {
   return [d, shift(-1), shift(1)].find((x) => Math.abs(now - decisionInstant(x, slot)) <= tolH * 3600e3) ?? null;
 }
 
-/** 当时能看到的报告，从新到旧：标注时间 ≤ cutoff，且不早于 cutoff 前 30 小时 */
-export const reportChain = (reports, cutoffMs) => reports
-  .filter((r) => { const t = Date.parse(r.asOf); return t <= cutoffMs && t > cutoffMs - CHAIN_BACK_H * 3600e3; })
+/**
+ * 当时能看到的报告，从新到旧：标注时间 ≤ cutoff，且不早于 floorMs。
+ * 与实验同：链 = 本时点那份 →（06:30 时）同日 22:00 那份 → 前一天 06:30 那份，再早的不用
+ */
+export const reportChain = (reports, cutoffMs, floorMs = -Infinity) => reports
+  .filter((r) => { const t = Date.parse(r.asOf); return t <= cutoffMs && t >= floorMs; })
   .sort((a, b) => Date.parse(b.asOf) - Date.parse(a.asOf));
 
 /**
@@ -80,7 +83,9 @@ export function shadowRows({ slate, slot, now, params, values, reports, teams })
   const sd = params.spreadSd ?? 12;
   const at = iso(now);
   const usable = valuesUsable(values, now);
-  const chain = reportChain(reports, now - (params.lagMin ?? 15) * 60000);
+  const lag = (params.lagMin ?? 15) * 60000;
+  const prevDay = new Date(Date.parse(`${D}T00:00:00Z`) - 86400e3).toISOString().slice(0, 10);
+  const chain = reportChain(reports, now - lag, decisionInstant(prevDay, '0630') - lag - CHAIN_SLACK_MS);
   const team = new Map(teams.map((t) => [t.teamId, t]));
   let val; let idx; let names;
   if (usable) {
@@ -147,10 +152,26 @@ const tx = (db, fn) => {
   try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; }
 };
 
-/** 插入；已有的 (game_id, variant) 由触发器忽略。返回新插入行数 */
+/**
+ * 插入；已有的 (game_id, variant) 由触发器忽略。每行一个保存点：某场恰在运行中开赛被触发器拒，
+ * 只丢那一行，不连累整晚。返回 { n: 新插入行数, rejected: [{ game_id, variant, why }] }
+ */
 export function insertShadow(db, rows) {
   const stmt = db.prepare(`INSERT INTO shadow_predictions (${COLS.join(', ')}) VALUES (${COLS.map(() => '?').join(', ')})`);
-  return tx(db, () => rows.reduce((n, r) => n + Number(stmt.run(...COLS.map((c) => r[c] ?? null)).changes ?? 0), 0));
+  const rejected = [];
+  const n = tx(db, () => rows.reduce((k, r) => {
+    db.exec('SAVEPOINT row');
+    try {
+      const c = Number(stmt.run(...COLS.map((col) => r[col] ?? null)).changes ?? 0);
+      db.exec('RELEASE row');
+      return k + c;
+    } catch (e) {
+      db.exec('ROLLBACK TO row'); db.exec('RELEASE row');
+      rejected.push({ game_id: r.game_id, variant: r.variant, why: String(e.message) });
+      return k;
+    }
+  }, 0));
+  return { n, rejected };
 }
 
 /** scores: { gameId: { homeScore, awayScore } }。只写还没结算的行，返回写入行数 */

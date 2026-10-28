@@ -29,11 +29,13 @@ const db = openLedger();
 if (!db) process.exit(1);
 const cmd = process.argv[2];
 const slot = process.argv.includes('--late') || process.env.LEDGER_RUN === 'late' ? '0630' : '22';
-const now = process.env.NODE_ENV !== 'production' && process.env.SHADOW_NOW ? Date.parse(process.env.SHADOW_NOW) : Date.now();
+// 演练时钟固定；线上每次取真实时间（抓报告可能要几分钟，插入前要重新取，免得刚开赛的场被当成没开赛）
+const FIXED = process.env.NODE_ENV !== 'production' && process.env.SHADOW_NOW ? Date.parse(process.env.SHADOW_NOW) : null;
+const clock = () => FIXED ?? Date.now();
 const iso = (ms) => new Date(ms).toISOString();
 
 /** 当时能看到的最新一份报告：已存就不再请求；抓不到（被拦、到上限）只记日志，用库里已有的继续 */
-async function fetchLatest() {
+async function fetchLatest(now) {
   const have = new Set(storedReports(db, iso(now - 86400e3)).map((r) => r.name));
   const http = injuryClient({
     maxPerRun: 15, maxPerDay: 40,
@@ -49,18 +51,26 @@ async function fetchLatest() {
       return null;
     }
     if (!bytes) continue;
-    const parsed = parseReportText(pdfText(bytes));
-    // 标注时间取文件名（换成 UTC ISO），PDF 里的 'MM/DD/YY hh:mm AM' 只作核对，不能覆盖它
-    storeReport(db, { ...parsed, name: c.name, asOf: iso(etToUtc(c.date, c.min)), fetchedAt: iso(Date.now()) });
+    let parsed;
+    try {
+      parsed = parseReportText(pdfText(bytes));
+      // 标注时间取文件名（换成 UTC ISO），PDF 里的 'MM/DD/YY hh:mm AM' 只作核对，不能覆盖它
+      storeReport(db, { ...parsed, name: c.name, asOf: iso(etToUtc(c.date, c.min)), fetchedAt: iso(Date.now()) });
+    } catch (e) {
+      // pdftotext 不在、PDF 坏了：不能连累基线，用库里已有的报告继续
+      console.warn(`  报告 ${c.name} 解析失败：${String(e.message).slice(0, 120)}`);
+      return null;
+    }
     return `${c.name}（新抓，PDF 标 ${parsed.asOf ?? '?'}，${parsed.rows.length} 行、未交名单 ${parsed.notSubmitted.length} 队）`;
   }
   return null;
 }
 
 async function capture() {
-  const D = captureDate(now, slot);
+  const D = captureDate(clock(), slot);
   if (!D) { console.log(`· 影子运行：现在不在 ${slot === '22' ? '22:00' : '06:30'} 时点窗口内，不记`); return; }
-  const got = process.env.SHADOW_NO_FETCH ? '（未抓）' : await fetchLatest();
+  const got = process.env.SHADOW_NO_FETCH ? '（未抓）' : await fetchLatest(clock());
+  const now = clock();
   const store = {
     teams: readJson('teams.json'), players: readJson('players.json'),
     schedule: readJson('schedule.json'), meta: readJson('meta.json'),
@@ -70,15 +80,20 @@ async function capture() {
     gameId: g.gameId, date: g.date, tipoff: g.dateTimeUtc, homeId: g.homeId, awayId: g.awayId,
     margin: g.prediction.margin, dataAt: store.meta.fetchedAt,
   }));
+  // 06:30 方案加在 22:00 那次记下的基线上（配对比较的是同一个基线）；没有基线才用此刻的线上预测
+  const baseM = new Map(shadowAll(db).filter((r) => r.variant === 'base' && r.game_date === D).map((r) => [r.game_id, r.base_margin]));
+  if (slot === '0630') for (const g of slate) g.margin = baseM.get(g.gameId) ?? g.margin;
   const values = readJson('player-values.json');
   const rows = shadowRows({
     slate, slot, now, params: PARAMS, values, reports: storedReports(db, iso(now - 48 * 3600e3)), teams: store.teams,
   });
-  const n = insertShadow(db, rows);
+  const { n, rejected } = insertShadow(db, rows);
+  const tipped = slate.filter((g) => !(Date.parse(g.tipoff) > now)).map((g) => g.gameId);
   const by = rows.reduce((o, r) => ({ ...o, [r.variant]: (o[r.variant] ?? 0) + 1 }), {});
   console.log(`· 影子运行（${slot === '22' ? '22:00' : '06:30'}，美东 ${D}）：赛程 ${games.length} 场，${JSON.stringify(by)}，新插入 ${n} 行；`
     + `报告 ${got ?? '没找到'}；球员价值 ${values ? `拟合于 ${values.fittedAt}、生成于 ${values.builtAt}` : '缺失'}`
-    + `${values && !rows.some((r) => r.variant !== 'base') && rows.length ? '（过期，只记基线）' : ''}`);
+    + `${values && !rows.some((r) => r.variant !== 'base') && rows.length ? '（过期，只记基线）' : ''}`
+    + `${tipped.length ? `；已开赛未记 ${tipped.join(',')}` : ''}${rejected.length ? `；库拒绝 ${rejected.map((r) => `${r.game_id}/${r.variant}`).join(',')}` : ''}`);
 }
 
 function settle() {

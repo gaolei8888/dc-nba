@@ -408,8 +408,13 @@ app.get('/api/paper', wrap((req, res) => {
 }));
 
 /** 伤病报告影子运行：三套预测的前向成绩（scripts/shadow.mjs 写，同账本一个库，只读）。不影响页面显示的预测 */
+let shadowCache = { key: '', data: null };
 app.get('/api/shadow', wrap((req, res) => {
-  res.json(ledgerDb ? { available: true, ...shadowSummary(shadowAll(ledgerDb)) } : { available: false });
+  if (!ledgerDb) return res.json({ available: false });
+  // bootstrap 有点重：行数与最近结算时间不变就用缓存（一天只变两三次）
+  const k = JSON.stringify(ledgerDb.prepare('SELECT COUNT(*) n, MAX(settled_at) s FROM shadow_predictions').get());
+  if (shadowCache.key !== k) shadowCache = { key: k, data: { available: true, ...shadowSummary(shadowAll(ledgerDb)) } };
+  res.json(shadowCache.data);
 }));
 
 // ---------------------------------------------------------------- 排行榜

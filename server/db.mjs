@@ -129,7 +129,7 @@ BEGIN SELECT RAISE(ABORT, 'paper_bets 只追加：已记录的字段不能改');
  * 伤病报告影子运行（见 server/injuryShadow.mjs）：每场三套预测，只记录、不改页面显示的预测。
  *   - (game_id, variant) 只认第一次；不能删；预测与输入字段不能改；比分只写一次；
  *   - 开赛后插不进（按真实时钟，且 captured_at 必须早于开赛）；
- *   - 用到的报告标注时间必须早于 captured_at——库里兜底「不偷看未来」。
+ *   - 用到的报告标注时间必须比 captured_at 早至少 15 分钟（发布延迟）——库里兜底「不偷看未来」。
  * injury_reports：抓到的官方报告解析结果，同名只存一次，按标注时间（UTC）找「当时能看到的」那几份。
  */
 const SHADOW_FROZEN = ['game_id', 'variant', 'params_version', 'captured_at', 'game_date', 'tipoff_utc', 'home_id', 'away_id',
@@ -174,7 +174,8 @@ CREATE TRIGGER IF NOT EXISTS shadow_after_tipoff BEFORE INSERT ON shadow_predict
 WHEN NEW.tipoff_utc <= ${NOW_SQL} OR NEW.captured_at >= NEW.tipoff_utc
 BEGIN SELECT RAISE(ABORT, 'shadow_predictions：开赛后不能记'); END;
 CREATE TRIGGER IF NOT EXISTS shadow_lookahead BEFORE INSERT ON shadow_predictions
-WHEN NEW.home_report_as_of >= NEW.captured_at OR NEW.away_report_as_of >= NEW.captured_at
+WHEN NEW.home_report_as_of > strftime('%Y-%m-%dT%H:%M:%fZ', NEW.captured_at, '-15 minutes')
+  OR NEW.away_report_as_of > strftime('%Y-%m-%dT%H:%M:%fZ', NEW.captured_at, '-15 minutes')
 BEGIN SELECT RAISE(ABORT, 'shadow_predictions：用了记录时刻之后（未来）的报告'); END;
 CREATE TRIGGER IF NOT EXISTS shadow_no_delete BEFORE DELETE ON shadow_predictions
 BEGIN SELECT RAISE(ABORT, 'shadow_predictions 只追加：不能删除'); END;
