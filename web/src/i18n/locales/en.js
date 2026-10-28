@@ -26,7 +26,7 @@ export default {
     leagueRank: '#{rank} in the league',
     offense: 'Off',
     defense: 'Def',
-    turnover: 'Roster churn',
+    turnover: 'Roster turnover',
   },
   fmt: {
     date: '{wd}, {mon} {d}',

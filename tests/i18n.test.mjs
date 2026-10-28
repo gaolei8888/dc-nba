@@ -137,3 +137,45 @@ test('locales：meta 字段齐全，defaultTz 是 TIMEZONES 之一', () => {
     assert.ok(['America/New_York', 'Asia/Shanghai'].includes(loc.meta.defaultTz));
   }
 });
+
+// ---- 英文术语表 ----
+function parseGlossary(md) {
+  const rows = [];
+  for (const line of md.split('\n')) {
+    if (!line.startsWith('|')) continue;
+    const cells = line.split('|').slice(1, -1).map((c) => c.trim());
+    if (cells.length !== 4 || cells[0] === '中文' || /^-+$/.test(cells[0])) continue;
+    const [zh, en, avoid, status] = cells;
+    rows.push({ zh, en, avoid: avoid === '—' ? [] : avoid.split(/[,，]/).map((s) => s.trim()).filter(Boolean), status });
+  }
+  return rows;
+}
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function enLeaves() {
+  const out = [];
+  const walk = (o, p) => { for (const [k, v] of Object.entries(o)) { const key = p ? `${p}.${k}` : k; if (typeof v === 'string') out.push([key, v]); else if (v && typeof v === 'object') walk(v, key); } };
+  walk(locales.en, '');
+  return out;
+}
+
+test('术语表：表格结构、状态值、必含条目', () => {
+  const rows = parseGlossary(fs.readFileSync('docs/i18n-glossary.md', 'utf8'));
+  assert.ok(rows.length >= 30);
+  for (const r of rows) {
+    assert.ok(r.zh && r.en, `空单元格：${JSON.stringify(r)}`);
+    assert.ok(['待确认', '已定'].includes(r.status), `${r.zh} 状态非法：${r.status}`);
+  }
+  assert.equal(new Set(rows.map((r) => r.zh)).size, rows.length, '中文列有重复');
+  assert.ok(rows.some((r) => r.status === '待确认') && rows.some((r) => r.status === '已定'));
+  const net = rows.find((r) => r.zh === '净效率');
+  assert.ok(net.en.startsWith('Net Rating') && net.avoid.includes('Net Efficiency'));
+  const honest = rows.find((r) => r.zh === '无证据表明模型能赢盘口');
+  assert.equal(honest.en, 'No evidence the model beats the market');
+});
+
+test('en 译文遵守术语表的「避免」列', () => {
+  const rows = parseGlossary(fs.readFileSync('docs/i18n-glossary.md', 'utf8'));
+  assert.ok(enLeaves().length > 30);
+  for (const [key, text] of enLeaves()) for (const r of rows) for (const bad of r.avoid)
+    assert.ok(!new RegExp(`\\b${escapeRe(bad)}\\b`, 'i').test(text), `${key} 用了「${bad}」，术语表要求 ${r.en}`);
+});
