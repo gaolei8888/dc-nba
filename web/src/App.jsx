@@ -79,7 +79,7 @@ export default function App() {
   // 当前主导配色的球队，决定背景光斑与卡片辉光
   const [accent, setAccent] = useState(null);
   // 玩家档案：身份只是"这台浏览器上的一个本地档案"，没有服务端账号
-  const [prof, setProf] = useState(() => ensureProfile(loadProfiles()));
+  const [prof, setProf] = useState(() => ensureProfile(loadProfiles(), t('profiles.defaultName', { n: 1 })));
 
   useEffect(() => {
     Promise.all([api.meta(), api.teams(), api.injuries().catch(() => ({ players: [] }))])
@@ -157,11 +157,13 @@ export default function App() {
       profiles: prof.profiles,
       profileId: prof.activeId,
       profileName: prof.profiles.find((p) => p.id === prof.activeId)?.name ?? '',
-      createProfile: (name) => setProf((s2) => createP(s2, name)),
+      createProfile: (name) => setProf((s2) => createP(s2, name, t('profiles.defaultName', { n: s2.profiles.length + 1 }))),
       renameProfile: (id, name) => setProf((s2) => renameP(s2, id, name)),
       switchProfile: (id) => setProf((s2) => switchP(s2, id)),
       deleteProfile: (id) => setProf((s2) => deleteP(s2, id)),
-      importProfile: (code) => setProf((s2) => importP(s2, code)),
+      // 不能放进 setProf 的更新函数：坏存档码会抛错，在更新函数里抛会直接让整个应用白屏；
+      // 这里同步抛给调用方（Profiles 页的 try/catch）显示具体原因
+      importProfile: (code) => setProf(importP(prof, code, (n) => t('profiles.imported', { name: n }))),
 
       // ---- 排行榜（服务端可能未启用，这里全部容错）
       leaderboardOn: !!state.meta?.features?.leaderboard,

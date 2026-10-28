@@ -68,21 +68,28 @@ function migrateLegacy(profileId) {
   }
 }
 
-/** 首次进入时自动建一个默认档案，避免空状态 */
-export function ensureProfile(state) {
+/**
+ * 本地错误：带机器可读的 code（界面按 code 翻译），message 保留中文原文仅供排查。
+ * errorText 见到以 err. 开头的 code 就按当前语言渲染。
+ */
+const codedError = (code, message, params = {}) => Object.assign(new Error(message), { code, params });
+
+/** 首次进入时自动建一个默认档案，避免空状态；defaultName 由调用方按当前语言给（t('profiles.defaultName')） */
+export function ensureProfile(state, defaultName) {
   if (state.profiles.length) {
     if (state.activeId && state.profiles.some((p) => p.id === state.activeId)) return state;
     return saveProfiles({ ...state, activeId: state.profiles[0].id });
   }
-  const p = { id: newId(), name: '玩家 1', createdAt: new Date().toISOString() };
+  const p = { id: newId(), name: defaultName, createdAt: new Date().toISOString() };
   migrateLegacy(p.id);
   return saveProfiles({ ...state, activeId: p.id, profiles: [p] });
 }
 
-export function createProfile(state, name) {
+/** name 为空时用 defaultName（调用方按当前语言给）；已有档案名是用户内容，永不翻译 */
+export function createProfile(state, name, defaultName) {
   const p = {
     id: newId(),
-    name: (name || '').trim() || `玩家 ${state.profiles.length + 1}`,
+    name: (name || '').trim() || defaultName,
     createdAt: new Date().toISOString(),
   };
   return saveProfiles({ ...state, activeId: p.id, profiles: [...state.profiles, p] });
@@ -147,7 +154,7 @@ export function exportProfile(profileId, profiles) {
   const meta = profiles.find((p) => p.id === profileId);
   const payload = {
     v: 1,
-    name: meta?.name ?? '玩家',
+    name: meta?.name ?? '', // 档案必存在；空名导入时会落到默认名
     // 刻意不导出 cloud 令牌：存档码可能被随手贴到聊天里，
     // 带着令牌等于把身份也交出去了
     games: Object.fromEntries(GAMES.map((g) => [g, read(gameKey(g, profileId), null)])),
@@ -160,19 +167,22 @@ export function exportProfile(profileId, profiles) {
   return btoa(bin);
 }
 
-/** 导入存档码，作为一个新档案落地 */
-export function importProfile(state, code) {
+/**
+ * 导入存档码，作为一个新档案落地。
+ * importedName(name) 给出带「导入」后缀的档案名（后缀随语言，由调用方给）；缺省只用原名。
+ */
+export function importProfile(state, code, importedName = (n) => n) {
   let payload;
   try {
     const bin = atob(code.trim());
     const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
     payload = JSON.parse(new TextDecoder().decode(bytes));
   } catch {
-    throw new Error('存档码无法识别，请确认复制完整');
+    throw codedError('err.profileCode', 'invalid save code');
   }
-  if (payload?.v !== 1 || !payload.games) throw new Error('存档码版本不支持');
+  if (payload?.v !== 1 || !payload.games) throw codedError('err.profileVersion', 'unsupported save code version');
 
-  const next = createProfile(state, `${payload.name}（导入）`);
+  const next = createProfile(state, importedName(payload.name));
   const id = next.activeId;
   for (const g of GAMES) {
     if (payload.games[g]) write(gameKey(g, id), payload.games[g]);

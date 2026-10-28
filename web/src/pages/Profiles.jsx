@@ -52,6 +52,8 @@ export default function Profiles() {
     };
   }), [profiles, profileId]);
 
+  const totalN = rows.reduce((a, r) => a + r.n, 0);
+
   const doImport = () => {
     setError(null);
     try {
@@ -65,20 +67,16 @@ export default function Profiles() {
   return (
     <>
       <div className="page-head">
-        <h1>玩家档案</h1>
-        <p>
-          在这台设备上创建多个玩家，各自独立存档、互不干扰。
-          档案保存在浏览器本地，没有账号也没有密码——
-          要带去别的设备，用下面的存档码导出再导入。
-        </p>
+        <h1>{t('profiles.title')}</h1>
+        <p>{t('profiles.intro')}</p>
       </div>
 
       <div className="grid cols-4" style={{ marginBottom: 14 }}>
-        <StatTile label="本机档案" value={profiles.length} unit=" 个" />
-        <StatTile label="当前玩家" value={profiles.find((p) => p.id === profileId)?.name ?? '—'} />
-        <StatTile label="已预测总场次" value={rows.reduce((a, r) => a + r.n, 0)} unit=" 场" />
+        <StatTile label={t('profiles.tile.local')} value={profiles.length} unit={t('profiles.tile.localUnit', { count: profiles.length })} />
+        <StatTile label={t('profiles.tile.current')} value={profiles.find((p) => p.id === profileId)?.name ?? '—'} />
+        <StatTile label={t('profiles.tile.predicted')} value={totalN} unit={t('common.unit.games', { count: totalN })} />
         <StatTile
-          label="本机最高积分"
+          label={t('profiles.tile.best')}
           value={rows.length ? Math.max(...rows.map((r) => r.points)) : 0}
         />
       </div>
@@ -86,7 +84,7 @@ export default function Profiles() {
       <ErrorBox error={error} />
 
       <div className="card">
-        <h2>档案列表 <span className="sub">点击切换当前玩家</span></h2>
+        <h2>{t('profiles.list.title')} <span className="sub">{t('profiles.list.sub')}</span></h2>
         <DataTable
           rows={rows}
           rowKey={(r) => r.id}
@@ -94,10 +92,10 @@ export default function Profiles() {
           onRowClick={(r) => switchProfile(r.id)}
           columns={[
             {
-              key: 'name', label: '玩家', align: 'left', width: 200,
+              key: 'name', label: t('profiles.col.player'), align: 'left', width: 200,
               render: (r) => (
                 <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  {r.active && <span className="chip accent">当前</span>}
+                  {r.active && <span className="chip accent">{t('profiles.col.current')}</span>}
                   <input
                     value={r.name}
                     onChange={(e) => renameProfile(r.id, e.target.value)}
@@ -106,22 +104,22 @@ export default function Profiles() {
                       background: 'transparent', border: '1px solid transparent',
                       padding: '2px 4px', minWidth: 0, width: 120, fontWeight: 650,
                     }}
-                    title="点击可直接改名"
+                    title={t('profiles.col.renameTip')}
                   />
                 </span>
               ),
             },
-            { key: 'n', label: '已预测', width: 70 },
+            { key: 'n', label: t('profiles.col.n'), width: 70 },
             {
-              key: 'accuracy', label: '命中率', width: 76,
+              key: 'accuracy', label: t('profiles.col.acc'), width: 76,
               render: (r) => (r.n ? pct(r.accuracy, 1) : '—'),
             },
             {
-              key: 'points', label: '积分', width: 70,
+              key: 'points', label: t('profiles.col.points'), width: 70,
               render: (r) => <b className={r.points > 0 ? 'pos' : r.points < 0 ? 'neg' : ''}>{r.points}</b>,
             },
             {
-              key: 'lead', label: '对模型领先', width: 90,
+              key: 'lead', label: t('profiles.col.lead'), width: 90,
               render: (r) => (r.n
                 ? <span className={r.lead > 0 ? 'pos' : r.lead < 0 ? 'neg' : ''}>{r.lead > 0 ? `+${r.lead}` : r.lead}</span>
                 : <span className="dim">—</span>),
@@ -130,9 +128,9 @@ export default function Profiles() {
               key: 'brier', label: 'Brier', width: 76,
               render: (r) => (r.n ? r.brier.toFixed(4) : '—'),
             },
-            { key: 'bestStreak', label: '最佳连胜', width: 80 },
+            { key: 'bestStreak', label: t('profiles.col.streak'), width: 80 },
             {
-              key: 'act', label: '操作', width: 150, align: 'left',
+              key: 'act', label: t('profiles.col.act'), width: 150, align: 'left',
               value: () => 0,
               render: (r) => (
                 <span style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
@@ -141,7 +139,7 @@ export default function Profiles() {
                     style={{ padding: '3px 9px', fontSize: 11 }}
                     onClick={() => setExported({ id: r.id, code: exportProfile(r.id, profiles) })}
                   >
-                    导出
+                    {t('profiles.export')}
                   </button>
                   {confirmDelete === r.id ? (
                     <button
@@ -149,7 +147,7 @@ export default function Profiles() {
                       style={{ padding: '3px 9px', fontSize: 11, color: 'var(--bad)' }}
                       onClick={() => { deleteProfile(r.id); setConfirmDelete(null); }}
                     >
-                      确认删除？
+                      {t('profiles.confirmDelete')}
                     </button>
                   ) : (
                     <button
@@ -158,7 +156,7 @@ export default function Profiles() {
                       disabled={profiles.length <= 1}
                       onClick={() => setConfirmDelete(r.id)}
                     >
-                      删除
+                      {t('profiles.delete')}
                     </button>
                   )}
                 </span>
@@ -170,10 +168,10 @@ export default function Profiles() {
 
       <div className="grid cols-2">
         <div className="card">
-          <h2>新建玩家</h2>
+          <h2>{t('profiles.new.title')}</h2>
           <div style={{ display: 'flex', gap: 8 }}>
             <input
-              placeholder="玩家名称"
+              placeholder={t('profiles.new.placeholder')}
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') { createProfile(newName); setNewName(''); } }}
@@ -183,29 +181,27 @@ export default function Profiles() {
               className="btn primary"
               onClick={() => { createProfile(newName); setNewName(''); }}
             >
-              创建
+              {t('profiles.new.create')}
             </button>
           </div>
-          <p className="note" style={{ marginTop: 10 }}>
-            新档案从零开始：没有预测记录、没有积分。创建后会自动切换过去。
-          </p>
+          <p className="note" style={{ marginTop: 10 }}>{t('profiles.new.note')}</p>
         </div>
 
         <div className="card">
-          <h2>存档码 <span className="sub">跨设备迁移</span></h2>
+          <h2>{t('profiles.code.title')} <span className="sub">{t('profiles.code.sub')}</span></h2>
           <div style={{ display: 'flex', gap: 8 }}>
             <input
-              placeholder="粘贴存档码后点导入"
+              placeholder={t('profiles.code.placeholder')}
               value={code}
               onChange={(e) => setCode(e.target.value)}
               style={{ flex: 1 }}
             />
-            <button className="btn" disabled={!code.trim()} onClick={doImport}>导入</button>
+            <button className="btn" disabled={!code.trim()} onClick={doImport}>{t('profiles.code.import')}</button>
           </div>
           {exported && (
             <div style={{ marginTop: 10 }}>
               <div style={{ fontSize: 11, color: 'var(--text-faint)', marginBottom: 4 }}>
-                「{profiles.find((p) => p.id === exported.id)?.name}」的存档码，全选复制：
+                {t('profiles.code.exported', { name: profiles.find((p) => p.id === exported.id)?.name })}
               </div>
               <textarea
                 readOnly
@@ -220,19 +216,16 @@ export default function Profiles() {
               />
             </div>
           )}
-          <p className="note" style={{ marginTop: 10 }}>
-            导入会新建一个档案，不会覆盖现有的。存档码是明文 base64，不加密，
-            只是为了避免手滑改坏内容。
-          </p>
+          <p className="note" style={{ marginTop: 10 }}>{t('profiles.code.note')}</p>
         </div>
       </div>
 
       {leaderboardOn ? (
         <div className="card">
           <h2>
-            排行榜
+            {t('profiles.lb.title')}
             <span className="sub">
-              {board ? `${board.counts?.players ?? 0} 名玩家 · ${board.counts?.picks ?? 0} 条预测` : '加载中…'}
+              {board ? t('profiles.lb.counts', { players: board.counts?.players ?? 0, picks: board.counts?.picks ?? 0 }) : t('common.loading')}
             </span>
             <span style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
               {cloud?.token ? (
@@ -247,10 +240,10 @@ export default function Profiles() {
                       setBusy(false);
                     }}
                   >
-                    {busy ? '同步中…' : '立即同步本档案'}
+                    {busy ? t('profiles.lb.syncing') : t('profiles.lb.sync')}
                   </button>
                   <button className="btn" onClick={() => { disconnectCloud(); setBoard(null); }}>
-                    断开
+                    {t('profiles.lb.disconnect')}
                   </button>
                 </>
               ) : (
@@ -266,7 +259,7 @@ export default function Profiles() {
                     setBusy(false);
                   }}
                 >
-                  用当前档案加入排行榜
+                  {t('profiles.lb.join')}
                 </button>
               )}
             </span>
@@ -277,15 +270,14 @@ export default function Profiles() {
               value={lbMode}
               onChange={setLbMode}
               options={[
-                { value: 'season', label: `本季实战 · ${meta.targetSeason}` },
-                { value: 'practice', label: `上季回放 · ${meta.priorSeason}` },
+                { value: 'season', label: t('profiles.lb.modeSeason', { season: meta.targetSeason }) },
+                { value: 'practice', label: t('profiles.lb.modePractice', { season: meta.priorSeason }) },
               ]}
             />
           </div>
 
           <div className="warn-box">
-            排行榜数据没有备份。服务器重建或数据卷丢失时，全部战绩会一并消失且无法恢复。
-            <b>本机存档不受影响</b>——即使榜单清空，你在这台浏览器上的进度仍然完整。
+            {t('profiles.lb.warn1')}<b>{t('profiles.lb.warnBold')}</b>{t('profiles.lb.warn2')}
           </div>
 
           {!board ? <Loading /> : (
@@ -295,31 +287,31 @@ export default function Profiles() {
               initialSort={{ key: 'points', dir: 'desc' }}
               columns={[
                 {
-                  key: 'rank', label: '#', width: 40,
+                  key: 'rank', label: t('profiles.lb.rank'), width: 40,
                   value: () => 0,
                   render: (r, i) => <span className="dim">{i + 1}</span>,
                 },
                 {
-                  key: 'name', label: '玩家', align: 'left', width: 180,
+                  key: 'name', label: t('profiles.col.player'), align: 'left', width: 180,
                   render: (r) => (
                     <span>
                       {r.name}
-                      {r.id === cloud?.playerId && <span className="chip accent" style={{ marginLeft: 6 }}>你</span>}
+                      {r.id === cloud?.playerId && <span className="chip accent" style={{ marginLeft: 6 }}>{t('profiles.lb.you')}</span>}
                     </span>
                   ),
                 },
-                { key: 'n', label: '预测场次', width: 80 },
+                { key: 'n', label: t('profiles.lb.picks'), width: 80 },
                 {
-                  key: 'accuracy', label: '命中率', width: 76,
+                  key: 'accuracy', label: t('profiles.col.acc'), width: 76,
                   value: (r) => (r.n ? r.correct / r.n : 0),
                   render: (r) => (r.n ? pct(r.correct / r.n, 1) : '—'),
                 },
                 {
-                  key: 'points', label: '积分', width: 74,
+                  key: 'points', label: t('profiles.col.points'), width: 74,
                   render: (r) => <b className={r.points > 0 ? 'pos' : r.points < 0 ? 'neg' : ''}>{r.points}</b>,
                 },
                 {
-                  key: 'lead', label: '对模型领先', width: 96,
+                  key: 'lead', label: t('profiles.col.lead'), width: 96,
                   value: (r) => r.points - r.model_points,
                   render: (r) => {
                     const d = r.points - r.model_points;
@@ -334,44 +326,33 @@ export default function Profiles() {
           <p className="note" style={{ marginTop: 10 }}>
             {lbMode === 'season' ? (
               <>
-                <b>本季实战榜。</b>只算 {meta.targetSeason} 真实比赛、开赛前提交、比分已出的场次；
-                开赛即锁定，模型按提交那一刻的赛前预测计分。样本少的时候排名主要是运气。<br />
+                <b>{t('profiles.lb.seasonLead')}</b>{t('profiles.lb.seasonBody', { season: meta.targetSeason })}<br />
               </>
             ) : (
               <>
-                <b>练习榜，不是竞技榜。</b>用的是 {meta.priorSeason} 已结束赛季的比赛，结果网上都能查到，
-                所以这个榜单无法防止作弊。要比真本事看「本季实战」榜。<br />
+                <b>{t('profiles.lb.practiceLead')}</b>{t('profiles.lb.practiceBody', { season: meta.priorSeason })}<br />
               </>
             )}
-            身份是一个随机令牌，存在本档案里，没有密码也没有找回流程——
-            令牌丢了就是一个新玩家。<b>导出存档码时不会带上令牌</b>，
-            因为存档码可能被随手贴到聊天里。<br />
-            <b>为什么没有备份</b>：这是一个展示作品，服务端只保存"押了哪边、多少信心"
-            和由此算出的得分，不含任何可识别身份的信息。权衡下来不值得为它建立
-            备份与恢复流程，所以选择了明确告知而不是默默承诺。
+            {t('profiles.lb.token1')}<b>{t('profiles.lb.tokenBold')}</b>{t('profiles.lb.token2')}<br />
+            <b>{t('profiles.lb.noBackupLead')}</b>{t('profiles.lb.noBackupBody')}
           </p>
         </div>
       ) : (
         <div className="card plain">
-          <h2>排行榜未启用</h2>
+          <h2>{t('profiles.off.title')}</h2>
           <p className="note">
-            {leaderboardReasonCode ? t(leaderboardReasonCode) : '本部署未开启服务端排行榜。'}<br />
-            所有进度仍然完整保存在这台浏览器本地，游戏功能不受影响。
+            {leaderboardReasonCode ? t(leaderboardReasonCode) : t('profiles.off.fallback')}<br />
+            {t('profiles.off.tail')}
           </p>
         </div>
       )}
 
       <div className="card plain">
-        <h2>为什么没有账号密码</h2>
+        <h2>{t('profiles.why.title')}</h2>
         <p className="note">
-          这个应用部署在 <code>/works/</code> 路径下，网关中间件会双向剥离 Cookie，
-          传统会话根本用不了，只能把令牌放在 localStorage 里——安全性反而比
-          httpOnly cookie 更差。<br />
-          服务端目前是无状态的，数据快照只读、容器不挂卷；加账号就要加存储卷，
-          随之而来的是备份、迁移、权限一整套负担。而存密码是要负安全责任的。<br />
-          所以身份被刻意做成「这台浏览器上的一个本地档案」。
-          <b>不同访客用各自的设备打开，本来就各玩各的，不需要登录。</b>
-          需要跨用户排行榜时再上服务端，届时这里的档案结构可以直接复用。
+          {t('profiles.why.p1a')}<code>/works/</code>{t('profiles.why.p1b')}<br />
+          {t('profiles.why.p2')}<br />
+          {t('profiles.why.p3a')}<b>{t('profiles.why.p3Bold')}</b>{t('profiles.why.p3b')}
         </p>
       </div>
     </>

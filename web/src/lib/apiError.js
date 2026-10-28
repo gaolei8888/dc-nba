@@ -33,6 +33,11 @@ export function errorText(err, t) {
     }
     return t('err.http', { status: err.status });
   }
+  // 前端本地错误（如存档码无法识别）：自带 err.* 形式的 code
+  if (typeof err?.code === 'string' && err.code.startsWith('err.')) {
+    const s = t(err.code, err.params);
+    if (s && s !== err.code) return s;
+  }
   if (err instanceof TypeError) return t('err.network');
   return t('err.unknown');
 }

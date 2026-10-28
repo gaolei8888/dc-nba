@@ -5,9 +5,7 @@ import { tzDateOf } from '../i18n/fmt.js';
 import { errorText } from '../lib/apiError.js';
 import { api } from '../lib/api.js';
 import { TeamLogo, StatTile, Loading, ErrorBox, ProbBar, Segmented } from '../components/common.jsx';
-import {
-  pct, fmtDateFull, restLabel, probColor,
-} from '../lib/format.js';
+import { pct, probColor } from '../lib/format.js';
 import {
   loadPlay, savePlay, resetPlay, scorePick, summarize,
 } from '../lib/store.js';
@@ -36,7 +34,7 @@ export default function Play() {
 
   // 本季实战接口出错不能连累上季回放：降级成「不可用」，回放照常
   const loadLive = (date) => api.live({ date }, headers).then(setLive)
-    .catch((e) => setLive((cur) => (cur?.available ? cur : { available: false, reasonText: `加载失败：${errorText(e, t)}`, days: [] })));
+    .catch((e) => setLive((cur) => (cur?.available ? cur : { available: false, reasonError: e, days: [] })));
   useEffect(() => { loadLive(live?.date); }, [headers]);
 
   // 默认模式只在第一次拿到数据时定，之后听用户的
@@ -51,14 +49,14 @@ export default function Play() {
   return (
     <>
       <div className="page-head">
-        <h1>人机对赌</h1>
+        <h1>{t('play.title')}</h1>
         <div style={{ marginTop: 8 }}>
           <Segmented
             value={tab}
             onChange={setTab}
             options={[
-              { value: 'live', label: `本季实战 · ${meta.targetSeason}` },
-              { value: 'replay', label: `上季回放 · ${meta.priorSeason}` },
+              { value: 'live', label: t('play.modeLive', { season: meta.targetSeason }) },
+              { value: 'replay', label: t('play.modeReplay', { season: meta.priorSeason }) },
             ]}
           />
         </div>
@@ -71,6 +69,8 @@ export default function Play() {
 }
 
 function ReplayMode({ season }) {
+  const { t, fmt } = useI18n();
+  const unitGames = (n) => `${n}${t('common.unit.games', { count: n })}`;
   const { teamById, profileId, cloud, leaderboardOn } = useApp();
   const [syncState, setSyncState] = useState(null);
   const [index, setIndex] = useState(null);
@@ -123,8 +123,7 @@ function ReplayMode({ season }) {
       <>
         <div className="card">
           <p className="note">
-            题库为空。请先运行 <code>npm run ingest</code> 生成对赌题库
-            （它需要上上个赛季的数据来给上赛季定开赛日评级）。
+            {t('play.replay.emptyPre')}<code>npm run ingest</code>{t('play.replay.emptyPost')}
           </p>
         </div>
       </>
@@ -179,50 +178,49 @@ function ReplayMode({ season }) {
     <>
       <div className="warn-box" style={{ marginBottom: 14 }}>
         <p style={{ margin: '2px 0', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span className="chip blue" style={{ fontSize: 13, fontWeight: 750 }}>上季回放 · {season}</span>
-          <b>这些是 {season} 赛季已经打完的比赛，不是今晚的比赛。</b>
+          <span className="chip blue" style={{ fontSize: 13, fontWeight: 750 }}>{t('play.modeReplay', { season })}</span>
+          <b>{t('play.replay.lead', { season })}</b>
         </p>
-        <p style={{ margin: '2px 0' }}>
-          模型的判断是逐日重放生成的——它在每场比赛前只能看到那场之前发生的事，和你拿到的信息一样多。
-          比分网上都查得到，所以这里只是练习；要和模型真刀真枪比，去「本季实战」。
-        </p>
+        <p style={{ margin: '2px 0' }}>{t('play.replay.explain')}</p>
       </div>
 
       <div className="grid cols-5" style={{ marginBottom: 14 }}>
-        <StatTile label="已预测" value={total.n} unit=" 场" />
+        <StatTile label={t('play.stat.predicted')} value={total.n} unit={t('common.unit.games', { count: total.n })} />
         <StatTile
-          label="你的命中率"
+          label={t('play.stat.acc')}
           value={total.n ? pct(total.accuracy, 1) : '—'}
-          hint={`模型 ${total.n ? pct(total.modelAccuracy, 1) : '—'}`}
+          hint={t('play.stat.modelAcc', { v: total.n ? pct(total.modelAccuracy, 1) : '—' })}
         />
         <StatTile
-          label="总积分"
+          label={t('play.stat.points')}
           value={total.n ? (total.points > 0 ? `+${total.points}` : total.points) : '—'}
-          hint={`模型同口径 ${total.modelPoints}`}
+          hint={t('play.stat.modelPoints', { v: total.modelPoints })}
         />
         <StatTile
-          label="对模型领先"
+          label={t('play.stat.lead')}
           value={total.n ? (lead > 0 ? `+${lead}` : lead) : '—'}
-          hint="你的积分减去模型的积分"
+          hint={t('play.stat.leadHint')}
         />
-        <StatTile label="当前连胜" value={total.streak} unit={` / 最佳 ${total.bestStreak}`} />
+        <StatTile label={t('play.stat.streak')} value={total.streak} unit={t('play.stat.streakUnit', { n: total.bestStreak })} />
       </div>
 
       <div className="card">
         <h2 style={{ flexWrap: 'wrap', rowGap: 8 }}>
-          比赛日
+          {t('play.day')}
           <span className="sub">
-            {fmtDateFull(cursor)} · {season} 第 {dayIdx + 1} / {index.days.length} 天 · {games.length} 场
+            {t('play.replay.daySub', {
+              date: fmt.dateFull(cursor), season, i: dayIdx + 1, n: index.days.length, games: unitGames(games.length),
+            })}
           </span>
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap', maxWidth: '100%' }}>
-            <button className="btn" disabled={dayIdx <= 0} onClick={() => move(-1)}>← 前一天</button>
+            <button className="btn" disabled={dayIdx <= 0} onClick={() => move(-1)}>{t('play.replay.prev')}</button>
             <select
               value={cursor ?? ''}
               onChange={(e) => { update((p) => ({ ...p, cursor: e.target.value })); setPending({}); }}
               style={{ minWidth: 0, maxWidth: '100%' }}
             >
               {index.days.map((d) => (
-                <option key={d.date} value={d.date}>{fmtDateFull(d.date)}（{d.games} 场）</option>
+                <option key={d.date} value={d.date}>{t('play.replay.dayOption', { date: fmt.dateFull(d.date), games: unitGames(d.games) })}</option>
               ))}
             </select>
             <button
@@ -230,7 +228,7 @@ function ReplayMode({ season }) {
               disabled={dayIdx >= index.days.length - 1}
               onClick={() => move(1)}
             >
-              后一天 →
+              {t('play.replay.next')}
             </button>
           </span>
         </h2>
@@ -256,20 +254,20 @@ function ReplayMode({ season }) {
                 disabled={allSettled || readyCount === 0}
                 onClick={settleDay}
               >
-                {allSettled ? '本日已结算' : `提交并翻牌（${readyCount}/${games.length}）`}
+                {allSettled ? t('play.replay.daySettled') : t('play.replay.submit', { ready: readyCount, total: games.length })}
               </button>
               {allSettled && dayIdx < index.days.length - 1 && (
-                <button className="btn" onClick={() => move(1)}>进入下一个比赛日 →</button>
+                <button className="btn" onClick={() => move(1)}>{t('play.replay.nextDay')}</button>
               )}
               <span className="note">
-                翻牌前看不到模型的选择和真实比分。可以只预测其中几场。
+                {t('play.replay.note')}
                 {leaderboardOn && cloud?.token && (
                   <>
                     {' · '}
-                    {syncState === 'syncing' ? '正在同步排行榜…'
-                      : syncState === 'ok' ? '已同步到排行榜'
-                        : syncState === 'fail' ? '排行榜同步失败（不影响本地进度）'
-                          : '结算后会自动同步到排行榜'}
+                    {syncState === 'syncing' ? t('play.replay.syncing')
+                      : syncState === 'ok' ? t('play.replay.syncOk')
+                        : syncState === 'fail' ? t('play.replay.syncFail')
+                          : t('play.replay.syncAuto')}
                   </>
                 )}
               </span>
@@ -280,12 +278,12 @@ function ReplayMode({ season }) {
 
       {total.n > 0 && (
         <div className="card">
-          <h2>你 vs 模型 · 上季回放 <span className="sub">基于已结算的 {total.n} 场（与本季实战分开计）</span></h2>
+          <h2>{t('play.vs.title')} <span className="sub">{t('play.vs.sub', { n: total.n })}</span></h2>
           <div className="grid cols-4">
-            <Compare label="命中率" you={pct(total.accuracy, 1)} model={pct(total.modelAccuracy, 1)} youBetter={total.accuracy > total.modelAccuracy} />
-            <Compare label="Brier（越低越好）" you={total.brier.toFixed(4)} model={total.modelBrier.toFixed(4)} youBetter={total.brier < total.modelBrier} />
-            <Compare label="积分" you={total.points} model={total.modelPoints} youBetter={total.points > total.modelPoints} />
-            <Compare label="猜对场次" you={total.correct} model={total.modelCorrect} youBetter={total.correct > total.modelCorrect} />
+            <Compare label={t('play.vs.acc')} you={pct(total.accuracy, 1)} model={pct(total.modelAccuracy, 1)} youBetter={total.accuracy > total.modelAccuracy} />
+            <Compare label={t('play.vs.brier')} you={total.brier.toFixed(4)} model={total.modelBrier.toFixed(4)} youBetter={total.brier < total.modelBrier} />
+            <Compare label={t('play.vs.points')} you={total.points} model={total.modelPoints} youBetter={total.points > total.modelPoints} />
+            <Compare label={t('play.vs.correct')} you={total.correct} model={total.modelCorrect} youBetter={total.correct > total.modelCorrect} />
           </div>
           <div className="divider" />
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -293,33 +291,27 @@ function ReplayMode({ season }) {
               className="btn"
               onClick={() => { setPlay(resetPlay(profileId)); setPending({}); }}
             >
-              清空存档
+              {t('play.vs.reset')}
             </button>
-            <span className="note">
-              存档保存在这台浏览器本地（localStorage），换设备或清缓存会丢失。
-            </span>
+            <span className="note">{t('play.vs.resetNote')}</span>
           </div>
         </div>
       )}
 
       <div className="card plain">
-        <h2>计分规则<span className="sub">本季实战与上季回放相同</span></h2>
+        <h2>{t('play.rules.title')}<span className="sub">{t('play.rules.sub')}</span></h2>
         <p className="note">
-          猜对得 <b>(信心 − 50%) × 200</b> 分，猜错扣同样的分。信心 55% 猜对只得 10 分，
-          信心 95% 猜对得 90 分、猜错扣 90 分。<br />
-          这样设计是为了让"敢下重注"只有在你的判断确实优于抛硬币时才划算——
-          否则最优策略永远是把信心拉满。<br />
-          <b>Brier</b> 是和模型同口径的比较：把你的选择折算成"主队获胜概率"再算平方误差，
-          越低越好。模型在 {season} 全季的 Brier 约 0.21。
+          {t('play.rules.p1a')}<b>{t('play.rules.formula')}</b>{t('play.rules.p1b')}<br />
+          {t('play.rules.p2')}<br />
+          <b>Brier</b>{t('play.rules.p3', { season })}
         </p>
       </div>
     </>
   );
 }
 
-const REJECT_CN = { locked: '已开赛，锁定了', unknown: '不是本季可下的比赛', side: '方向不对' };
 /** 开赛时刻：按所选时区显示并标明时区；赛程日期仍是美东口径（服务端按美东日锁盘） */
-const tipLabel = (utc, tz, fmt) => `${fmtDateFull(tzDateOf(utc, tz)).slice(5)} ${fmt.timeZoned(utc)}`;
+const tipLabel = (utc, tz, fmt) => `${fmt.date(tzDateOf(utc, tz))} ${fmt.timeZoned(utc)}`;
 
 /**
  * 本季实战。服务端记下「你的选择 + 模型此刻的赛前预测」，按赛程开赛时间锁定，比分出来后翻牌。
@@ -327,6 +319,7 @@ const tipLabel = (utc, tz, fmt) => `${fmtDateFull(tzDateOf(utc, tz)).slice(5)} $
  */
 function LiveMode({ live, reload, headers }) {
   const { t, tz, fmt } = useI18n();
+  const unitGames = (n) => `${n}${t('common.unit.games', { count: n })}`;
   const { teamById, meta, leaderboardOn, cloud, connectCloud } = useApp();
   const [pending, setPending] = useState({});
   const [busy, setBusy] = useState(false);
@@ -341,8 +334,10 @@ function LiveMode({ live, reload, headers }) {
   if (!live.available) {
     return (
       <div className="card plain">
-        <h2>本季实战不可用</h2>
-        <p className="note">{live.reasonText ?? (live.reasonCode ? t(live.reasonCode) : live.reason)}<br />「上季回放」不受影响。</p>
+        <h2>{t('play.live.offTitle')}</h2>
+        <p className="note">
+          {live.reasonError ? t('play.loadFailed', { msg: errorText(live.reasonError, t) }) : t(live.reasonCode || 'err.liveUnavailable')}<br />{t('play.live.offTail')}
+        </p>
       </div>
     );
   }
@@ -359,13 +354,18 @@ function LiveMode({ live, reload, headers }) {
     try {
       const picks = Object.entries(pending).map(([gameId, p]) => ({ gameId, ...p }));
       const r = await api.livePicks(picks, headers);
+      const rejectText = (reason) => {
+        const k = `play.reject.${reason}`;
+        const s = t(k);
+        return s === k ? reason : s;
+      };
       setMsg(r.rejected.length
-        ? `已保存 ${r.saved} 场；${r.rejected.map((x) => `${x.gameId} ${REJECT_CN[x.reason] ?? x.reason}`).join('，')}`
-        : `已保存 ${r.saved} 场。开赛前还能改。`);
+        ? t('play.live.savedRejected', { count: r.saved, rejected: r.rejected.map((x) => `${x.gameId} ${rejectText(x.reason)}`).join(t('play.listSep')) })
+        : t('play.live.saved', { count: r.saved }));
       setPending({});
       await reload(live.date);
     } catch (e) {
-      setMsg(`提交失败：${errorText(e, t)}`);
+      setMsg(t('play.live.submitFailed', { msg: errorText(e, t) }));
     }
     setBusy(false);
   };
@@ -374,54 +374,59 @@ function LiveMode({ live, reload, headers }) {
     <>
       <div className="warn-box" style={{ marginBottom: 14 }}>
         <p style={{ margin: '2px 0', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span className="chip accent" style={{ fontSize: 13, fontWeight: 750 }}>本季实战 · {live.season}</span>
-          <b>本季真实比赛，开赛前提交，开赛即锁定（以服务器时间为准），比分出来后翻牌。</b>
+          <span className="chip accent" style={{ fontSize: 13, fontWeight: 750 }}>{t('play.modeLive', { season: live.season })}</span>
+          <b>{t('play.live.lead')}</b>
         </p>
         <p style={{ margin: '2px 0' }}>
-          提交时服务器同时记下模型<b>那一刻</b>的赛前预测（胜率与所用 Elo），模型按它赛前说过的话计分，不按赛后更新过的评级。
-          开赛前可以改，改的时候模型快照一起更新。战绩与「上季回放」分开计。
+          {t('play.live.explain1')}<b>{t('play.live.explainBold')}</b>{t('play.live.explain2')}
         </p>
       </div>
 
       {live.identity === 'cloud' && !live.signedIn && (
         <div className="card plain">
           <p className="note" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', margin: 0 }}>
-            本季实战的选择存在服务器上（才能按开赛时间锁定），需要先给当前档案建一个线上身份。
+            {t('play.live.needCloud')}
             <button
               className="btn primary"
               disabled={busy}
               onClick={async () => { setBusy(true); try { await connectCloud(); } catch (e) { setMsg(errorText(e, t)); } setBusy(false); }}
             >
-              用当前档案加入
+              {t('play.live.join')}
             </button>
           </p>
         </div>
       )}
 
       <div className="grid cols-5" style={{ marginBottom: 14 }}>
-        <StatTile label="已翻牌" value={total.n} unit=" 场" hint={`另有 ${waiting} 场等比分`} />
-        <StatTile label="你的命中率" value={total.n ? pct(total.accuracy, 1) : '—'} hint={`模型 ${total.n ? pct(total.modelAccuracy, 1) : '—'}`} />
-        <StatTile label="总积分" value={total.n ? (total.points > 0 ? `+${total.points}` : total.points) : '—'} hint={`模型同口径 ${total.modelPoints}`} />
-        <StatTile label="对模型领先" value={total.n ? (lead > 0 ? `+${lead}` : lead) : '—'} hint="你的积分减去模型的积分" />
-        <StatTile label="当前连胜" value={total.streak} unit={` / 最佳 ${total.bestStreak}`} />
+        <StatTile label={t('play.live.revealed')} value={total.n} unit={t('common.unit.games', { count: total.n })} hint={t('play.live.waitingHint', { count: waiting })} />
+        <StatTile label={t('play.stat.acc')} value={total.n ? pct(total.accuracy, 1) : '—'} hint={t('play.stat.modelAcc', { v: total.n ? pct(total.modelAccuracy, 1) : '—' })} />
+        <StatTile label={t('play.stat.points')} value={total.n ? (total.points > 0 ? `+${total.points}` : total.points) : '—'} hint={t('play.stat.modelPoints', { v: total.modelPoints })} />
+        <StatTile label={t('play.stat.lead')} value={total.n ? (lead > 0 ? `+${lead}` : lead) : '—'} hint={t('play.stat.leadHint')} />
+        <StatTile label={t('play.stat.streak')} value={total.streak} unit={t('play.stat.streakUnit', { n: total.bestStreak })} />
       </div>
 
       <div className="card">
         <h2 style={{ flexWrap: 'wrap', rowGap: 8 }}>
-          比赛日
+          {t('play.day')}
           <span className="sub">
-            {t('tz.short.et')} {fmtDateFull(live.date)} · {games.length} 场，还能下 {day?.open ?? 0} 场
+            {t('play.live.daySub', {
+              tz: t('tz.short.et'), date: fmt.dateFull(live.date), games: unitGames(games.length), open: day?.open ?? 0,
+            })}
           </span>
           <span style={{ marginLeft: 'auto' }}>
             <select value={live.date ?? ''} onChange={(e) => reload(e.target.value)} style={{ minWidth: 0, maxWidth: '100%' }}>
               {live.days.map((d) => (
-                <option key={d.date} value={d.date}>{fmtDateFull(d.date)}（{d.open ? `可下 ${d.open} 场` : '已开赛，看翻牌'}）</option>
+                <option key={d.date} value={d.date}>
+                  {d.open
+                    ? t('play.live.optOpen', { date: fmt.dateFull(d.date), open: d.open })
+                    : t('play.live.optLocked', { date: fmt.dateFull(d.date) })}
+                </option>
               ))}
             </select>
           </span>
         </h2>
 
-        {!games.length ? <div className="empty">近期没有还能预测的本季比赛</div> : (
+        {!games.length ? <div className="empty">{t('play.live.empty')}</div> : (
           <>
             <div className="grid cols-2">
               {games.map((g) => {
@@ -438,8 +443,8 @@ function LiveMode({ live, reload, headers }) {
                     choice={pending[g.gameId] ?? (saved ? { side: saved.side, conf: saved.conf } : null)}
                     status={(
                       <>
-                        {g.locked ? '已开赛 · 锁定' : `${tipLabel(g.tipoff, tz, fmt)} 开赛`}
-                        {saved && !g.locked && <span className="chip hit" style={{ marginLeft: 6 }}>已提交{pending[g.gameId] ? ' · 改动未保存' : ''}</span>}
+                        {g.locked ? t('play.live.locked') : t('play.live.tipoff', { time: tipLabel(g.tipoff, tz, fmt) })}
+                        {saved && !g.locked && <span className="chip hit" style={{ marginLeft: 6 }}>{t('play.live.submitted')}{pending[g.gameId] ? t('play.live.unsaved') : ''}</span>}
                       </>
                     )}
                     onChoose={(side, conf) => setPending((p) => ({ ...p, [g.gameId]: { side, conf } }))}
@@ -449,11 +454,11 @@ function LiveMode({ live, reload, headers }) {
             </div>
             <div style={{ marginTop: 14, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
               <button className="btn primary" disabled={busy || !ready || (live.identity === 'cloud' && !live.signedIn)} onClick={submit}>
-                {busy ? '提交中…' : `提交（${ready} 场）`}
+                {busy ? t('play.live.submitting') : t('play.live.submit', { count: ready })}
               </button>
               <span className="note">
-                {msg ?? '可以只预测其中几场。翻牌前看不到模型的选择；比分由每天的数据刷新带进来。'}
-                {live.identity === 'local' && ' · 本地模式：存在本机服务的 data/app.db，按当前档案区分。'}
+                {msg ?? t('play.live.note')}
+                {live.identity === 'local' && t('play.live.localMode')}
               </span>
             </div>
           </>
@@ -462,26 +467,26 @@ function LiveMode({ live, reload, headers }) {
 
       {(live.history ?? []).length > 0 && (
         <div className="card">
-          <h2>我的本季实战记录<span className="sub">共 {live.history.length} 场 · 已翻牌 {total.n} · 等比分 {waiting}</span></h2>
+          <h2>{t('play.hist.title')}<span className="sub">{t('play.hist.sub', { total: unitGames(live.history.length), n: total.n, waiting })}</span></h2>
           <div className="table-wrap">
             <table className="data">
               <thead>
                 <tr>
-                  <th className="left">日期（{t('tz.short.et')}）</th><th className="left">对阵</th><th className="left">你押</th>
-                  <th>比分</th><th>你</th><th>模型（提交时）</th><th>模型</th>
+                  <th className="left">{t('play.hist.date', { tz: t('tz.short.et') })}</th><th className="left">{t('play.hist.matchup')}</th><th className="left">{t('play.hist.pick')}</th>
+                  <th>{t('play.hist.score')}</th><th>{t('play.hist.you')}</th><th>{t('play.hist.modelAtPick')}</th><th>{t('play.hist.model')}</th>
                 </tr>
               </thead>
               <tbody>
                 {[...live.history].reverse().map((r) => {
-                  const nm = (id) => teamById.get(id)?.cn ?? id;
+                  const nm = (id) => (teamById.get(id) ? fmt.teamName(teamById.get(id)) : id);
                   return (
                     <tr key={r.gameId}>
-                      <td className="left">{fmtDateFull(r.date)}</td>
+                      <td className="left">{fmt.dateFull(r.date)}</td>
                       <td className="left">{nm(r.awayId)} @ {nm(r.homeId)}</td>
                       <td className="left">{nm(r.side === 'home' ? r.homeId : r.awayId)} {Math.round(r.conf * 100)}%</td>
-                      <td className="mono">{r.result ? `${r.result.awayScore}-${r.result.homeScore}` : '等比分'}</td>
+                      <td className="mono">{r.result ? `${r.result.awayScore}-${r.result.homeScore}` : t('play.hist.waiting')}</td>
                       <td className="mono">{r.result ? <b className={r.points > 0 ? 'pos' : 'neg'}>{r.points > 0 ? `+${r.points}` : r.points}</b> : '—'}</td>
-                      <td className="mono">{r.result ? `主队 ${(r.modelProb * 100).toFixed(0)}%` : '翻牌后显示'}</td>
+                      <td className="mono">{r.result ? t('play.hist.homeProb', { p: (r.modelProb * 100).toFixed(0) }) : t('play.hist.afterReveal')}</td>
                       <td className="mono">{r.result ? <span className={r.modelPoints > 0 ? 'pos' : 'neg'}>{r.modelPoints > 0 ? `+${r.modelPoints}` : r.modelPoints}</span> : '—'}</td>
                     </tr>
                   );
@@ -489,16 +494,23 @@ function LiveMode({ live, reload, headers }) {
               </tbody>
             </table>
           </div>
-          {total.n > 0 && total.n < 30 && <p className="note">才 {total.n} 场，输赢里运气占大头，别急着下结论。</p>}
-          {leaderboardOn && cloud?.token && <p className="note">本季实战有单独的排行榜，在「玩家档案」页切换查看。</p>}
+          {total.n > 0 && total.n < 30 && <p className="note">{t('play.hist.small', { n: total.n })}</p>}
+          {leaderboardOn && cloud?.token && <p className="note">{t('play.hist.boardNote')}</p>}
         </div>
       )}
-      <p className="note">数据快照 {live.dataAt ? new Date(live.dataAt).toLocaleString('zh-CN', { hour12: false }) : '—'} · 服务器时间 {new Date(live.now).toLocaleString('zh-CN', { hour12: false })} · 模型是 {meta.targetSeason} 生产默认预测（不套缺阵勾选）</p>
+      <p className="note">
+        {t('play.footer', {
+          at: live.dataAt ? new Date(live.dataAt).toLocaleString(fmt.intl, { hour12: false }) : '—',
+          now: new Date(live.now).toLocaleString(fmt.intl, { hour12: false }),
+          season: meta.targetSeason,
+        })}
+      </p>
     </>
   );
 }
 
 function Compare({ label, you, model, youBetter }) {
+  const { t } = useI18n();
   return (
     <div className="tile">
       <div className="k">{label}</div>
@@ -506,11 +518,11 @@ function Compare({ label, you, model, youBetter }) {
         <span style={{ fontSize: 20, fontWeight: 760, color: youBetter ? 'var(--good)' : 'var(--text)' }}>
           {you}
         </span>
-        <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>你</span>
+        <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>{t('play.vs.you')}</span>
         <span style={{ marginLeft: 'auto', fontSize: 15, fontWeight: 650, color: 'var(--text-dim)' }}>
           {model}
         </span>
-        <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>模型</span>
+        <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>{t('play.vs.model')}</span>
       </div>
     </div>
   );
@@ -521,6 +533,7 @@ function Compare({ label, you, model, youBetter }) {
  * 回放直接用题库行；本季实战用服务端结算行（模型概率是提交那一刻的快照）。
  */
 function GameRow({ game, teamById, settled, choice, onChoose, reveal = game, locked = false, status = null }) {
+  const { t, fmt } = useI18n();
   const home = teamById.get(game.homeId);
   const away = teamById.get(game.awayId);
   const picked = settled ?? choice;
@@ -531,17 +544,17 @@ function GameRow({ game, teamById, settled, choice, onChoose, reveal = game, loc
   return (
     <div className="game-card" style={{ cursor: 'default' }}>
       <div className="top">
-        <span>{status ?? `${restLabel(game.restAway)} / ${restLabel(game.restHome)}`}</span>
+        <span>{status ?? `${fmt.rest(game.restAway)} / ${fmt.rest(game.restHome)}`}</span>
         {settled && (
           <span style={{ color: settled.correct ? 'var(--good)' : 'var(--bad)', fontWeight: 700 }}>
-            {settled.correct ? '猜对' : '猜错'} {settled.points > 0 ? `+${settled.points}` : settled.points}
+            {settled.correct ? t('play.row.hit') : t('play.row.miss')} {settled.points > 0 ? `+${settled.points}` : settled.points}
           </span>
         )}
       </div>
 
       <div style={{ display: 'flex', gap: 8 }}>
         <SideButton
-          team={away} label="客"
+          team={away} label={t('common.side.away')}
           active={side === 'away'}
           disabled={frozen}
           won={settled ? !reveal.homeWin : null}
@@ -549,7 +562,7 @@ function GameRow({ game, teamById, settled, choice, onChoose, reveal = game, loc
           onClick={() => onChoose('away', conf)}
         />
         <SideButton
-          team={home} label="主"
+          team={home} label={t('common.side.home')}
           active={side === 'home'}
           disabled={frozen}
           won={settled ? reveal.homeWin : null}
@@ -561,7 +574,7 @@ function GameRow({ game, teamById, settled, choice, onChoose, reveal = game, loc
       {!frozen && side && (
         <div style={{ marginTop: 9 }}>
           <div style={{ fontSize: 10.5, color: 'var(--text-faint)', marginBottom: 4 }}>
-            信心 · 猜对 {Math.round((conf - 0.5) * 200)} 分 / 猜错 −{Math.round((conf - 0.5) * 200)} 分
+            {t('play.row.confidence', { n: Math.round((conf - 0.5) * 200) })}
           </div>
           <div style={{ display: 'flex', gap: 4 }}>
             {CONF_STEPS.map((c) => (
@@ -581,26 +594,27 @@ function GameRow({ game, teamById, settled, choice, onChoose, reveal = game, loc
       {locked && !settled && (
         <div style={{ marginTop: 9, fontSize: 11, color: 'var(--text-faint)' }}>
           {side
-            ? `已锁定：你押 ${side === 'home' ? home?.cn : away?.cn} ${Math.round(conf * 100)}% · 等比分出来翻牌`
-            : '已开赛，没有预测这一场'}
+            ? t('play.row.lockedPick', { team: fmt.teamName(side === 'home' ? home : away), conf: Math.round(conf * 100) })
+            : t('play.row.lockedNone')}
         </div>
       )}
 
       {settled && (
         <div style={{ marginTop: 9, fontSize: 11, color: 'var(--text-faint)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-            <span style={{ width: 46 }}>模型</span>
+            <span style={{ width: 46 }}>{t('play.vs.model')}</span>
             <ProbBar p={reveal.modelProb} width={54} />
             <span className="mono" style={{ color: probColor(reveal.modelProb) }}>
-              {(reveal.modelProb * 100).toFixed(0)}% 主队
+              {t('play.row.modelHome', { p: (reveal.modelProb * 100).toFixed(0) })}
             </span>
             <span style={{ marginLeft: 'auto', color: settled.modelCorrect ? 'var(--good)' : 'var(--bad)' }}>
-              {settled.modelCorrect ? '模型对' : '模型错'}
+              {settled.modelCorrect ? t('play.row.modelRight') : t('play.row.modelWrong')}
             </span>
           </div>
           <div style={{ marginTop: 3 }}>
-            你押 {side === 'home' ? home?.abbr : away?.abbr} {Math.round(conf * 100)}% ·
-            {' '}实际 {reveal.awayScore}-{reveal.homeScore}
+            {t('play.row.youPicked', {
+              abbr: side === 'home' ? home?.abbr : away?.abbr, conf: Math.round(conf * 100), score: `${reveal.awayScore}-${reveal.homeScore}`,
+            })}
           </div>
         </div>
       )}
@@ -609,6 +623,7 @@ function GameRow({ game, teamById, settled, choice, onChoose, reveal = game, loc
 }
 
 function SideButton({ team, label, active, disabled, won, score, onClick }) {
+  const { fmt } = useI18n();
   const border = won === true ? 'var(--good)' : won === false ? 'var(--bad)' : 'var(--line)';
   return (
     <button
@@ -635,7 +650,7 @@ function SideButton({ team, label, active, disabled, won, score, onClick }) {
           whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block',
         }}
         >
-          {team?.cn}
+          {team ? fmt.teamName(team) : undefined}
         </span>
       </span>
       {score !== null && score !== undefined && (
