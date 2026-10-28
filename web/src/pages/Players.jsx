@@ -4,18 +4,15 @@ import { api } from '../lib/api.js';
 import {
   TeamCell, PlayerHeadshot, Loading, ErrorBox, Segmented, StatTile, DataTable, Th,
 } from '../components/common.jsx';
-import PlayerTable, { MODE_OPTIONS, MODE_LABEL } from '../components/PlayerTable.jsx';
+import PlayerTable, { modeOptions } from '../components/PlayerTable.jsx';
 import { num, rate } from '../lib/format.js';
+import { useI18n } from '../i18n/react.jsx';
 
-const POS_FILTERS = [
-  { value: 'all', label: '全部位置' },
-  { value: 'G', label: '后卫' },
-  { value: 'F', label: '前锋' },
-  { value: 'C', label: '中锋' },
-];
+const POS_FILTERS = ['all', 'G', 'F', 'C'];
 
 export default function Players() {
   const { teams, teamById, meta, setAccent } = useApp();
+  const { t, fmt } = useI18n();
   const [all, setAll] = useState(null);
   const [error, setError] = useState(null);
   const [mode, setMode] = useState('base');
@@ -24,7 +21,7 @@ export default function Players() {
   const [posFilter, setPosFilter] = useState('all');
   // 默认门槛随赛季进度：本季取出场最少球队的已赛场次（封顶 20），上季数据仍为 20；用户改过就以用户为准
   const [userMinGp, setMinGp] = useState(null);
-  const minGp = userMinGp ?? (meta.displayCurrent ? Math.min(20, ...teams.map((t) => t.wins + t.losses)) : 20);
+  const minGp = userMinGp ?? (meta.displayCurrent ? Math.min(20, ...teams.map((tm) => tm.wins + tm.losses)) : 20);
   const [rosterOnly, setRosterOnly] = useState(true);
 
   useEffect(() => { setAccent(null); }, [setAccent]);
@@ -62,41 +59,44 @@ export default function Players() {
   return (
     <>
       <div className="page-head">
-        <h1>球员数据</h1>
+        <h1>{t('players.title')}</h1>
         <p>
-          {(meta.displayCurrent ? meta.targetSeason : meta.priorSeason)} 赛季场均基础数据与高阶数据，共 {all.length} 人；
-          名单归属已按 {meta.targetSeason} 最新阵容更新。
+          {t('players.intro', {
+            season: meta.displayCurrent ? meta.targetSeason : meta.priorSeason,
+            total: all.length,
+            target: meta.targetSeason,
+          })}
         </p>
       </div>
 
       <div className="toolbar">
         <div className="field">
-          <label>搜索</label>
+          <label>{t('players.search')}</label>
           <input
             type="search"
-            placeholder="球员姓名"
+            placeholder={t('players.searchPh')}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             style={{ minWidth: 170 }}
           />
         </div>
         <div className="field">
-          <label>球队</label>
+          <label>{t('players.team')}</label>
           <select value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} style={{ minWidth: 150 }}>
-            <option value="all">全部球队</option>
-            {[...teams].sort((a, b) => a.cn.localeCompare(b.cn, 'zh')).map((t) => (
-              <option key={t.teamId} value={t.teamId}>{t.cn}</option>
+            <option value="all">{t('players.allTeams')}</option>
+            {fmt.sortTeams(teams).map((tm) => (
+              <option key={tm.teamId} value={tm.teamId}>{fmt.teamName(tm)}</option>
             ))}
           </select>
         </div>
         <div className="field">
-          <label>位置</label>
+          <label>{t('players.pos')}</label>
           <select value={posFilter} onChange={(e) => setPosFilter(e.target.value)}>
-            {POS_FILTERS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            {POS_FILTERS.map((v) => <option key={v} value={v}>{v === 'all' ? t('players.allPos') : fmt.pos(v)}</option>)}
           </select>
         </div>
         <div className="field">
-          <label>最少出场</label>
+          <label>{t('players.minGp')}</label>
           <input
             type="number" min="0" max="82" value={minGp}
             onChange={(e) => setMinGp(Number(e.target.value) || 0)}
@@ -107,7 +107,7 @@ export default function Players() {
           <label>&nbsp;</label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 0' }}>
             <input type="checkbox" checked={rosterOnly} onChange={(e) => setRosterOnly(e.target.checked)} />
-            <span style={{ fontSize: 12.5 }}>仅现役名单</span>
+            <span style={{ fontSize: 12.5 }}>{t('players.rosterOnly')}</span>
           </label>
         </div>
         <div className="field" style={{ marginLeft: 'auto' }}>
@@ -115,19 +115,19 @@ export default function Players() {
           <Segmented
             value={mode}
             onChange={setMode}
-            options={MODE_OPTIONS}
+            options={modeOptions(t)}
           />
         </div>
       </div>
 
       <div className="grid cols-4" style={{ marginBottom: 14 }}>
-        <StatTile label="筛选结果" value={rows.length} unit=" 人" />
-        <PlayerTile label="得分王" player={topScorer} value={topScorer && `${num(topScorer.base?.pts)} 分`} />
-        <PlayerTile label="PIE 最高" player={topPie} value={topPie && rate(topPie.adv?.pie)} />
+        <StatTile label={t('players.tile.results')} value={rows.length} unit={t('players.tile.unit', { count: rows.length })} />
+        <PlayerTile label={t('players.tile.scorer')} player={topScorer} value={topScorer && t('players.tile.pts', { v: num(topScorer.base?.pts) })} />
+        <PlayerTile label={t('players.tile.pie')} player={topPie} value={topPie && rate(topPie.adv?.pie)} />
         <PlayerTile
-          label="缺阵影响最大"
+          label={t('players.tile.outCost')}
           player={topImpact}
-          value={topImpact && `${num(topImpact.outCostPts, 1)} 分/场`}
+          value={topImpact && t('players.tile.perGame', { v: num(topImpact.outCostPts, 1) })}
         />
       </div>
 
@@ -135,8 +135,8 @@ export default function Players() {
 
       <div className="card">
         <h2>
-          {MODE_LABEL[mode]}数据
-          <span className="sub">点击表头排序 · 点击行进入所属球队</span>
+          {t('players.cardTitle', { mode: t(`playerTable.mode.${mode}`) })}
+          <span className="sub">{t('players.cardSub')}</span>
         </h2>
         <PlayerTable
           rows={rows}
@@ -144,14 +144,14 @@ export default function Players() {
           maxHeight={640}
           onRowClick={(p) => go(`team/${p.teamId}`)}
           nameColumn={{
-            key: 'name', label: '球员', align: 'left', width: 216,
+            key: 'name', label: t('players.player'), align: 'left', width: 216,
             render: (p) => (
               <span className="player-cell">
                 <PlayerHeadshot player={p} size={28} />
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {p.name}
                   {p.priorTeamAbbr && p.priorTeamAbbr !== p.teamAbbr && (
-                    <span className="chip accent" style={{ marginLeft: 6 }}>转自 {p.priorTeamAbbr}</span>
+                    <span className="chip accent" style={{ marginLeft: 6 }}>{t('players.from', { team: p.priorTeamAbbr })}</span>
                   )}
                 </span>
               </span>
@@ -159,11 +159,11 @@ export default function Players() {
           }}
           extraColumns={[
             {
-              key: 'teamAbbr', label: '球队', align: 'left', width: 142,
+              key: 'teamAbbr', label: t('players.team'), align: 'left', width: 142,
               render: (p) => <TeamCell team={teamById.get(p.teamId)} size={20} showAbbr={false} />,
             },
-            { key: 'posCn', label: '位置', align: 'left', width: 72, render: (p) => <span className="dim">{p.posCn || '—'}</span> },
-            { key: 'age', label: '年龄', width: 44, render: (p) => num(p.age, 0) },
+            { key: 'posCn', label: t('players.pos'), align: 'left', width: 72, render: (p) => <span className="dim">{p.pos ? fmt.pos(p.pos) : '—'}</span> },
+            { key: 'age', label: t('players.age'), width: 44, render: (p) => num(p.age, 0) },
           ]}
         />
       </div>
@@ -208,32 +208,41 @@ function PlayerTile({ label, player, value }) {
  * 「对标盘口」那页也是这么处理自己的短处的——只报好数字的指标不值得信。
  */
 export function ImpactValidation({ impact }) {
+  const { t } = useI18n();
   const v = impact?.validation;
   if (!v?.perPair?.length) return null;
   const names = v.candidates ?? Object.keys(v.average ?? {});
   const avg = v.average ?? {};
   const best = (row) => Math.max(...names.map((n) => row[n] ?? -9));
   const wins = v.perPair.filter((row) => (row.IMP ?? -9) >= best(row)).length;
+  // 候选指标名来自数据文件（含中文括注），显示时按代号翻成当前语言；纯 ASCII 的（IMP、PIE）原样
+  const candLabel = (n) => {
+    if (/^[\x00-\x7f]+$/.test(n)) return n;
+    if (n.startsWith('IMP')) return t('players.impact.cand.impPre');
+    if (n.startsWith('SPM')) return t('players.impact.cand.spm');
+    if (n.startsWith('APM')) return t('players.impact.cand.apm');
+    return t('players.impact.cand.netRtg');
+  };
 
   return (
     <div className="card">
       <h2>
-        IMP 准不准
-        <span className="sub">{v.criterion}</span>
+        {t('players.impact.title')}
+        <span className="sub">{t('players.impact.criterion')}</span>
       </h2>
 
       <div className="grid cols-3" style={{ marginBottom: 12 }}>
         <StatTile
-          abbr="IMP" label="平均相关" value={(avg.IMP ?? 0).toFixed(3)}
-          hint="用第 N 季的数据预测第 N+1 季真实表现的相关系数"
+          abbr="IMP" label={t('players.impact.avg')} value={(avg.IMP ?? 0).toFixed(3)}
+          hint={t('players.impact.avgHint')}
         />
         <StatTile
-          abbr="PIE" label="同一批球员" value={(avg.PIE ?? 0).toFixed(3)}
-          hint="现状指标 PIE 在同一批球员上的成绩"
+          abbr="PIE" label={t('players.impact.same')} value={(avg.PIE ?? 0).toFixed(3)}
+          hint={t('players.impact.sameHint')}
         />
         <StatTile
-          abbr="W" label="逐季排第一" value={`${wins} / ${v.perPair.length}`}
-          hint="有多少个赛季对里，IMP 在所有候选指标中排第一"
+          abbr="W" label={t('players.impact.first')} value={`${wins} / ${v.perPair.length}`}
+          hint={t('players.impact.firstHint')}
         />
       </div>
 
@@ -242,12 +251,12 @@ export function ImpactValidation({ impact }) {
         rowKey={(r) => r.pair}
         initialSort={{ key: 'pair', dir: 'asc' }}
         columns={[
-          { key: 'pair', label: '赛季对', align: 'left', width: 132 },
-          { key: 'n', label: '人数', width: 58 },
+          { key: 'pair', label: t('players.impact.pair'), align: 'left', width: 132 },
+          { key: 'n', label: t('players.impact.n'), width: 58 },
           ...names.map((n) => ({
             key: n,
-            label: n === 'IMP' ? <Th abbr="IMP" label="混合" /> : n,
-            title: n,
+            label: n === 'IMP' ? <Th abbr="IMP" label={t('players.impact.blend')} /> : candLabel(n),
+            title: n === 'IMP' ? 'IMP' : candLabel(n),
             width: n === 'IMP' ? 76 : 112,
             render: (r) => {
               const val = r[n];
@@ -260,35 +269,22 @@ export function ImpactValidation({ impact }) {
       />
 
       <p className="note" style={{ marginTop: 10 }}>
-        IMP 是<b>统计栏模型（SPM）</b>与<b>场上实测（APM）</b>的混合，两半各占
-        {' '}{Math.round((1 - (impact.blendW ?? 0.35)) * 100)}% 与
-        {' '}{Math.round((impact.blendW ?? 0.35) * 100)}%。
-        单看任何一半都更差——这一点表里就能看到。混合权重是扫出来的，
-        而且用了两把尺子：预测次季 APM，以及预测次季 on/off。
-        只用前者不行，因为 IMP 里含 APM，两者共享同一个偏差。
+        {t('players.impact.n1.pre')}<b>{t('players.impact.n1.b1')}</b>{t('players.impact.n1.mid')}<b>{t('players.impact.n1.b2')}</b>
+        {t('players.impact.n1.tail', {
+          spm: Math.round((1 - (impact.blendW ?? 0.35)) * 100),
+          apm: Math.round((impact.blendW ?? 0.35) * 100),
+        })}
       </p>
       {v.shrink && (
         <p className="note">
-          混合之后再<b>按上季出场分钟向人群均值收缩</b>（k = {v.shrink.k} 分钟）：
-          打满 {v.shrink.pivot} 分钟的人不变，480 分钟的人只保留约四成偏离——
-          上场时间本身就说明了教练怎么看他。表里「IMP」是收缩后的线上口径，
-          「IMP（收缩前）」照列作对照。k 是留一赛季对选的，4 折都选了同一个值；
-          次季 on/off 这把尺子上收缩也 4 对全胜，只是有两对的增量接近噪声。
+          {t('players.impact.n2.pre')}<b>{t('players.impact.n2.b')}</b>{t('players.impact.n2.tail', { k: v.shrink.k, pivot: v.shrink.pivot })}
         </p>
       )}
       <p className="note">
-        做法对齐 EPM 的公开方法，但 EPM 用的是逐回合、含对手阵容的完整 RAPM，
-        我们实测那一半只看得到进攻方五人，算出来的是<b>未做对手调整</b>的 APM。
-        后果是<b>总在一起上场的球员分不太开</b>——某支强队的角色球员会被抬高，
-        榜单上还能看到这个痕迹。这是当前最大的已知缺陷。
+        {t('players.impact.n3.pre')}<b>{t('players.impact.n3.b1')}</b>{t('players.impact.n3.mid')}<b>{t('players.impact.n3.b2')}</b>{t('players.impact.n3.tail')}
       </p>
       <p className="note">
-        这条不再是猜测：我们解析了 5 个赛季 6150 场的 play-by-play，还原出攻守双方
-        阵容做了真 RAPM，量到污染确实存在（球员评分与所在队净效率的相关
-        <b> 0.589 → 0.425</b>）。但换上去之后预测能力<b>测不出改善</b>
-        （配对 t=1.45，不显著），所以没有为它增加一条每次刷新要重抓 3 小时的管线。
-        这不等于 RAPM 更差——是我们每季约 24 万回合的数据量分辨不出来；
-        EPM 有 550 万回合。
+        {t('players.impact.n4.pre')}<b>{t('players.impact.n4.b1')}</b>{t('players.impact.n4.mid')}<b>{t('players.impact.n4.b2')}</b>{t('players.impact.n4.tail')}
       </p>
     </div>
   );

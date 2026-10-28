@@ -41,8 +41,8 @@
 | 存疑 | Doubtful | — | 已定 |
 | 每日观察 | Day-to-day | Daily Observation, day to day | 已定 |
 | 美东时间 | ET | EST, Eastern Standard Time | 已定 |
-| 分区 | Division | — | 已定 |
-| 赛区 | Conference | — | 已定 |
+| 分区 | Conference | — | 已定 |
+| 赛区 | Division | — | 已定 |
 | 无证据表明模型能赢盘口 | No evidence the model beats the market | promising edge, slight edge, may beat the market, likely beats the market, could beat the market | 已定 |
 | 未经回测验证 | Not backtested（首选；语境中 "Unvalidated" 也可） | not fully validated, still being refined, promising, may help | 已定 |
 | 阵容先验 | Roster prior | Lineup prior, Roster baseline | 已定 |

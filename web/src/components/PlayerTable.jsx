@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { DataTable, Th } from './common.jsx';
+import { useI18n } from '../i18n/react.jsx';
 import { num, rate, signed, signClass, ABBR } from '../lib/format.js';
 
 const b = (key) => (r) => r.base?.[key] ?? null;
@@ -33,111 +34,126 @@ const defendedFga = (r) => (r.defend?.dFga ?? 0) * (r.gp ?? 0);
 const qualified = (total, min) => total !== null && total !== undefined && total >= min;
 
 /** 生成一个「够样本才参与排名」的列 */
-const rateCol = (key, cn, width, get, totalOf, min, opts = {}) => col(
-  key, cn, width,
-  (r) => {
+const rateCol = (key, width, get, totalOf, min, opts = {}) => col(
+  key, width,
+  (r, t) => {
     const v = get(r);
     if (v === null || v === undefined) return dash;
     const total = totalOf(r);
     const ok = qualified(total, min);
     const text = opts.render ? opts.render(v) : rate(v);
     return ok ? text : (
-      <span className="dim" title={`样本仅 ${Math.round(total ?? 0)} 次，不参与排名`}>{text}</span>
+      <span className="dim" title={t('playerTable.sampleLow', { count: Math.round(total ?? 0) })}>{text}</span>
     );
   },
   { ...opts, value: (r) => (qualified(totalOf(r), min) ? get(r) : null) },
 );
 
 /**
- * 列定义的简写。
- * label 是「英文缩写在上、中文在下」的两行表头，所以 title 必须显式给字符串——
+ * 列定义的简写（规格，尚未翻译）。
+ * 列名取 playerTable.<key>，悬停说明取 playerTable.hint.<key>（opts.hint 为真时）；
+ * 真正的表头在 PlayerTable 里按当前语言用 buildColumns 生成。
+ * render(r, t) 的第二个参数是翻译函数，供需要文案的单元格（如样本不足的提示）使用。
+ */
+const col = (key, width, render, opts = {}) => ({
+  key,
+  abbr: ABBR[opts.abbrKey ?? key],
+  width,
+  render,
+  hint: !!opts.hint,
+  ...(opts.value ? { value: opts.value } : {}),
+});
+
+/**
+ * 把列规格翻成 DataTable 的列。
+ * label 是「英文缩写在上、中文在下」的两行表头（英文界面只显示缩写），所以 title 必须显式给字符串——
  * DataTable 默认拿 label 当 title，label 是 JSX 的话会渲染成 [object Object]。
  */
-const col = (key, cn, width, render, opts = {}) => {
-  const abbr = ABBR[opts.abbrKey ?? key];
+const buildColumns = (specs, t) => specs.map((c) => {
+  const name = t(`playerTable.${c.key}`);
   return {
-    key,
-    label: <Th abbr={abbr} label={cn} />,
-    title: opts.hint ? `${cn} ${abbr} — ${opts.hint}` : `${cn} ${abbr}`,
-    width,
-    render,
-    ...(opts.value ? { value: opts.value } : {}),
+    key: c.key,
+    label: <Th abbr={c.abbr} label={name} />,
+    title: c.hint ? `${name} ${c.abbr} — ${t(`playerTable.hint.${c.key}`)}` : `${name} ${c.abbr}`,
+    width: c.width,
+    render: (r) => c.render(r, t),
+    ...(c.value ? { value: c.value } : {}),
   };
-};
+});
 
 /** 每种视图都带的前两列 */
 const LEAD = [
-  col('gp', '出场', 52, (r) => num(r.gp, 0)),
-  col('min', '时间', 52, (r) => num(r.min)),
+  col('gp', 52, (r) => num(r.gp, 0)),
+  col('min', 52, (r) => num(r.min)),
 ];
 
 /** 基础数据列（场均） */
 export const BASE_COLUMNS = [
   ...LEAD,
-  col('pts', '得分', 56, (r) => <b>{num(r.base?.pts)}</b>, { value: b('pts') }),
-  col('reb', '篮板', 56, (r) => num(r.base?.reb), { value: b('reb') }),
-  col('ast', '助攻', 56, (r) => num(r.base?.ast), { value: b('ast') }),
-  col('stl', '抢断', 52, (r) => num(r.base?.stl), { value: b('stl') }),
-  col('blk', '盖帽', 52, (r) => num(r.base?.blk), { value: b('blk') }),
-  col('tov', '失误', 52, (r) => num(r.base?.tov), { value: b('tov') }),
-  col('fgPct', '投篮', 58, (r) => rate(r.base?.fgPct), { value: b('fgPct') }),
-  col('fg3m', '三分球', 56, (r) => num(r.base?.fg3m), { value: b('fg3m') }),
-  col('fg3Pct', '三分', 58, (r) => rate(r.base?.fg3Pct), { value: b('fg3Pct') }),
-  col('ftPct', '罚球', 58, (r) => rate(r.base?.ftPct), { value: b('ftPct') }),
-  col('plusMinus', '正负值', 62, (r) => (
+  col('pts', 56, (r) => <b>{num(r.base?.pts)}</b>, { value: b('pts') }),
+  col('reb', 56, (r) => num(r.base?.reb), { value: b('reb') }),
+  col('ast', 56, (r) => num(r.base?.ast), { value: b('ast') }),
+  col('stl', 52, (r) => num(r.base?.stl), { value: b('stl') }),
+  col('blk', 52, (r) => num(r.base?.blk), { value: b('blk') }),
+  col('tov', 52, (r) => num(r.base?.tov), { value: b('tov') }),
+  col('fgPct', 58, (r) => rate(r.base?.fgPct), { value: b('fgPct') }),
+  col('fg3m', 56, (r) => num(r.base?.fg3m), { value: b('fg3m') }),
+  col('fg3Pct', 58, (r) => rate(r.base?.fg3Pct), { value: b('fg3Pct') }),
+  col('ftPct', 58, (r) => rate(r.base?.ftPct), { value: b('ftPct') }),
+  col('plusMinus', 62, (r) => (
     <span className={signClass(r.base?.plusMinus)}>{signed(r.base?.plusMinus)}</span>
-  ), { value: b('plusMinus'), hint: '在场时球队的净胜分' }),
+  ), { value: b('plusMinus'), hint: true }),
 ];
 
 /** 高阶数据列 */
 export const ADV_COLUMNS = [
   ...LEAD,
-  col('impact', '影响力分', 76, (r) => (r.impact === null || r.impact === undefined ? dash : (
+  col('impact', 76, (r) => (r.impact === null || r.impact === undefined ? dash : (
     <b className={signClass(r.impact)}>{signed(r.impact, 1)}</b>
   )), {
-    hint: '本站自制的综合影响力指标：相对联盟平均，该球员每百回合给球队带来多少分。由 box score、球场追踪、拼抢、防守对位回归到个人 on/off 拟合而成，用留出赛季验证过',
+    hint: true,
   }),
-  col('pie', '事件贡献', 62, (r) => <b>{rate(r.adv?.pie, 1)}</b>, {
+  col('pie', 62, (r) => <b>{rate(r.adv?.pie, 1)}</b>, {
     value: a('pie'),
-    hint: 'Player Impact Estimate，球员对比赛所有可统计事件的贡献占比',
+    hint: true,
   }),
-  col('estNetRtg', '估计净效率', 78, (r) => val(r.est?.netRtg, (v) => (
+  col('estNetRtg', 78, (r) => val(r.est?.netRtg, (v) => (
     <span className={signClass(v)}>{signed(v, 1)}</span>
   )), {
     value: e('netRtg'),
-    hint: 'NBA 官方按球员贡献估计的每百回合净效率。与下面的「净效率」不同——那个几乎等于在场时球队的表现，受队友影响很大',
+    hint: true,
   }),
-  col('usgPct', '使用率', 60, (r) => rate(r.adv?.usgPct), {
-    value: a('usgPct'), hint: '在场时球队回合以该球员终结的比例',
+  col('usgPct', 60, (r) => rate(r.adv?.usgPct), {
+    value: a('usgPct'), hint: true,
   }),
-  col('tsPct', '真实命中', 66, (r) => rate(r.adv?.tsPct), {
-    value: a('tsPct'), hint: '计入三分与罚球权重的命中率',
+  col('tsPct', 66, (r) => rate(r.adv?.tsPct), {
+    value: a('tsPct'), hint: true,
   }),
-  col('efgPct', '有效命中', 66, (r) => rate(r.adv?.efgPct), {
-    value: a('efgPct'), hint: '三分记 1.5 倍的命中率',
+  col('efgPct', 66, (r) => rate(r.adv?.efgPct), {
+    value: a('efgPct'), hint: true,
   }),
-  col('offRtg', '进攻效率', 68, (r) => num(r.adv?.offRtg), {
-    value: a('offRtg'), hint: '在场时球队每百回合得分',
+  col('offRtg', 68, (r) => num(r.adv?.offRtg), {
+    value: a('offRtg'), hint: true,
   }),
-  col('defRtg', '防守效率', 68, (r) => num(r.adv?.defRtg), {
-    value: a('defRtg'), hint: '在场时球队每百回合失分',
+  col('defRtg', 68, (r) => num(r.adv?.defRtg), {
+    value: a('defRtg'), hint: true,
   }),
-  col('netRtg', '净效率', 66, (r) => (
+  col('netRtg', 66, (r) => (
     <span className={signClass(r.adv?.netRtg)}>{signed(r.adv?.netRtg)}</span>
-  ), { value: a('netRtg'), hint: '进攻效率减防守效率' }),
-  col('astPct', '助攻率', 62, (r) => rate(r.adv?.astPct), {
-    value: a('astPct'), hint: '在场时队友进球由其助攻的比例',
+  ), { value: a('netRtg'), hint: true }),
+  col('astPct', 62, (r) => rate(r.adv?.astPct), {
+    value: a('astPct'), hint: true,
   }),
-  col('rebPct', '篮板率', 62, (r) => rate(r.adv?.rebPct), { value: a('rebPct') }),
-  col('tovPct', '失误率', 62, (r) => rate(r.adv?.tovPct), { value: a('tovPct') }),
-  col('astTo', '助攻失误比', 74, (r) => num(r.adv?.astTo, 2), { value: a('astTo') }),
-  col('outCostPts', '缺阵影响', 74, (r) => {
+  col('rebPct', 62, (r) => rate(r.adv?.rebPct), { value: a('rebPct') }),
+  col('tovPct', 62, (r) => rate(r.adv?.tovPct), { value: a('tovPct') }),
+  col('astTo', 74, (r) => num(r.adv?.astTo, 2), { value: a('astTo') }),
+  col('outCostPts', 74, (r, t) => {
     if (r.outCostPts === null || r.outCostPts === undefined) return dash;
     if (r.outCostPts > -0.05) {
-      return <span className="dim" title="PIE 低于替补级，模型认为顶替者可以打平">≈0</span>;
+      return <span className="dim" title={t('playerTable.outCostZero')}>≈0</span>;
     }
     return <span className="neg">{num(r.outCostPts, 1)}</span>;
-  }, { hint: '该球员缺阵时，模型预计球队每场净胜分的变化（空出的时间由名单里排在后面的人顶上）' }),
+  }, { hint: true }),
 ];
 
 /**
@@ -147,109 +163,109 @@ export const ADV_COLUMNS = [
  */
 export const DEFENSE_COLUMNS = [
   ...LEAD,
-  rateCol('diffPct', '对位压制', 72, d('diffPct'), defendedFga, QUALIFY.defend, {
+  rateCol('diffPct', 72, d('diffPct'), defendedFga, QUALIFY.defend, {
     // 负数 = 把对手压到了低于其正常命中率，是好事，所以取反上色
     render: (v) => <b className={signClass(-v)}>{signed(v * 100, 1)}</b>,
-    hint: '被该球员防守时对手的命中率，减去对手的正常命中率。负数越大，压制越强' + '。样本不足 200 次对位出手的不参与排名',
+    hint: true,
   }),
-  rateCol('dFgPct', '对位命中', 68, d('dFgPct'), defendedFga, QUALIFY.defend, {
-    hint: '被该球员防守时对手的命中率',
+  rateCol('dFgPct', 68, d('dFgPct'), defendedFga, QUALIFY.defend, {
+    hint: true,
   }),
-  col('dFga', '对位出手', 68, (r) => val(r.defend?.dFga, (v) => num(v)), {
-    value: d('dFga'), hint: '每场被该球员防守的出手次数，衡量他要扛多少防守任务',
+  col('dFga', 68, (r) => val(r.defend?.dFga, (v) => num(v)), {
+    value: d('dFga'), hint: true,
   }),
-  col('contested', '干扰投篮', 72, (r) => val(r.hustle?.contested, (v) => num(v)), {
-    value: h('contested'), hint: '每场干扰的对手出手次数',
+  col('contested', 72, (r) => val(r.hustle?.contested, (v) => num(v)), {
+    value: h('contested'), hint: true,
   }),
-  col('deflections', '偏转球', 64, (r) => val(r.hustle?.deflections, (v) => num(v)), {
-    value: h('deflections'), hint: '每场把球拨离对手控制的次数，抢断的先行指标',
+  col('deflections', 64, (r) => val(r.hustle?.deflections, (v) => num(v)), {
+    value: h('deflections'), hint: true,
   }),
-  col('stl', '抢断', 52, (r) => num(r.base?.stl), { value: b('stl') }),
-  col('blk', '盖帽', 52, (r) => num(r.base?.blk), { value: b('blk') }),
-  col('charges', '造犯规', 64, (r) => val(r.hustle?.charges, (v) => num(v, 2)), {
-    value: h('charges'), hint: '每场造成的进攻犯规',
+  col('stl', 52, (r) => num(r.base?.stl), { value: b('stl') }),
+  col('blk', 52, (r) => num(r.base?.blk), { value: b('blk') }),
+  col('charges', 64, (r) => val(r.hustle?.charges, (v) => num(v, 2)), {
+    value: h('charges'), hint: true,
   }),
-  col('looseBalls', '争抢球', 64, (r) => val(r.hustle?.looseBalls, (v) => num(v)), {
-    value: h('looseBalls'), hint: '每场抢到的无主球',
+  col('looseBalls', 64, (r) => val(r.hustle?.looseBalls, (v) => num(v)), {
+    value: h('looseBalls'), hint: true,
   }),
-  col('boxOuts', '卡位', 56, (r) => val(r.hustle?.boxOuts, (v) => num(v)), {
-    value: h('boxOuts'), hint: '每场卡位次数',
+  col('boxOuts', 56, (r) => val(r.hustle?.boxOuts, (v) => num(v)), {
+    value: h('boxOuts'), hint: true,
   }),
-  col('drebChancePct', '防守篮板把握', 88, (r) => val(r.track?.drebChancePct, (v) => rate(v)), {
-    value: t('drebChancePct'), hint: '球落在他身边时，他把防守篮板拿下的比例',
+  col('drebChancePct', 88, (r) => val(r.track?.drebChancePct, (v) => rate(v)), {
+    value: t('drebChancePct'), hint: true,
   }),
-  col('defRtg', '防守效率', 68, (r) => num(r.adv?.defRtg), { value: a('defRtg') }),
+  col('defRtg', 68, (r) => num(r.adv?.defRtg), { value: a('defRtg') }),
 ];
 
 /** 得分方式：球从哪来、怎么进的 */
 export const SCORING_COLUMNS = [
   ...LEAD,
-  col('pts', '得分', 56, (r) => <b>{num(r.base?.pts)}</b>, { value: b('pts') }),
-  col('drives', '突破', 56, (r) => val(r.track?.drives, (v) => num(v)), {
-    value: t('drives'), hint: '每场从三分线外持球突入禁区附近的次数',
+  col('pts', 56, (r) => <b>{num(r.base?.pts)}</b>, { value: b('pts') }),
+  col('drives', 56, (r) => val(r.track?.drives, (v) => num(v)), {
+    value: t('drives'), hint: true,
   }),
-  col('drivePts', '突破得分', 72, (r) => val(r.track?.drivePts, (v) => num(v)), {
+  col('drivePts', 72, (r) => val(r.track?.drivePts, (v) => num(v)), {
     value: t('drivePts'),
   }),
-  rateCol('driveFgPct', '突破命中', 72, t('driveFgPct'),
+  rateCol('driveFgPct', 72, t('driveFgPct'),
     (r) => (r.track?.driveFga ?? 0) * (r.gp ?? 0), QUALIFY.drive, {}),
-  col('csPts', '接球投篮得分', 88, (r) => val(r.track?.csPts, (v) => num(v)), {
-    value: t('csPts'), hint: '接球后两秒内、无运球出手的得分',
+  col('csPts', 88, (r) => val(r.track?.csPts, (v) => num(v)), {
+    value: t('csPts'), hint: true,
   }),
-  rateCol('csEfg', '接球有效命中', 88, t('csEfg'),
+  rateCol('csEfg', 88, t('csEfg'),
     (r) => (r.track?.csFga ?? 0) * (r.gp ?? 0), QUALIFY.catchShoot, {}),
-  col('puPts', '干拔得分', 72, (r) => val(r.track?.puPts, (v) => num(v)), {
-    value: t('puPts'), hint: '运球后直接出手的得分，难度最高的一类',
+  col('puPts', 72, (r) => val(r.track?.puPts, (v) => num(v)), {
+    value: t('puPts'), hint: true,
   }),
-  rateCol('puEfg', '干拔有效命中', 88, t('puEfg'),
+  rateCol('puEfg', 88, t('puEfg'),
     (r) => (r.track?.puFga ?? 0) * (r.gp ?? 0), QUALIFY.pullUp, {}),
-  col('ptsPaint', '油漆区得分', 82, (r) => val(r.misc?.ptsPaint, (v) => num(v)), {
+  col('ptsPaint', 82, (r) => val(r.misc?.ptsPaint, (v) => num(v)), {
     value: m('ptsPaint'),
   }),
-  col('ptsFb', '快攻得分', 72, (r) => val(r.misc?.ptsFb, (v) => num(v)), { value: m('ptsFb') }),
-  col('pts2nd', '二次进攻', 72, (r) => val(r.misc?.pts2nd, (v) => num(v)), { value: m('pts2nd') }),
-  col('ptsOffTov', '失误转化', 72, (r) => val(r.misc?.ptsOffTov, (v) => num(v)), {
-    value: m('ptsOffTov'), hint: '对手失误后转化的得分',
+  col('ptsFb', 72, (r) => val(r.misc?.ptsFb, (v) => num(v)), { value: m('ptsFb') }),
+  col('pts2nd', 72, (r) => val(r.misc?.pts2nd, (v) => num(v)), { value: m('pts2nd') }),
+  col('ptsOffTov', 72, (r) => val(r.misc?.ptsOffTov, (v) => num(v)), {
+    value: m('ptsOffTov'), hint: true,
   }),
-  col('pfd', '造犯规', 64, (r) => val(r.misc?.pfd, (v) => num(v)), {
-    value: m('pfd'), hint: '每场造成对手犯规的次数',
+  col('pfd', 64, (r) => val(r.misc?.pfd, (v) => num(v)), {
+    value: m('pfd'), hint: true,
   }),
 ];
 
 /** 传球与控球：真正的组织能力，助攻数看不出来 */
 export const PLAYMAKING_COLUMNS = [
   ...LEAD,
-  col('ast', '助攻', 56, (r) => num(r.base?.ast), { value: b('ast') }),
-  col('potentialAst', '潜在助攻', 76, (r) => val(r.track?.potentialAst, (v) => <b>{num(v)}</b>), {
+  col('ast', 56, (r) => num(r.base?.ast), { value: b('ast') }),
+  col('potentialAst', 76, (r) => val(r.track?.potentialAst, (v) => <b>{num(v)}</b>), {
     value: t('potentialAst'),
-    hint: '传出后队友直接出手的传球数——不管有没有进。助攻数受队友命中率影响，这个不受',
+    hint: true,
   }),
-  col('astPtsCreated', '助攻创造得分', 92, (r) => val(r.track?.astPtsCreated, (v) => num(v)), {
-    value: t('astPtsCreated'), hint: '由他的助攻直接产生的球队得分',
+  col('astPtsCreated', 92, (r) => val(r.track?.astPtsCreated, (v) => num(v)), {
+    value: t('astPtsCreated'), hint: true,
   }),
-  col('secondaryAst', '二次助攻', 76, (r) => val(r.track?.secondaryAst, (v) => num(v)), {
-    value: t('secondaryAst'), hint: '助攻的前一传，俗称"潜在助攻的助攻"',
+  col('secondaryAst', 76, (r) => val(r.track?.secondaryAst, (v) => num(v)), {
+    value: t('secondaryAst'), hint: true,
   }),
-  col('touches', '触球', 56, (r) => val(r.track?.touches, (v) => num(v, 0)), {
-    value: t('touches'), hint: '每场碰到球的次数',
+  col('touches', 56, (r) => val(r.track?.touches, (v) => num(v, 0)), {
+    value: t('touches'), hint: true,
   }),
-  col('timeOfPoss', '控球时间', 76, (r) => val(r.track?.timeOfPoss, (v) => num(v)), {
-    value: t('timeOfPoss'), hint: '每场持球的分钟数',
+  col('timeOfPoss', 76, (r) => val(r.track?.timeOfPoss, (v) => num(v)), {
+    value: t('timeOfPoss'), hint: true,
   }),
-  col('secPerTouch', '每次触球秒数', 92, (r) => val(r.track?.secPerTouch, (v) => num(v, 2)), {
-    value: t('secPerTouch'), hint: '数值高说明球到他手里会停一停，是持球型打法',
+  col('secPerTouch', 92, (r) => val(r.track?.secPerTouch, (v) => num(v, 2)), {
+    value: t('secPerTouch'), hint: true,
   }),
-  col('ptsPerTouch', '每次触球得分', 92, (r) => val(r.track?.ptsPerTouch, (v) => num(v, 3)), {
+  col('ptsPerTouch', 92, (r) => val(r.track?.ptsPerTouch, (v) => num(v, 3)), {
     value: t('ptsPerTouch'),
   }),
-  col('passes', '传球', 56, (r) => val(r.track?.passes, (v) => num(v, 0)), { value: t('passes') }),
-  col('tov', '失误', 52, (r) => num(r.base?.tov), { value: b('tov') }),
-  col('astTo', '助攻失误比', 74, (r) => num(r.adv?.astTo, 2), { value: a('astTo') }),
-  col('screenAstPts', '掩护创造得分', 92, (r) => val(r.hustle?.screenAstPts, (v) => num(v)), {
-    value: h('screenAstPts'), hint: '由他的掩护直接产生的队友得分，内线的隐形贡献',
+  col('passes', 56, (r) => val(r.track?.passes, (v) => num(v, 0)), { value: t('passes') }),
+  col('tov', 52, (r) => num(r.base?.tov), { value: b('tov') }),
+  col('astTo', 74, (r) => num(r.adv?.astTo, 2), { value: a('astTo') }),
+  col('screenAstPts', 92, (r) => val(r.hustle?.screenAstPts, (v) => num(v)), {
+    value: h('screenAstPts'), hint: true,
   }),
-  col('distMiles', '跑动英里', 72, (r) => val(r.track?.distMiles, (v) => num(v, 1)), {
-    value: t('distMiles'), hint: '每场跑动距离（英里）',
+  col('distMiles', 72, (r) => val(r.track?.distMiles, (v) => num(v, 1)), {
+    value: t('distMiles'), hint: true,
   }),
 ];
 
@@ -266,15 +282,10 @@ const DEFAULT_SORT = {
   base: 'pts', adv: 'impact', defense: 'diffPct', scoring: 'pts', playmaking: 'potentialAst',
 };
 
-export const MODE_OPTIONS = [
-  { value: 'base', label: '基础' },
-  { value: 'adv', label: '高阶' },
-  { value: 'defense', label: '防守拼抢' },
-  { value: 'scoring', label: '得分方式' },
-  { value: 'playmaking', label: '传球控球' },
-];
+export const MODE_KEYS = ['base', 'adv', 'defense', 'scoring', 'playmaking'];
 
-export const MODE_LABEL = Object.fromEntries(MODE_OPTIONS.map((o) => [o.value, o.label]));
+/** 视图切换选项（已翻译）：Segmented 用 */
+export const modeOptions = (t) => MODE_KEYS.map((value) => ({ value, label: t(`playerTable.mode.${value}`) }));
 
 /**
  * 球员数据表。mode 见 MODE_OPTIONS
@@ -283,7 +294,8 @@ export const MODE_LABEL = Object.fromEntries(MODE_OPTIONS.map((o) => [o.value, o
 export default function PlayerTable({
   rows, mode = 'base', nameColumn, extraColumns = [], onRowClick, maxHeight,
 }) {
-  const stats = MODES[mode] ?? BASE_COLUMNS;
+  const { t } = useI18n();
+  const stats = useMemo(() => buildColumns(MODES[mode] ?? BASE_COLUMNS, t), [mode, t]);
   const columns = [nameColumn, ...extraColumns, ...stats].filter(Boolean);
   return (
     <DataTable
