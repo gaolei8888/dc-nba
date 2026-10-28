@@ -15,6 +15,7 @@ import { liveRosterRankings } from './liveRosterRankings.mjs';
 import { buildBoard } from './predictionBoard.mjs';
 import { ledgerRows, ledgerReport } from './ledger.mjs';
 import { shadowAll, shadowSummary } from './injuryShadow.mjs';
+import { rrAll } from './rosterResultsShadow.mjs';
 import {
   scorePick, slateDays, submitLivePicks, livePickRows, settleLive, liveBoard, isLiveGame, isLocked,
 } from './livePlay.mjs';
@@ -407,13 +408,17 @@ app.get('/api/paper', wrap((req, res) => {
   });
 }));
 
-/** 伤病报告影子运行：三套预测的前向成绩（scripts/shadow.mjs 写，同账本一个库，只读）。不影响页面显示的预测 */
+/** 影子运行：伤病报告三套 + 阵容+战绩榜两套预测的前向成绩（scripts/shadow.mjs 写，同账本一个库，只读）。不影响页面显示的预测 */
 let shadowCache = { key: '', data: null };
 app.get('/api/shadow', wrap((req, res) => {
   if (!ledgerDb) return res.json({ available: false });
   // bootstrap 有点重：行数与最近结算时间不变就用缓存（一天只变两三次）
-  const k = JSON.stringify(ledgerDb.prepare('SELECT COUNT(*) n, MAX(settled_at) s FROM shadow_predictions').get());
-  if (shadowCache.key !== k) shadowCache = { key: k, data: { available: true, ...shadowSummary(shadowAll(ledgerDb)) } };
+  // 阵容+战绩榜的 rr22 / rr0630 在另一张表（server/rosterResultsShadow.mjs），拼在一起汇总
+  const k = JSON.stringify([ledgerDb.prepare('SELECT COUNT(*) n, MAX(settled_at) s FROM shadow_predictions').get(),
+    ledgerDb.prepare('SELECT COUNT(*) n, MAX(settled_at) s FROM shadow_rr_predictions').get()]);
+  if (shadowCache.key !== k) {
+    shadowCache = { key: k, data: { available: true, ...shadowSummary([...shadowAll(ledgerDb), ...rrAll(ledgerDb)]) } };
+  }
   res.json(shadowCache.data);
 }));
 
