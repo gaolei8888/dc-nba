@@ -293,28 +293,34 @@ export function counterfactual(dataset, seasons, teamId, deltaPts, opts = {}) {
 
 // ---------------------------------------------------------------- 误差分析
 
+/**
+ * 误差分析的切片定义：[key, 中文 label, 条件]。
+ * key 稳定（前端按 srv.lab.slice.<key> 翻译）；中文 label 留在响应里给脚本与日志。
+ */
+export const SLICE_DEFS = [
+  ['b2bHome', '背靠背 · 主队', (r) => r.b2bHome && !r.b2bAway],
+  ['b2bAway', '背靠背 · 客队', (r) => r.b2bAway && !r.b2bHome],
+  ['b2bBoth', '双方都背靠背', (r) => r.b2bHome && r.b2bAway],
+  ['rested', '双方都休息充分', (r) => (r.restHome ?? 9) >= 2 && (r.restAway ?? 9) >= 2],
+  ['close', '实力接近 (Elo 差<50)', (r) => Math.abs(r.eloDiff) < 50],
+  ['mismatch', '实力悬殊 (Elo 差>200)', (r) => Math.abs(r.eloDiff) > 200],
+  ['sure', '模型很有把握 (>75%)', (r) => Math.max(r.p, 1 - r.p) > 0.75],
+  ['unsure', '模型没把握 (<60%)', (r) => Math.max(r.p, 1 - r.p) < 0.6],
+  ['early', '赛季初 (<10场)', (r) => r.teamGp < 10],
+  ['late', '赛季末 (≥60场)', (r) => r.teamGp >= 60],
+  ['neutral', '中立场', (r) => r.neutral],
+];
+
 /** 把记录按若干条件切片，逐片算指标——用来找模型在哪类比赛上系统性犯错 */
 export function slices(rows) {
-  const defs = [
-    ['背靠背 · 主队', (r) => r.b2bHome && !r.b2bAway],
-    ['背靠背 · 客队', (r) => r.b2bAway && !r.b2bHome],
-    ['双方都背靠背', (r) => r.b2bHome && r.b2bAway],
-    ['双方都休息充分', (r) => (r.restHome ?? 9) >= 2 && (r.restAway ?? 9) >= 2],
-    ['实力接近 (Elo 差<50)', (r) => Math.abs(r.eloDiff) < 50],
-    ['实力悬殊 (Elo 差>200)', (r) => Math.abs(r.eloDiff) > 200],
-    ['模型很有把握 (>75%)', (r) => Math.max(r.p, 1 - r.p) > 0.75],
-    ['模型没把握 (<60%)', (r) => Math.max(r.p, 1 - r.p) < 0.6],
-    ['赛季初 (<10场)', (r) => r.teamGp < 10],
-    ['赛季末 (≥60场)', (r) => r.teamGp >= 60],
-    ['中立场', (r) => r.neutral],
-  ];
   const all = score(rows);
-  return defs
-    .map(([label, f]) => {
+  return SLICE_DEFS
+    .map(([key, label, f]) => {
       const sub = rows.filter(f);
       if (!sub.length) return null;
       const s = score(sub);
       return {
+        key,
         label,
         ...s,
         // 相对整体的偏离：正数表示这一片比平均更准
@@ -408,12 +414,22 @@ export function mcnemar(rows) {
   };
 }
 
-const EDGE_BUCKETS = [
-  ['0 ~ 1 分', 0, 1],
-  ['1 ~ 2 分', 1, 2],
-  ['2 ~ 3 分', 2, 3],
-  ['3 ~ 5 分', 3, 5],
-  ['5 分以上', 5, Infinity],
+/** 让分分歧档位：[key（srv.lab.edge.<key>）, 中文 label, 下限, 上限) */
+export const EDGE_BUCKETS = [
+  ['e0to1', '0 ~ 1 分', 0, 1],
+  ['e1to2', '1 ~ 2 分', 1, 2],
+  ['e2to3', '2 ~ 3 分', 2, 3],
+  ['e3to5', '3 ~ 5 分', 3, 5],
+  ['e5plus', '5 分以上', 5, Infinity],
+];
+
+/** 「模型在哪类比赛上被盘口拉开差距」的切片：[key（srv.lab.slice.<key>）, 中文 label, 条件] */
+export const GAP_SLICE_DEFS = [
+  ['b2bEither', '背靠背相关', (r) => r.b2bHome || r.b2bAway],
+  ['close', '实力接近 (Elo 差<50)', (r) => Math.abs(r.eloDiff) < 50],
+  ['mismatch', '实力悬殊 (Elo 差>200)', (r) => Math.abs(r.eloDiff) > 200],
+  ['early', '赛季初 (<10场)', (r) => r.teamGp < 10],
+  ['late', '赛季末 (≥60场)', (r) => r.teamGp >= 60],
 ];
 
 /**
@@ -480,12 +496,12 @@ export function market(rows) {
     };
   };
 
-  const byEdge = EDGE_BUCKETS.map(([label, lo, hi]) => {
+  const byEdge = EDGE_BUCKETS.map(([key, label, lo, hi]) => {
     const sub = withMkt.filter((r) => {
       const e = Math.abs(r.pred - r.mktPred);
       return e >= lo && e < hi;
     });
-    return sub.length ? { label, ...atsOf(sub) } : null;
+    return sub.length ? { key, label, ...atsOf(sub) } : null;
   }).filter(Boolean);
 
   const seasons = [...new Set(withMkt.map((r) => r.season))].sort();
@@ -507,18 +523,13 @@ export function market(rows) {
   });
 
   // ---- 模型在哪类比赛上被盘口拉开差距
-  const gapSlices = [
-    ['背靠背相关', (r) => r.b2bHome || r.b2bAway],
-    ['实力接近 (Elo 差<50)', (r) => Math.abs(r.eloDiff) < 50],
-    ['实力悬殊 (Elo 差>200)', (r) => Math.abs(r.eloDiff) > 200],
-    ['赛季初 (<10场)', (r) => r.teamGp < 10],
-    ['赛季末 (≥60场)', (r) => r.teamGp >= 60],
-  ].map(([label, f]) => {
+  const gapSlices = GAP_SLICE_DEFS.map(([key, label, f]) => {
     const sub = withMkt.filter(f);
     if (sub.length < 30) return null;
     const mk = sub.map((r) => ({ ...r, p: r.mktProb, pred: r.mktPred }));
     const m = score(sub); const k = score(mk);
     return {
+      key,
       label,
       n: sub.length,
       modelAccuracy: m.accuracy,

@@ -10,6 +10,7 @@
 import { devigHomeProb } from './oddsClient.mjs';
 import { bootstrapCI } from './fusionLab.mjs';
 import { gameBooks } from './books.mjs';
+import { msg } from './messages.mjs';
 
 export const PRIMARY = 0.03;
 export const THRESHOLDS = [0, 0.03, 0.06];
@@ -195,3 +196,23 @@ export function verdictOf(s, { seasons }) {
   if (s.ci.hi < 0) return `${head}稳定亏损，无证据表明模型能赢盘口，不建议据此下注。`;
   return `${head}无证据表明模型能赢盘口，不建议据此下注。`;
 }
+
+/**
+ * verdictOf 的消息码版本：判断分支与 verdictOf 完全相同，数字原样放 params，由前端按语言渲染。
+ * verdictOf 保留给脚本（scripts/paper-backtest.mjs 写进 data/paper-backtest.json 的中文 verdict）。
+ */
+export function verdictMsg(s, { seasons }) {
+  if (!s.bets) return msg('srv.paper.verdict.none');
+  const params = { seasons, bets: s.bets, roi: s.roi, lo: s.ci.lo, hi: s.ci.hi };
+  if (s.ci.lo > 0) return msg('srv.paper.verdict.positive', params);
+  if (s.ci.hi < 0) return msg('srv.paper.verdict.negative', params);
+  return msg('srv.paper.verdict.noEvidence', params);
+}
+
+/** 回测头条（data/paper-backtest.json 的 headline）→ 带「样本外」前缀的消息；与脚本里的中文 verdict 逐字对应 */
+export function paperHeadlineMsg(headline) {
+  return msg('srv.paper.oos', { after: TUNING_SEASON, verdict: verdictMsg(headline, { seasons: headline.seasons.length }) });
+}
+
+/** 预测总表总结的最后一句：「模拟投注（DraftKings、edge ≥ 3% 平注）」+ 头条结论（params.verdict 是嵌套消息） */
+export const PAPER_LINE_CODE = 'srv.board.paperLine';

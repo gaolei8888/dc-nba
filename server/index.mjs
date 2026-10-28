@@ -10,10 +10,11 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readJson, DATA_DIR } from './nbaClient.mjs';
 import * as db from './db.mjs';
-import { sendError, publicCode } from './messages.mjs';
+import { sendError, publicCode, msg } from './messages.mjs';
 import * as lab from './lab.mjs';
 import { liveRosterRankings } from './liveRosterRankings.mjs';
 import { buildBoard } from './predictionBoard.mjs';
+import { paperHeadlineMsg, PAPER_LINE_CODE } from './paperBetting.mjs';
 import { ledgerRows, ledgerReport } from './ledger.mjs';
 import { shadowAll, shadowSummary } from './injuryShadow.mjs';
 import { rrAll } from './rosterResultsShadow.mjs';
@@ -49,6 +50,8 @@ function loadStore() {
   const impactModel = readJson('impact-model.json');
   // 模拟投注历史回测（scripts/paper-backtest.mjs 离线生成）；没有就只显示前向账本
   const paper = readJson('paper-backtest.json');
+  // 头条结论的消息码版本：由 JSON 里的头条数字现算（中文 verdict 原样保留），不需要重新生成 JSON
+  if (paper?.headline && Array.isArray(paper.headline.seasons)) paper.headline.verdictMsg = paperHeadlineMsg(paper.headline);
   if (!teams || !players || !schedule || !meta) {
     throw new Error('数据缺失，请先运行  npm run ingest');
   }
@@ -399,10 +402,14 @@ app.get('/api/predictions/summary', wrap(async (req, res) => {
       seasonYear: store.schedule.seasonYear,
       oddsFetchedAt: store.odds?.fetchedAt ?? null,
       ...board,
-      // 总结里也要直说投注回测的结论，不能只藏在「模拟投注」那一栏
+      // 总结里也要直说投注回测的结论，不能只藏在「模拟投注」那一栏。
+      // summary 是中文原句（脚本 / 日志），summaryMsg 是同内容的消息码，前端按语言渲染
       summary: store.paper?.headline?.verdict
         ? [...board.summary, `模拟投注（DraftKings、edge ≥ 3% 平注）${store.paper.headline.verdict}`]
         : board.summary,
+      summaryMsg: store.paper?.headline?.verdictMsg
+        ? [...board.summaryMsg, msg(PAPER_LINE_CODE, { verdict: store.paper.headline.verdictMsg })]
+        : board.summaryMsg,
     };
   });
 }));

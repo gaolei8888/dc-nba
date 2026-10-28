@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  profitOf, impliedOf, decide, settle, bestPrice, placeBets, summarize, maxDrawdown, clvOf, verdictOf,
+  profitOf, impliedOf, decide, settle, bestPrice, placeBets, summarize, maxDrawdown, clvOf, verdictOf, verdictMsg, paperHeadlineMsg, TUNING_SEASON,
   PRIMARY, THRESHOLDS,
 } from '../server/paperBetting.mjs';
 import { devigHomeProb } from '../server/oddsClient.mjs';
@@ -162,4 +162,24 @@ test('placeBets 挑最优价 pool：只在给定博彩商之间挑（非美国�
   const [b] = placeBets(games, { book: 'best', threshold: 0.03, pool: ['draftkings'] });
   assert.equal(b.book, 'draftkings');
   assert.equal(b.ml, -150);
+});
+
+test('verdictMsg：区间整体 > 0 才 positive，含 0 为 noEvidence，整体 < 0 为 negative', () => {
+  assert.equal(verdictMsg({ bets: 500, roi: 0.06, ci: { lo: 0.01, hi: 0.11 } }, { seasons: 2 }).code, 'srv.paper.verdict.positive');
+  assert.equal(verdictMsg({ bets: 500, roi: -0.08, ci: { lo: -0.13, hi: -0.02 } }, { seasons: 2 }).code, 'srv.paper.verdict.negative');
+  assert.equal(verdictMsg({ bets: 500, roi: -0.01, ci: { lo: -0.05, hi: 0.03 } }, { seasons: 2 }).code, 'srv.paper.verdict.noEvidence');
+  assert.equal(verdictMsg({ bets: 0, roi: null, ci: { lo: null, hi: null } }, { seasons: 0 }).code, 'srv.paper.verdict.none');
+  // 边界：下限恰好 0 不算正收益证据
+  assert.equal(verdictMsg({ bets: 10, roi: 0, ci: { lo: 0, hi: 0.2 } }, { seasons: 1 }).code, 'srv.paper.verdict.noEvidence');
+  assert.deepEqual(verdictMsg({ bets: 812, roi: -0.031, ci: { lo: -0.09, hi: 0.03 } }, { seasons: 3 }).params,
+    { seasons: 3, bets: 812, roi: -0.031, lo: -0.09, hi: 0.03 });
+});
+
+test('paperHeadlineMsg：样本外前缀写 TUNING_SEASON', () => {
+  const m = paperHeadlineMsg({ seasons: ['2023-24', '2025-26'], bets: 1596, roi: -0.1182, ci: { lo: -0.1926, hi: -0.0457 } });
+  assert.equal(m.code, 'srv.paper.oos');
+  assert.equal(m.params.after, '2022-23');
+  assert.equal(m.params.after, TUNING_SEASON);
+  assert.equal(m.params.verdict.code, 'srv.paper.verdict.negative');
+  assert.deepEqual(m.params.verdict.params, { seasons: 2, bets: 1596, roi: -0.1182, lo: -0.1926, hi: -0.0457 });
 });

@@ -1,6 +1,8 @@
 export default {
   meta: { name: 'English', short: 'EN', intl: 'en-US', htmlLang: 'en', defaultTz: 'America/New_York', match: ['en'] },
   common: {
+    // 多条服务端消息拼成一段时的分隔
+    sentenceJoin: ' ',
     loading: 'Loading…', noData: 'No data', clear: 'Clear', noMatch: 'Nothing matches',
     injury: { out: 'Out', doubtful: 'Doubtful', dayToDay: 'Day-to-day', unknown: 'Injury' },
     returnDate: 'Expected back {date}',
@@ -43,6 +45,61 @@ export default {
       ledgerOff: 'The paper-betting ledger is turned off on this deployment.',
       ledgerUnavailable: 'The ledger database could not be opened, so there is no live ledger data yet.',
       liveOff: 'The leaderboard is off on this deployment and no user data is stored on the server. In-season live play needs server-side locking, so it is unavailable.',
+    },
+    board: {
+      noneFinished: 'No regular-season games have finished yet this season. Below are pregame predictions only.',
+      overall: 'Regular-season games finished this season: {n}. Our model called {hits} right and {misses} wrong before tip-off, for an accuracy of {acc, pct1} (95% CI {lo, pct0}–{hi, pct0}), a Brier score of {brier, fix3} and a log loss of {logLoss, fix3} (saying 50% for every game gives 0.250 and 0.693; lower is better).',
+      smallSample: 'The sample is only {n} games and the 95% CI spans {width} percentage points: this accuracy does not yet show whether the model is strong or weak. It takes several hundred games to tell.',
+      baselines: 'On the same games, always picking the home team gets {homeHits} right ({homeAcc, pct0}), and picking the team with the higher pregame Elo rating gets {eloHits} right ({eloAcc, pct0}). The predicted margin is off by {marginMae, fix1} points on average, and the predicted total by {totalMae, fix1} points.',
+      baselinesNoElo: 'On the same games, always picking the home team gets {homeHits} right ({homeAcc, pct0}). The predicted margin is off by {marginMae, fix1} points on average, and the predicted total by {totalMae, fix1} points.',
+      highConf: 'High-confidence games (≥70%): {n}, of which we called {hits} right ({acc, pct0}).',
+      highConfNone: 'No game has had pregame confidence of 70% or more yet.',
+      upsetHome: 'Biggest upset: on {date, dateMD}, {winnerId, team} beat {loserId, team} at home, and we had given {winnerId, team} only a {p, pct0} chance before the game.',
+      upsetAway: 'Biggest upset: on {date, dateMD}, {winnerId, team} beat {loserId, team} on the road, and we had given {winnerId, team} only a {p, pct0} chance before the game.',
+      market: 'For reference only: {n} of these games have a betting-line snapshot. On those games we called {modelHits} right, and the market favorite won {marketHits}.',
+      marketFew: 'Finished games with a betting-line snapshot: only {n}. That is too few, so there is no comparison with the market yet.',
+      marketNone: 'No finished game has a betting-line record yet (the current snapshots only cover games not yet played), so there is no comparison with the market yet.',
+      nextWeek: 'Regular-season games left in the next 7 days: {count}. The most confident pick is {awayId, team} at {homeId, team} ({date, dateMD}), favoring {favId, team} ({p, pct0}).',
+      noUpcoming: 'No regular-season games are left to play.',
+      paperLine: 'Paper betting (DraftKings, flat stakes at edge ≥ 3%): {verdict, msg}',
+      splitGroup: { fav: 'Model pick', margin: 'Actual margin', rest: 'Rest' },
+      split: {
+        home: 'Picked the home team', away: 'Picked the road team',
+        le5: '≤5 pts', m6to14: '6–14 pts', ge15: '≥15 pts',
+        b2bAny: 'At least one team on a back-to-back', b2bNone: 'Neither team on a back-to-back', restUnknown: 'Rest unknown (incl. season openers)',
+      },
+      baseline: { model: 'Our model', home: 'Always pick the home team', elo: 'Higher pregame Elo rating (ignoring home court)' },
+    },
+    paper: {
+      oos: 'Out-of-sample (after {after}): {verdict, msg}',
+      verdict: {
+        none: 'No bets to backtest, so there is nothing to evaluate.',
+        positive: 'Seasons backtested: {seasons}; bets: {bets}; ROI {roi, roi} (95% CI [{lo, pctSigned1}, {hi, pctSigned1}]). Evidence of a positive return, but this is a historical backtest: go by this season\'s live ledger before betting.',
+        negative: 'Seasons backtested: {seasons}; bets: {bets}; ROI {roi, roi} (95% CI [{lo, pctSigned1}, {hi, pctSigned1}]). Consistent losses. No evidence the model beats the market. We do not recommend betting on it.',
+        noEvidence: 'Seasons backtested: {seasons}; bets: {bets}; ROI {roi, roi} (95% CI [{lo, pctSigned1}, {hi, pctSigned1}]). No evidence the model beats the market. We do not recommend betting on it.',
+      },
+    },
+    lab: {
+      slice: {
+        b2bHome: 'Back-to-back · home team', b2bAway: 'Back-to-back · road team', b2bBoth: 'Both teams on a back-to-back', rested: 'Both teams well rested',
+        close: 'Close matchup (Elo rating gap <50)', mismatch: 'Mismatch (Elo rating gap >200)',
+        sure: 'Model confident (>75%)', unsure: 'Model unsure (<60%)',
+        early: 'Early season (<10 games)', late: 'Late season (≥60 games)', neutral: 'Neutral site', b2bEither: 'Any back-to-back',
+      },
+      edge: { e0to1: '0–1 pts', e1to2: '1–2 pts', e2to3: '2–3 pts', e3to5: '3–5 pts', e5plus: '5+ pts' },
+    },
+    predict: {
+      factor: { elo: 'Elo rating gap', net: 'Net Rating gap', turnover: 'Roster turnover', hca: 'Home-court advantage', rest: 'Rest / back-to-back', roster: 'Missing players' },
+    },
+    roster: {
+      source: {
+        'estimated-shrunk-spm': 'Estimate (not backtested): {n} games of box-score SPM, shrunk with K={k} games toward {what, msg} {target, fix2}',
+        'estimated-rookie-prior': 'Estimate (not backtested): {n} games of box-score SPM, shrunk with K={k} games toward {what, msg} {target, fix2}',
+        'estimated-population-prior': 'Estimate (not backtested): {n} games of box-score SPM, shrunk with K={k} games toward {what, msg} {target, fix2}',
+        'replacement-prior': 'The project\'s existing replacement-level IMP prior; not a measured player rating',
+      },
+      target: { rookie: 'the minutes-weighted SPM mean of last season\'s rookies', population: 'the mean of players with an IMP last season', fringe: 'the SPM mean of last season\'s 10–15 minute players' },
+      insufficient: 'Not enough roster data to estimate this team',
     },
   },
   teams: {

@@ -272,6 +272,9 @@ export function teamStrength(model, teamId, outIds = [], rosterIds = null) {
   };
 }
 
+/** 因素分解的稳定 key（前端按 srv.predict.factor.<key> 翻译；中文 label 字段仍保留） */
+export const FACTOR_KEYS = ['elo', 'net', 'turnover', 'hca', 'rest', 'roster'];
+
 /**
  * 单场比赛预测。
  * @param {object} opts { homeId, awayId, gameId?, restHome?, restAway?, out?, neutral? }

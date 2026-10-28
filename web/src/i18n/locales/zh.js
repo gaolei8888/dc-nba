@@ -1,6 +1,8 @@
 export default {
   meta: { name: '中文', short: '中文', intl: 'zh-CN', htmlLang: 'zh-CN', defaultTz: 'Asia/Shanghai', match: ['zh'] },
   common: {
+    // 多条服务端消息拼成一段时的分隔
+    sentenceJoin: '',
     loading: '加载中…', noData: '暂无数据', clear: '清除', noMatch: '没有符合条件的数据',
     injury: { out: '缺阵', doubtful: '存疑', dayToDay: '每日观察', unknown: '伤病' },
     returnDate: '预计复出 {date}',
@@ -43,6 +45,61 @@ export default {
       ledgerOff: '本部署已关闭模拟投注账本',
       ledgerUnavailable: '账本数据库打不开，暂无前向账本数据',
       liveOff: '本部署关闭了排行榜，不在服务端保存任何用户数据，本季实战需要服务端锁定，暂不可用',
+    },
+    board: {
+      noneFinished: '本季常规赛还没有已结束的比赛，下面只有赛前预测。',
+      overall: '本季常规赛已结束 {n} 场，我们的模型赛前猜对 {hits} 场、猜错 {misses} 场，准确率 {acc, pct1}（95% 置信区间 {lo, pct0}–{hi, pct0}），Brier {brier, fix3}、对数损失 {logLoss, fix3}（每场都报 50% 分别是 0.250 和 0.693，越低越好）。',
+      smallSample: '样本只有 {n} 场，95% 区间横跨 {width} 个百分点：这个准确率还说明不了模型强还是弱，要几百场才看得清。',
+      baselines: '同一批比赛上，全押主队能猜对 {homeHits} 场（{homeAcc, pct0}），只看赛前 Elo 高低能猜对 {eloHits} 场（{eloAcc, pct0}）；预测分差平均差 {marginMae, fix1} 分，总分平均差 {totalMae, fix1} 分。',
+      baselinesNoElo: '同一批比赛上，全押主队能猜对 {homeHits} 场（{homeAcc, pct0}）；预测分差平均差 {marginMae, fix1} 分，总分平均差 {totalMae, fix1} 分。',
+      highConf: '高信心（≥70%）的比赛 {n} 场，猜对 {hits} 场（{acc, pct0}）。',
+      highConfNone: '还没有赛前信心达到 70% 的比赛。',
+      upsetHome: '最大冷门：{date, dateMD} {winnerId, team} 主场击败 {loserId, team}，赛前我们只给 {winnerId, team} {p, pct0} 的胜率。',
+      upsetAway: '最大冷门：{date, dateMD} {winnerId, team} 客场击败 {loserId, team}，赛前我们只给 {winnerId, team} {p, pct0} 的胜率。',
+      market: '仅作参考：其中 {n} 场有盘口快照，这批比赛我们猜对 {modelHits} 场，盘口热门胜出 {marketHits} 场。',
+      marketFew: '已结束的比赛里只有 {n} 场有盘口快照，太少，暂不和市场对照。',
+      marketNone: '已结束的比赛里还没有盘口记录（目前的盘口快照只覆盖未开打的比赛），暂时无法和市场对照。',
+      nextWeek: '接下来 7 天还有 {count} 场常规赛，最有把握的一场是 {awayId, team} 客场对 {homeId, team}（{date, dateMD}），看好 {favId, team}（{p, pct0}）。',
+      noUpcoming: '常规赛已经没有未开打的比赛。',
+      paperLine: '模拟投注（DraftKings、edge ≥ 3% 平注）{verdict, msg}',
+      splitGroup: { fav: '看好哪边', margin: '实际分差', rest: '休息情况' },
+      split: {
+        home: '看好主队', away: '看好客队',
+        le5: '≤5 分', m6to14: '6–14 分', ge15: '≥15 分',
+        b2bAny: '有一方背靠背', b2bNone: '双方都不是背靠背', restUnknown: '休息信息缺失（含揭幕战）',
+      },
+      baseline: { model: '我们的模型', home: '全押主队', elo: '赛前 Elo 高的一方（不计主场）' },
+    },
+    paper: {
+      oos: '样本外（{after} 之后）{verdict, msg}',
+      verdict: {
+        none: '没有可回测的下注，无法评估。',
+        positive: '历史 {seasons} 季、{bets} 注、ROI {roi, roi}（95% 区间 [{lo, pctSigned1}, {hi, pctSigned1}]）：有正收益证据，但这是历史回测，下注前应以本季前向账本为准。',
+        negative: '历史 {seasons} 季、{bets} 注、ROI {roi, roi}（95% 区间 [{lo, pctSigned1}, {hi, pctSigned1}]）：稳定亏损，无证据表明模型能赢盘口，不建议据此下注。',
+        noEvidence: '历史 {seasons} 季、{bets} 注、ROI {roi, roi}（95% 区间 [{lo, pctSigned1}, {hi, pctSigned1}]）：无证据表明模型能赢盘口，不建议据此下注。',
+      },
+    },
+    lab: {
+      slice: {
+        b2bHome: '背靠背 · 主队', b2bAway: '背靠背 · 客队', b2bBoth: '双方都背靠背', rested: '双方都休息充分',
+        close: '实力接近 (Elo 差<50)', mismatch: '实力悬殊 (Elo 差>200)',
+        sure: '模型很有把握 (>75%)', unsure: '模型没把握 (<60%)',
+        early: '赛季初 (<10场)', late: '赛季末 (≥60场)', neutral: '中立场', b2bEither: '背靠背相关',
+      },
+      edge: { e0to1: '0 ~ 1 分', e1to2: '1 ~ 2 分', e2to3: '2 ~ 3 分', e3to5: '3 ~ 5 分', e5plus: '5 分以上' },
+    },
+    predict: {
+      factor: { elo: 'Elo 实力差', net: '净效率差', turnover: '阵容更迭', hca: '主场优势', rest: '休息/背靠背', roster: '阵容缺阵' },
+    },
+    roster: {
+      source: {
+        'estimated-shrunk-spm': '估计值（未验证）：{n} 场统计栏 SPM 按 K={k} 场收缩到{what, msg} {target, fix2}',
+        'estimated-rookie-prior': '估计值（未验证）：{n} 场统计栏 SPM 按 K={k} 场收缩到{what, msg} {target, fix2}',
+        'estimated-population-prior': '估计值（未验证）：{n} 场统计栏 SPM 按 K={k} 场收缩到{what, msg} {target, fix2}',
+        'replacement-prior': '项目既有替补级 IMP 先验；非实测球员评级',
+      },
+      target: { rookie: '上季新秀 SPM 分钟加权均值', population: '上季有 IMP 球员均值', fringe: '上季 10–15 分钟段 SPM 均值' },
+      insufficient: '该队阵容数据不足，无法估计',
     },
   },
   teams: {

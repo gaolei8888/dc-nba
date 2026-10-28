@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { createT, SOURCE_LANG } from './core.js';
+import { SOURCE_LANG } from './core.js';
+import { createMsgT } from './msg.js';
 import { createFormat, TIMEZONES } from './fmt.js';
 import { locales } from './registry.js';
 import { readPrefs, writePrefs, resolvePrefs } from '../lib/prefs.js';
@@ -42,7 +43,8 @@ export function I18nProvider({ children }) {
 
   const value = useMemo(() => {
     const fmt = createFormat({ locale: locales[lang], fallback: locales[SOURCE_LANG], tz });
-    const t = createT({
+    // t 额外带 msg 格式化器：服务端嵌套消息（{verdict, msg}）用 renderMsg(m, t) 渲染
+    const t = createMsgT({
       dict: locales[lang], fallback: locales[SOURCE_LANG], lang, formatters: fmt.formatters, warn,
     });
     return {

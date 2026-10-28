@@ -81,19 +81,23 @@ function errors(rows) {
   };
 }
 
-/** 切片：每组都给样本量，几场的切片别当结论 */
-const SPLITS = [
-  ['看好哪边', [['看好主队', (g) => g.p >= 0.5], ['看好客队', (g) => g.p < 0.5]]],
-  ['实际分差', [
-    ['≤5 分', (g) => Math.abs(g.homeScore - g.awayScore) <= 5],
-    ['6–14 分', (g) => { const m = Math.abs(g.homeScore - g.awayScore); return m > 5 && m < 15; }],
-    ['≥15 分', (g) => Math.abs(g.homeScore - g.awayScore) >= 15],
-  ]],
-  ['休息情况', [
-    ['有一方背靠背', (g) => g.prediction.restHome === 0 || g.prediction.restAway === 0],
-    ['双方都不是背靠背', (g) => g.prediction.restHome > 0 && g.prediction.restAway > 0],
-    ['休息信息缺失（含揭幕战）', (g) => g.prediction.restHome == null || g.prediction.restAway == null],
-  ]],
+/**
+ * 切片：每组都给样本量，几场的切片别当结论。
+ * key 稳定（前端按 srv.board.splitGroup.<key> / srv.board.split.<key> 翻译）；中文 title / label 留给脚本与日志。
+ */
+const group = (key, title, rows) => ({ key, title, rows: rows.map(([k, label, f]) => ({ key: k, label, f })) });
+export const SPLITS = [
+  group('fav', '看好哪边', [['home', '看好主队', (g) => g.p >= 0.5], ['away', '看好客队', (g) => g.p < 0.5]]),
+  group('margin', '实际分差', [
+    ['le5', '≤5 分', (g) => Math.abs(g.homeScore - g.awayScore) <= 5],
+    ['m6to14', '6–14 分', (g) => { const m = Math.abs(g.homeScore - g.awayScore); return m > 5 && m < 15; }],
+    ['ge15', '≥15 分', (g) => Math.abs(g.homeScore - g.awayScore) >= 15],
+  ]),
+  group('rest', '休息情况', [
+    ['b2bAny', '有一方背靠背', (g) => g.prediction.restHome === 0 || g.prediction.restAway === 0],
+    ['b2bNone', '双方都不是背靠背', (g) => g.prediction.restHome > 0 && g.prediction.restAway > 0],
+    ['restUnknown', '休息信息缺失（含揭幕战）', (g) => g.prediction.restHome == null || g.prediction.restAway == null],
+  ]),
 ];
 
 /** 已结束比赛里至少这么多场有盘口，才和市场对照 */
@@ -107,6 +111,8 @@ const addDays = (iso, n) => {
   const [y, m, d] = iso.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
 };
+// 消息码：{ code, params }，前端按语言渲染（与 server/messages.mjs 的 msg 同形）
+const m = (code, params = {}) => ({ code: `srv.board.${code}`, params });
 const slim = (g) => ({
   gameId: g.gameId, date: g.date, homeId: g.homeId, awayId: g.awayId,
   homeScore: g.homeScore, awayScore: g.awayScore, p: g.p, conf: g.conf,
@@ -114,9 +120,9 @@ const slim = (g) => ({
 
 /**
  * @param games  predictSchedule 的输出（可带 market），只放常规赛
- * @param teamName  teamId -> 中文队名
+ * @param teamName  teamId -> 中文队名，只用于中文 summary（脚本 / 日志）；界面用 summaryMsg 按语言渲染
  */
-export function buildBoard(games, { teamName, weekDays = 7, upcomingDays = 30 } = {}) {
+export function buildBoard(games, { teamName = String, weekDays = 7, upcomingDays = 30 } = {}) {
   const completed = games.filter((g) => g.hit !== undefined).map((g) => {
     const p = g.prediction.homeWinProb;
     const homeWin = g.homeScore > g.awayScore;
@@ -165,22 +171,33 @@ export function buildBoard(games, { teamName, weekDays = 7, upcomingDays = 30 } 
   };
 
   // ---- 文字总结：每个数字都从上面算出来，不写死
+  // summary 是中文原句（保留给脚本与日志）；summaryMsg 是同样内容的消息码，两者逐句对应
   const summary = [];
+  const summaryMsg = [];
   if (!overall.n) {
     summary.push('本季常规赛还没有已结束的比赛，下面只有赛前预测。');
+    summaryMsg.push(m('noneFinished'));
   } else {
     const { n, hits, acc, ci, brier, logLoss } = overall;
+    summaryMsg.push(m('overall', { n, hits, misses: n - hits, acc, lo: ci.lo, hi: ci.hi, brier, logLoss }));
     summary.push(`本季常规赛已结束 ${n} 场，我们的模型赛前猜对 ${hits} 场、猜错 ${n - hits} 场，`
       + `准确率 ${pct(acc)}（95% 置信区间 ${pct(ci.lo, 0)}–${pct(ci.hi, 0)}），`
       + `Brier ${brier.toFixed(3)}、对数损失 ${logLoss.toFixed(3)}（每场都报 50% 分别是 0.250 和 0.693，越低越好）。`);
     if (n < 300) {
+      summaryMsg.push(m('smallSample', { n, width: Math.round((ci.hi - ci.lo) * 100) }));
       summary.push(`样本只有 ${n} 场，95% 区间横跨 ${Math.round((ci.hi - ci.lo) * 100)} 个百分点：`
         + '这个准确率还说明不了模型强还是弱，要几百场才看得清。');
     }
     const [, home, elo] = baselines;
+    summaryMsg.push(elo.n
+      ? m('baselines', { homeHits: home.hits, homeAcc: home.acc, eloHits: elo.hits, eloAcc: elo.acc, marginMae: err.marginMae, totalMae: err.totalMae })
+      : m('baselinesNoElo', { homeHits: home.hits, homeAcc: home.acc, marginMae: err.marginMae, totalMae: err.totalMae }));
     summary.push(`同一批比赛上，全押主队能猜对 ${home.hits} 场（${pct(home.acc, 0)}）`
       + (elo.n ? `，只看赛前 Elo 高低能猜对 ${elo.hits} 场（${pct(elo.acc, 0)}）` : '')
       + `；预测分差平均差 ${err.marginMae.toFixed(1)} 分，总分平均差 ${err.totalMae.toFixed(1)} 分。`);
+    summaryMsg.push(highConf.n
+      ? m('highConf', { n: highConf.n, hits: highConf.hits, acc: highConf.hits / highConf.n })
+      : m('highConfNone'));
     summary.push(highConf.n
       ? `高信心（≥70%）的比赛 ${highConf.n} 场，猜对 ${highConf.hits} 场（${pct(highConf.hits / highConf.n, 0)}）。`
       : '还没有赛前信心达到 70% 的比赛。');
@@ -188,9 +205,15 @@ export function buildBoard(games, { teamName, weekDays = 7, upcomingDays = 30 } 
       const winH = upset.homeWin;
       const w = teamName(winH ? upset.homeId : upset.awayId);
       const l = teamName(winH ? upset.awayId : upset.homeId);
+      summaryMsg.push(m(winH ? 'upsetHome' : 'upsetAway', {
+        date: upset.date, winnerId: winH ? upset.homeId : upset.awayId, loserId: winH ? upset.awayId : upset.homeId, p: 1 - upset.conf,
+      }));
       summary.push(`最大冷门：${cnDate(upset.date)} ${w} ${winH ? '主场' : '客场'}击败 ${l}，`
         + `赛前我们只给 ${w} ${pct(1 - upset.conf, 0)} 的胜率。`);
     }
+    summaryMsg.push(market.shown
+      ? m('market', { n: market.n, modelHits: market.model.hits, marketHits: market.market.hits })
+      : market.n ? m('marketFew', { n: market.n }) : m('marketNone'));
     summary.push(market.shown
       ? `仅作参考：其中 ${market.n} 场有盘口快照，这批比赛我们猜对 ${market.model.hits} 场，盘口热门胜出 ${market.market.hits} 场。`
       : market.n
@@ -201,14 +224,19 @@ export function buildBoard(games, { teamName, weekDays = 7, upcomingDays = 30 } 
     const best = [...week].sort((a, b) => confOf(b.prediction.homeWinProb) - confOf(a.prediction.homeWinProb))[0];
     const p = best.prediction.homeWinProb;
     const fav = p >= 0.5 ? best.homeId : best.awayId;
+    summaryMsg.push(m('nextWeek', {
+      count: week.length, awayId: best.awayId, homeId: best.homeId, date: best.date, favId: fav, p: confOf(p),
+    }));
     summary.push(`接下来 7 天还有 ${week.length} 场常规赛，最有把握的一场是 `
       + `${teamName(best.awayId)} 客场对 ${teamName(best.homeId)}（${cnDate(best.date)}），看好 ${teamName(fav)}（${pct(confOf(p), 0)}）。`);
   } else {
     summary.push('常规赛已经没有未开打的比赛。');
+    summaryMsg.push(m('noUpcoming'));
   }
 
   return {
     summary,
+    summaryMsg,
     overall,
     errors: err,
     highConf,
@@ -218,9 +246,10 @@ export function buildBoard(games, { teamName, weekDays = 7, upcomingDays = 30 } 
     misses: misses.map(slim),
     market,
     buckets: buckets(completed),
-    splits: SPLITS.map(([title, defs]) => ({
+    splits: SPLITS.map(({ key, title, rows }) => ({
+      key,
       title,
-      rows: defs.map(([label, f]) => ({ label, ...score(completed.filter(f)) })),
+      rows: rows.map(({ key: k, label, f }) => ({ key: k, label, ...score(completed.filter(f)) })),
     })),
     byDate,
     byTeam: hitRateBy(completed, (g) => [g.homeId, g.awayId]).sort((a, b) => b.acc - a.acc || b.n - a.n),

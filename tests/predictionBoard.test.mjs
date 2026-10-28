@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { wilson, score, buckets, hitRateBy, buildBoard, MIN_MARKET } from '../server/predictionBoard.mjs';
+import { wilson, score, buckets, hitRateBy, buildBoard, MIN_MARKET, SPLITS } from '../server/predictionBoard.mjs';
 
 const near = (a, b, eps = 1e-3) => assert.ok(Math.abs(a - b) < eps, `${a} ≠ ${b}`);
 
@@ -84,6 +84,18 @@ test('buildBoard：总结用数据说话，冷门、盘口、接下来的比赛�
   assert.match(text, /接下来 7 天/);
   assert.equal(b.market.shown, false);
   assert.match(text, /只有 1 场有盘口快照，太少/);
+
+  // 消息码：每个数字都在 params 里，没有中文
+  assert.deepEqual(b.summaryMsg.map((m) => m.code), ['srv.board.overall', 'srv.board.smallSample', 'srv.board.baselinesNoElo',
+    'srv.board.highConf', 'srv.board.upsetAway', 'srv.board.marketFew', 'srv.board.nextWeek']);
+  assert.deepEqual(b.summaryMsg[0].params, { n: 3, hits: 2, misses: 1, acc: b.overall.acc, lo: b.overall.ci.lo, hi: b.overall.ci.hi, brier: b.overall.brier, logLoss: b.overall.logLoss });
+  assert.deepEqual(b.summaryMsg[1].params, { n: 3, width: Math.round((b.overall.ci.hi - b.overall.ci.lo) * 100) });
+  assert.deepEqual(b.summaryMsg[2].params, { homeHits: 1, homeAcc: 1 / 3, marginMae: b.errors.marginMae, totalMae: b.errors.totalMae });
+  assert.deepEqual(b.summaryMsg[3].params, { n: 2, hits: 1, acc: 0.5 });
+  assert.deepEqual(b.summaryMsg[4].params, { date: '2026-10-20', winnerId: 4, loserId: 3, p: 0.25 });
+  assert.deepEqual(b.summaryMsg[5].params, { n: 1 });
+  assert.deepEqual(b.summaryMsg[6].params, { count: 2, awayId: 4, homeId: 1, date: '2026-10-22', favId: 1, p: 0.9 });
+  assert.doesNotMatch(JSON.stringify(b.summaryMsg), /[一-鿿]/);
 });
 
 test('buildBoard：没有已结束比赛、没有盘口时如实说', () => {
@@ -93,6 +105,7 @@ test('buildBoard：没有已结束比赛、没有盘口时如实说', () => {
   const text = b.summary.join('');
   assert.match(text, /还没有已结束/);
   assert.doesNotMatch(text, /NaN|null|undefined/);
+  assert.deepEqual(b.summaryMsg.map((m) => m.code), ['srv.board.noneFinished', 'srv.board.nextWeek']);
 });
 
 test('buildBoard：盘口覆盖够了才作为参考对照', () => {
@@ -102,6 +115,10 @@ test('buildBoard：盘口覆盖够了才作为参考对照', () => {
   assert.equal(b.market.shown, true);
   assert.equal(b.market.market.hits, MIN_MARKET - 1);
   assert.match(b.summary.join(''), new RegExp(`仅作参考：其中 ${MIN_MARKET} 场有盘口`));
+  const mk = b.summaryMsg.find((m) => m.code === 'srv.board.market');
+  assert.deepEqual(mk.params, { n: MIN_MARKET, modelHits: MIN_MARKET, marketHits: MIN_MARKET - 1 });
+  assert.ok(b.summaryMsg.some((m) => m.code === 'srv.board.highConfNone'));
+  assert.equal(b.summaryMsg.at(-1).code, 'srv.board.noUpcoming');
 });
 
 test('buildBoard：全面统计——误差、基准线、切片、爆冷清单、累计命中、未开打分布', () => {
@@ -136,6 +153,19 @@ test('buildBoard：全面统计——误差、基准线、切片、爆冷清单�
   assert.equal(split('实际分差')['≤5 分'].n, 1);
   assert.equal(split('实际分差')['≥15 分'].n, 1);
   assert.equal(split('休息情况')['有一方背靠背'].hits, 0);
+
+  // 切片按 key 取（中文 title / label 仍保留给脚本）
+  const byKey = (k) => Object.fromEntries(b.splits.find((x) => x.key === k).rows.map((r) => [r.key, r]));
+  assert.deepEqual(b.splits.map((x) => x.key), ['fav', 'margin', 'rest']);
+  assert.deepEqual(b.splits.map((x) => x.key), SPLITS.map((x) => x.key));
+  assert.equal(byKey('fav').home.n, 2);
+  assert.equal(byKey('fav').away.hits, 1);
+  assert.equal(byKey('margin').le5.n, 1);
+  assert.equal(byKey('margin').ge15.n, 1);
+  assert.equal(byKey('rest').b2bAny.hits, 0);
+  assert.deepEqual(Object.keys(byKey('rest')), ['b2bAny', 'b2bNone', 'restUnknown']);
+  assert.equal(b.summaryMsg[2].code, 'srv.board.baselines');
+  assert.deepEqual(b.summaryMsg[2].params, { homeHits: 1, homeAcc: 1 / 3, eloHits: 3, eloAcc: 1, marginMae: b.errors.marginMae, totalMae: b.errors.totalMae });
 
   assert.deepEqual(b.misses.map((m) => m.gameId), ['b']);
   assert.deepEqual(b.byDate.map((d) => [d.cumN, d.cumHits]), [[2, 1], [3, 2]]);

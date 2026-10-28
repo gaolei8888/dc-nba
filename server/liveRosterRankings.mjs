@@ -83,6 +83,14 @@ function impactPriors(store) {
   };
 }
 
+/**
+ * 有先验说明的来源（前端按 srv.roster.source.<impactSource> 翻译）；实测来源没有说明。
+ * 估计来源的说明里「收缩到什么」由 sourceParams.targetKind 决定（srv.roster.target.<targetKind>），
+ * 与 impactSource 不是一一对应：新秀有样本时 impactSource 是 estimated-shrunk-spm，措辞却是新秀均值。
+ */
+export const PRIOR_SOURCES = ['estimated-shrunk-spm', 'estimated-rookie-prior', 'estimated-population-prior', 'replacement-prior'];
+export const TARGET_KINDS = ['rookie', 'population', 'fringe'];
+
 function estimateImpact(p, priors) {
   const fallback = { value: REPLACEMENT_IMP, impactSource: 'replacement-prior', source: '项目既有替补级 IMP 先验；非实测球员评级' };
   if (!priors) return fallback;
@@ -95,8 +103,11 @@ function estimateImpact(p, priors) {
   const value = samples.length ? shrink(target, IMPACT_K, samples.reduce((s, x) => s + x.n * x.v, 0) / n, n) : target;
   const impactSource = samples.length ? 'estimated-shrunk-spm' : rookie ? 'estimated-rookie-prior' : 'estimated-population-prior';
   const what = rookie ? '上季新秀 SPM 分钟加权均值' : samples.length ? '上季有 IMP 球员均值' : '上季 10–15 分钟段 SPM 均值';
+  // 与 what 同一分支顺序（先判新秀）
+  const targetKind = rookie ? 'rookie' : samples.length ? 'population' : 'fringe';
   return { value: Math.round(value * 100) / 100, impactSource,
-    source: `估计值（未验证）：${n} 场统计栏 SPM 按 K=${IMPACT_K} 场收缩到${what} ${target.toFixed(2)}` };
+    source: `估计值（未验证）：${n} 场统计栏 SPM 按 K=${IMPACT_K} 场收缩到${what} ${target.toFixed(2)}`,
+    sourceParams: { n, k: IMPACT_K, target, targetKind } };
 }
 
 /** 按来源汇总预计分钟占 240 的比例 */
@@ -156,7 +167,7 @@ export function liveRosterRankings(store, legacyRows, {
         playerId: p.playerId, name: p.name,
         projectedMinutes: rm.minutes, rotation: rm.rotation, minutesSource: rm.minutesSource,
         impact, impactSource: Number.isFinite(p.cur?.impact) ? 'current-blended' : impact != null ? 'prior-season' : estimate.impactSource,
-        impactPrior: estimate ? { value: estimate.value, source: estimate.source } : undefined,
+        impactPrior: estimate ? { value: estimate.value, source: estimate.source, sourceParams: estimate.sourceParams } : undefined,
         injuryStatus: status.get(p.playerId) ?? null, availability: playProbability(status.get(p.playerId)),
       };
     });
@@ -189,8 +200,9 @@ export function liveRosterRankings(store, legacyRows, {
     const projection = projections.get(row.teamId);
     const base = { ...row, legacyTotal: row.total, legacyRank: row.rank, model: 'roster',
       total: null, rank: null, priorTotal: null, resultsAdj: null, rosterAdj: null, modelDelta: null };
+    // 中文 error 留给日志；界面按 errorCode 显示
     if (!valid.length || !projection || projection.error) return { ...base, rosterProjection: {
-      ...info, error: projection?.error ?? '该队阵容数据不足，无法估计',
+      ...info, error: projection?.error ?? '该队阵容数据不足，无法估计', errorCode: 'srv.roster.insufficient',
     } };
     const excluded = new Set(out[row.teamId] ?? []);
     const { pace } = projection;
@@ -209,7 +221,7 @@ export function liveRosterRankings(store, legacyRows, {
           rotation: expected.players,
         } };
     } catch (error) {
-      return { ...base, rosterProjection: { ...info, error: error.message } };
+      return { ...base, rosterProjection: { ...info, error: error.message, errorCode: 'srv.roster.insufficient' } };
     }
   });
   // 第二遍：本季已完赛结果修正（先验值 K 场，对手与主场调整，见 rosterResults.mjs）

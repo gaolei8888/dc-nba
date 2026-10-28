@@ -205,6 +205,10 @@ test('players without any IMP get a data-derived estimate instead of the replace
   assert.ok(Math.abs(rookie.impact - 1.8) < 1e-9);
   assert.notEqual(vet.impact, -0.5);
   assert.match(vet.impactPrior.source, /未验证/);
+  assert.deepEqual(Object.keys(vet.impactPrior.sourceParams), ['n', 'k', 'target', 'targetKind']);
+  assert.deepEqual(vet.impactPrior.sourceParams, { n: 19, k: IMPACT_K, target: m, targetKind: 'population' });
+  assert.equal(rookie.impactPrior.sourceParams.targetKind, 'rookie');
+  assert.equal(rookie.impactPrior.sourceParams.n, 0);
 });
 
 test('team rows report how much of the rating is estimated versus measured', () => {
@@ -231,4 +235,16 @@ test('shrinkage fitting recovers the constant that generated the data', () => {
   const rows = checkpointSamples(prev, new Map([[7, games]]), { maxT: 1 }).flat();
   assert.deepEqual(rows.find((x) => x.p === 1), { p: 1, team: 7, T: 1, n: 1, v: 30, y: 30, rate: 1, mpg: 30, priorMpg: 30 });
   assert.deepEqual(rows.find((x) => x.p === 2), { p: 2, team: 7, T: 1, n: 1, v: 10, y: 10 / 3, rate: 1 / 3, mpg: 10, priorMpg: null });
+});
+
+test('阵容先验算不出来的队带 errorCode（中文 error 保留）', () => {
+  const s = store();
+  s.teams[1].adv.pace = 0; s.meta.leagueAvg.pace = 0;
+  const bad = liveRosterRankings(s, legacy).find((r) => r.teamId === 2).rosterProjection;
+  assert.equal(bad.error, '缺少有效节奏数据');
+  assert.equal(bad.errorCode, 'srv.roster.insufficient');
+  const good = liveRosterRankings(store(), legacy).find((r) => r.teamId === 2).rosterProjection;
+  assert.equal(good.errorCode, undefined);
+  // 实测 IMP 的球员没有先验说明
+  assert.equal(liveRosterRankings(store(), legacy)[0].rosterProjection.rotation[0].impactPrior, undefined);
 });

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildModel, teamStrength, predictGame } from '../server/predict.mjs';
+import { buildModel, teamStrength, predictGame, FACTOR_KEYS } from '../server/predict.mjs';
+import zh from '../web/src/i18n/locales/zh.js';
 import { rotationImpact, VALUE_IMP } from '../server/ratings.mjs';
 
 // 两支队的最小数据集。名单总分钟不到球队上限，移出一个人后空出的时间算替补级（贡献 0），
@@ -59,4 +60,10 @@ test('不勾缺阵时预测不受影响', () => {
   const b = predictGame(model, { homeId: 1, awayId: 2, out: { 1: [], 2: [] } });
   assert.deepEqual(a, b);
   assert.equal(a.strength.home.rosterAdj, 0);
+});
+
+test('因素分解的 key 与导出的 FACTOR_KEYS 一致，中文标签与 srv.predict.factor 逐字相同', () => {
+  const { factors } = predictGame(model, { homeId: 1, awayId: 2 });
+  assert.deepEqual(factors.map((f) => f.key), FACTOR_KEYS);
+  for (const f of factors) assert.equal(zh.srv.predict.factor[f.key], f.label);
 });
