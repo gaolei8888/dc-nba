@@ -137,7 +137,8 @@ export function replay(dataset, seasons, opts = {}) {
         };
         const restHome = restOf(g.home.teamId);
         const restAway = restOf(g.away.teamId);
-        const restPts = (restAdjust(restHome) - restAdjust(restAway)) * p.restWeight;
+        const restRaw = restAdjust(restHome) - restAdjust(restAway);
+        const restPts = restRaw * p.restWeight;
 
         const strength = (id) => (p.wElo * ((getElo(id) - ELO_BASE) / ELO_PER_POINT)
           + p.wNet * (netPts.get(id) ?? 0)) / wSum
@@ -145,7 +146,9 @@ export function replay(dataset, seasons, opts = {}) {
 
         const eloDiff = getElo(g.home.teamId) - getElo(g.away.teamId);
         const hca = g.neutral ? 0 : p.homeAdv;
-        const margin = strength(g.home.teamId) - strength(g.away.teamId) + hca + restPts;
+        // eloPts 不含主场与休息：walk-forward 拿它重拟主场优势 / 休息权重，不必重跑 Elo
+        const eloPts = strength(g.home.teamId) - strength(g.away.teamId);
+        const margin = eloPts + hca + restPts;
         const prob = normalCdf(margin, p.spreadSd);
         const actual = g.home.pts - g.away.pts;
 
@@ -162,6 +165,9 @@ export function replay(dataset, seasons, opts = {}) {
           // 误差分析用的上下文
           restHome,
           restAway,
+          // pred === eloPts + (neutral ? 0 : homeAdv) + restWeight * restRaw
+          eloPts,
+          restRaw,
           b2bHome: restHome === 0,
           b2bAway: restAway === 0,
           eloDiff,

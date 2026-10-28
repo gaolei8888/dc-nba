@@ -55,3 +55,24 @@ test('replay：同一比赛日的预测只用当日开始时的评级（同日�
   assert.notEqual(a.find((r) => r.gameId === 'G3').p, b.find((r) => r.gameId === 'G3').p); // 次日照常吸收
   assert.equal(g2(a).restAway, null);               // 同日已出场不算「前一场」
 });
+
+test('replay 记录：pred = eloPts + 主场 + restWeight·restRaw', () => {
+  // 合成数据：一场正常主客场、一场休息不对等、一场中立场
+  const prior = [{ i: 'P1', d: '2021-11-01', s: [[1, 110, 1], [2, 100, 0]] }, { i: 'P2', d: '2021-11-02', s: [[3, 105, 1], [1, 100, 0]] }];
+  const cur = [
+    { i: 'G1', d: '2022-11-01', s: [[1, 120, 1], [2, 100, 0]] },
+    { i: 'G2', d: '2022-11-02', s: [[3, 101, 1], [1, 99, 0]] },
+    { i: 'G3', d: '2022-11-04', s: [[2, 100, 1], [1, 98, 0]] },   // 2 号队休 2 天，1 号队休 1 天
+    { i: 'G4', d: '2022-11-05', s: [[3, 90, 0], [2, 95, 0]] },    // 中立场
+  ];
+  const rs = replay({ seasons: { '2021-22': prior, '2022-23': cur }, teamAdv: {} }, ['2022-23'], { homeAdv: 2, restWeight: 1.5 });
+  assert.equal(rs.length, 4);
+  for (const r of rs) {
+    assert.equal(r.pred, r.eloPts + (r.neutral ? 0 : 2) + 1.5 * r.restRaw);
+  }
+  const g3 = rs.find((r) => r.gameId === 'G3');
+  assert.deepEqual([g3.restHome, g3.restAway], [2, 1]);
+  assert.ok(Math.abs(g3.restRaw - 0.35) < 1e-12);
+  assert.equal(rs.find((r) => r.gameId === 'G4').neutral, true);
+  assert.notEqual(rs.find((r) => r.gameId === 'G2').eloPts, 0);
+});
