@@ -13,6 +13,7 @@
     "test": "node --test tests/*.test.mjs",
     "backup": "node scripts/backup-db.mjs",
     "check": "node scripts/check-jsx.mjs",
+    "check:i18n": "node scripts/check-i18n.mjs",
     "server": "node server/index.mjs",
     "dev": "concurrently -n server,web -c cyan,magenta \"node --watch server/index.mjs\" \"vite --config web/vite.config.js\"",
     "build": "node scripts/check-jsx.mjs && vite build --config web/vite.config.js",

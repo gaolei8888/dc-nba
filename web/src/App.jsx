@@ -20,6 +20,7 @@ import Profiles from './pages/Profiles.jsx';
 import Lab from './pages/Lab.jsx';
 import Today from './pages/Today.jsx';
 import Board from './pages/Board.jsx';
+import { useI18n } from './i18n/react.jsx';
 
 // ------------------------------------------------------------ 全局数据
 
@@ -27,17 +28,17 @@ const AppCtx = createContext(null);
 export const useApp = () => useContext(AppCtx);
 
 const NAV = [
-  { path: '', label: '总览', ico: '◈' },
-  { path: 'teams', label: '球队', ico: '⬢' },
-  { path: 'players', label: '球员', ico: '⚇' },
-  { path: 'today', label: '今日比赛', ico: '◷' },
-  { path: 'schedule', label: '赛程', ico: '▤' },
-  { path: 'board', label: '预测总表', ico: '✓' },
-  { path: 'predict', label: '比赛预测', ico: '◎' },
-  { path: 'simulate', label: '赛季模拟', ico: '∿' },
-  { path: 'play', label: '人机对赌', ico: '⚔' },
-  { path: 'lab', label: '模型实验室', ico: '⚗' },
-  { path: 'profiles', label: '玩家档案', ico: '⚉' },
+  { path: '', key: 'nav.overview', ico: '◈' },
+  { path: 'teams', key: 'nav.teams', ico: '⬢' },
+  { path: 'players', key: 'nav.players', ico: '⚇' },
+  { path: 'today', key: 'nav.today', ico: '◷' },
+  { path: 'schedule', key: 'nav.schedule', ico: '▤' },
+  { path: 'board', key: 'nav.board', ico: '✓' },
+  { path: 'predict', key: 'nav.predict', ico: '◎' },
+  { path: 'simulate', key: 'nav.simulate', ico: '∿' },
+  { path: 'play', key: 'nav.play', ico: '⚔' },
+  { path: 'lab', key: 'nav.lab', ico: '⚗' },
+  { path: 'profiles', key: 'nav.profiles', ico: '⚉' },
 ];
 
 /** 没有选中球队时的默认配色，用应用自身的强调色 */
@@ -67,6 +68,8 @@ const readTheme = () => {
 
 export default function App() {
   const { head, rest } = useHashRoute();
+  const i18n = useI18n();
+  const { t } = i18n;
   const [state, setState] = useState({ loading: true });
   // 全局缺阵名单：{ [teamId]: [playerId] }，各页面共享
   const [out, setOut] = useState({});
@@ -163,7 +166,7 @@ export default function App() {
       /** 用当前档案名在服务端建一个玩家，把令牌绑回本地档案 */
       connectCloud: async () => {
         const me = prof.profiles.find((p) => p.id === prof.activeId);
-        const created = await createCloudPlayer(me?.name ?? '玩家');
+        const created = await createCloudPlayer(me?.name ?? t('app.defaultPlayer'));
         setProf((s2) => linkC(s2, prof.activeId, {
           playerId: created.id, token: created.token, name: created.name,
         }));
@@ -175,17 +178,20 @@ export default function App() {
         if (c?.token) await renameCloud(c.token, name);
       },
     };
-  }, [state, out, params, theme, prof]);
+  }, [state, out, params, theme, prof, t]);
 
   if (state.loading) {
-    return <div className="loading" style={{ paddingTop: 120 }}>正在加载数据…</div>;
+    return <div className="loading" style={{ paddingTop: 120 }}>{t('app.loading')}</div>;
   }
   if (state.error) {
     return (
       <div className="main">
         <ErrorBox error={state.error} />
         <p className="note">
-          若提示数据缺失，请先在项目目录执行 <code>npm run ingest</code> 抓取 NBA 数据，再启动服务。
+          {(() => {
+            const [pre, post] = t('app.errorHint', { cmd: '\u0001' }).split('\u0001');
+            return <>{pre}<code>npm run ingest</code>{post}</>;
+          })()}
         </p>
       </div>
     );
@@ -217,7 +223,7 @@ export default function App() {
         <nav className="sidebar">
           <div className="brand">
             <span className="dot">N</span>
-            <span>NBA超级幻想</span>
+            <span>{t('app.title')}</span>
           </div>
           {NAV.map((n) => (
             <button
@@ -226,26 +232,26 @@ export default function App() {
               onClick={() => go(n.path)}
             >
               <span className="ico">{n.ico}</span>
-              {n.label}
+              {t(n.key)}
             </button>
           ))}
 
           <div className="side-bottom" style={{ marginTop: 0 }}>
           <div className="side-box">
-            <label title="不读伤病名单。只改轮换分钟的算法：默认用上季实际分钟（场均×出场数）；勾选后对上季出场满 10 场的球员改用场均×70 场，伤停多的球星不会被埋没。">
+            <label title={t('app.healthyTip')}>
               <input
                 type="checkbox"
                 checked={!!params.assumeHealthy}
                 onChange={(e) => setParams((p) => ({ ...p, assumeHealthy: e.target.checked ? 1 : 0 }))}
               />
-              <span>按满勤计权</span>
+              <span>{t('app.healthyLabel')}</span>
             </label>
-            <p>不看伤病名单；勾选后上季分钟按场均×70 场算，不勾按实际出场</p>
+            <p>{t('app.healthyNote')}</p>
           </div>
 
           <div className="side-box" style={{ marginTop: 'auto' }}>
             <div style={{ fontSize: 10.5, color: 'var(--text-faint)', letterSpacing: '.6px', marginBottom: 5 }}>
-              当前玩家
+              {t('app.currentPlayer')}
             </div>
             <select
               value={prof.activeId ?? ''}
@@ -261,55 +267,64 @@ export default function App() {
               style={{ width: '100%', marginTop: 6, padding: '5px 8px', fontSize: 11.5 }}
               onClick={() => go('profiles')}
             >
-              管理档案
+              {t('app.manageProfiles')}
             </button>
           </div>
 
           {(ctx.injuries.players?.length ?? 0) > 0 && (
             <div className="side-box">
               <div style={{ fontSize: 12, fontWeight: 650, marginBottom: 6 }}>
-                伤病名单 · ESPN
+                {t('app.injuryTitle')}
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-faint)', lineHeight: 1.6 }}>
-                确定缺阵 {ctx.injuries.counts?.out ?? 0} 人 ·
-                观察 {ctx.injuries.counts?.dayToDay ?? 0} 人
+                {t('app.injuryCounts', { out: ctx.injuries.counts?.out ?? 0, dtd: ctx.injuries.counts?.dayToDay ?? 0 })}
               </div>
               <button
                 className="btn"
                 style={{ width: '100%', marginTop: 7, padding: '6px 8px', fontSize: 12 }}
                 onClick={() => ctx.applyInjuries('out')}
               >
-                套用「确定缺阵」
+                {t('app.applyOut')}
               </button>
               <p style={{ fontSize: 10.5, color: 'var(--text-faint)', lineHeight: 1.5, margin: '6px 0 0' }}>
-                实验功能：按 IMP 估算缺阵影响，未经回测验证。正式预测不计伤病，伤病影响正在影子模式检验。
+                {t('app.injuryNote')}
               </p>
             </div>
           )}
 
           <div className="theme-switch">
-            <button className={theme === 'dark' ? 'on' : ''} onClick={() => setTheme('dark')}>深色</button>
-            <button className={theme === 'light' ? 'on' : ''} onClick={() => setTheme('light')}>浅色</button>
+            <button className={theme === 'dark' ? 'on' : ''} onClick={() => setTheme('dark')}>{t('app.themeDark')}</button>
+            <button className={theme === 'light' ? 'on' : ''} onClick={() => setTheme('light')}>{t('app.themeLight')}</button>
+          </div>
+          <div className="theme-switch" role="group" aria-label={t('app.langSwitch')}>
+            {i18n.langs.map((l) => (
+              <button key={l.id} className={i18n.lang === l.id ? 'on' : ''} onClick={() => i18n.setLang(l.id)}>{l.short}</button>
+            ))}
+          </div>
+          <div className="theme-switch" role="group" aria-label={t('app.tzSwitch')}>
+            {i18n.timezones.map((z) => (
+              <button key={z.id} className={i18n.tz === z.iana ? 'on' : ''} onClick={() => i18n.setTz(z.iana)}>{t(`tz.short.${z.id}`)}</button>
+            ))}
           </div>
 
           <div className="sidebar-foot">
-            <div>{state.meta.targetSeason} 赛季</div>
-            <div>基准数据 {state.meta.priorSeason}</div>
-            <div>{state.meta.counts.teams} 队 · {state.meta.counts.players} 人</div>
-            <div title="模型已吸收的本赛季真实比赛结果。赛季进行中每次重新抓取都会更新评级。">
+            <div>{t('app.season', { season: state.meta.targetSeason })}</div>
+            <div>{t('app.baseData', { season: state.meta.priorSeason })}</div>
+            <div>{t('app.counts', { teams: state.meta.counts.teams, players: state.meta.counts.players })}</div>
+            <div title={t('app.absorbedTip')}>
               {state.meta.gamesPlayedCurrent > 0
-                ? `已吸收本季 ${state.meta.gamesPlayedCurrent} 场结果`
-                : '赛季未开打 · 赛季前评级'}
+                ? t('app.absorbed', { count: state.meta.gamesPlayedCurrent })
+                : t('app.preseason')}
             </div>
             {outCount > 0 && (
               <div style={{ marginTop: 6 }}>
-                <span className="chip accent">{outCount} 人缺阵</span>{' '}
+                <span className="chip accent">{t('app.outCount', { count: outCount })}</span>{' '}
                 <button
                   className="nav-item"
                   style={{ padding: '2px 0', width: 'auto', display: 'inline' }}
                   onClick={ctx.clearOut}
                 >
-                  清除
+                  {t('common.clear')}
                 </button>
               </div>
             )}
