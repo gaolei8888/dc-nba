@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { expand, slices, market, SLICE_DEFS, GAP_SLICE_DEFS, EDGE_BUCKETS } from '../server/lab.mjs';
+import { replay, expand, slices, market, SLICE_DEFS, GAP_SLICE_DEFS, EDGE_BUCKETS } from '../server/lab.mjs';
 
 test('expand：中立场两行都标客场时，主客仍是两支不同球队', () => {
   // 真实数据 0022400147（2024-11-02 巴黎赛）：两行 MATCHUP 都是 "@"
@@ -37,4 +37,21 @@ test('slices / gapSlices / byEdge 每行带 key，key 与 label 一一对应', (
   assert.ok(mk.ats.byEdge.length > 0);
   for (const r of mk.ats.byEdge) assert.equal(r.label, edge.get(r.key));
   assert.deepEqual(EDGE_BUCKETS.map(([k]) => k), ['e0to1', 'e1to2', 'e2to3', 'e3to5', 'e5plus']);
+});
+
+test('replay：同一比赛日的预测只用当日开始时的评级（同日共享球队也不互相影响）', () => {
+  // 预热季 + 测试季；测试季 D 日人为放两场都含 1 号队的比赛（真实数据里不会出现，用来钉住不变量）
+  const prior = [{ i: 'P1', d: '2021-11-01', s: [[1, 110, 1], [2, 100, 0]] }, { i: 'P2', d: '2021-11-02', s: [[3, 105, 1], [1, 100, 0]] }];
+  const day = (g1Home) => [
+    { i: 'G1', d: '2022-11-01', s: [[1, g1Home, 1], [2, 100, 0]] },
+    { i: 'G2', d: '2022-11-01', s: [[3, 101, 1], [1, 99, 0]] },
+    { i: 'G3', d: '2022-11-02', s: [[1, 100, 1], [3, 98, 0]] },
+  ];
+  const run = (g1Home) => replay({ seasons: { '2021-22': prior, '2022-23': day(g1Home) }, teamAdv: {} }, ['2022-23']);
+  const a = run(140); const b = run(60);           // G1 大胜 vs 大败
+  const g2 = (rs) => rs.find((r) => r.gameId === 'G2');
+  assert.equal(g2(a).p, g2(b).p);                   // 同日第二场不受第一场结果影响
+  assert.equal(g2(a).eloDiff, g2(b).eloDiff);
+  assert.notEqual(a.find((r) => r.gameId === 'G3').p, b.find((r) => r.gameId === 'G3').p); // 次日照常吸收
+  assert.equal(g2(a).restAway, null);               // 同日已出场不算「前一场」
 });

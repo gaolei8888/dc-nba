@@ -1,0 +1,31 @@
+重放「按比赛日批量更新」修复前后对比（2026-10-29）
+====================================================
+改动：lab.replay 与 scripts/backtest.mjs 的 replaySeason 按 date 分组——同一天的全部预测
+先用当日开始时的 Elo / 休息 / 场次算完，再统一更新。快照脚本：scripts/replay-snapshot.mjs
+（离线，只读 data/backtest.json 与 books_*.json）。data/backtest.json 的 sha256 修复前后相同。
+
+指标                                   修复前                      修复后                      差
+recordsSha256                          b81b8cc1f2ed3751278e8f4373e1142fbcce630b919c33959667f63b9377d8c4   同   0
+                                       （4920 场，p 取 12 位、pred 取 9 位）
+按季准确率 2022-23 / 23-24 / 24-25 / 25-26
+                                       62.68 / 65.85 / 67.40 / 69.35   同   0
+按季 Brier                             0.2268 / 0.2105 / 0.2090 / 0.2059   同   0
+对盘口 n=4908：模型准确率              66.32%                      66.32%                      0
+对盘口：盘口准确率                     68.40%                      68.40%                      0
+McNemar χ²（onlyModel 292 / onlyMarket 394）
+                                       14.87                       14.87                       0
+让分盘 ATS（2391 胜 2471 负 46 平）    49.18%                      49.18%                      0
+paperHeadline（DK、主规则、2022-23 之后） 1596 注，ROI -11.82%，95% CI [-19.26%, -4.57%]（同）   0
+npm run backtest「滚动Elo＋纯Elo（基线）」 4920 场 66.32% Brier 0.2136 LogLoss 0.6154 MAE 10.91（同） 0
+npm run backtest 全文 diff             无输出
+
+注：计划里引用的 66.26% / χ² 15.70 / 49.12% 与仓库当前 data/backtest.json 的实际快照
+（66.32% / 14.87 / 49.18%）不一致，应为较早数据版本的数字；以本表实测为准。修复前后一致不受影响。
+
+结论：差异为零的原因：Elo 更新只改本场两队，数据中没有球队同日出场两次
+（2021-22～2025-26 逐季核对为 0）。
+
+同结构但本次未改（同理不受影响，不改线上，交给用户决定）：
+- server/replay.mjs（人机对赌题库）
+- server/rosterReplay.mjs
+- scripts/ingest.mjs 的生产赛前 Elo（computeElo 逐场更新）

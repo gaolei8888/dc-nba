@@ -121,71 +121,85 @@ export function replay(dataset, seasons, opts = {}) {
     const dayNum = (d) => Math.round(new Date(`${d}T00:00:00Z`).getTime() / 86400000);
     const wSum = p.wElo + p.wNet || 1;
 
-    for (const g of games) {
-      const today = dayNum(g.date);
-      const restOf = (id) => {
-        const prev = lastPlayed.get(id);
-        return prev === undefined ? null : today - prev - 1;
-      };
-      const restHome = restOf(g.home.teamId);
-      const restAway = restOf(g.away.teamId);
-      const restPts = (restAdjust(restHome) - restAdjust(restAway)) * p.restWeight;
+    // 按比赛日分组（games 已按 date, gameId 排序）：同一天的预测全部用当日开始时的
+    // Elo / 休息 / 场次，先全部记完，再统一更新——同日赛果不得影响同日其他预测
+    for (let i = 0; i < games.length;) {
+      let j = i;
+      while (j < games.length && games[j].date === games[i].date) j += 1;
+      const day = games.slice(i, j);
+      i = j;
+      const today = dayNum(day[0].date);
 
-      const strength = (id) => (p.wElo * ((getElo(id) - ELO_BASE) / ELO_PER_POINT)
-        + p.wNet * (netPts.get(id) ?? 0)) / wSum
-        + (boost?.get(id) ?? 0);
+      for (const g of day) {
+        const restOf = (id) => {
+          const prev = lastPlayed.get(id);
+          return prev === undefined ? null : today - prev - 1;
+        };
+        const restHome = restOf(g.home.teamId);
+        const restAway = restOf(g.away.teamId);
+        const restPts = (restAdjust(restHome) - restAdjust(restAway)) * p.restWeight;
 
-      const eloDiff = getElo(g.home.teamId) - getElo(g.away.teamId);
-      const hca = g.neutral ? 0 : p.homeAdv;
-      const margin = strength(g.home.teamId) - strength(g.away.teamId) + hca + restPts;
-      const prob = normalCdf(margin, p.spreadSd);
-      const actual = g.home.pts - g.away.pts;
+        const strength = (id) => (p.wElo * ((getElo(id) - ELO_BASE) / ELO_PER_POINT)
+          + p.wNet * (netPts.get(id) ?? 0)) / wSum
+          + (boost?.get(id) ?? 0);
 
-      records.push({
-        season,
-        gameId: g.gameId,
-        date: g.date,
-        homeId: g.home.teamId,
-        awayId: g.away.teamId,
-        p: prob,
-        homeWin: g.home.win,
-        pred: margin,
-        actual,
-        // 误差分析用的上下文
-        restHome,
-        restAway,
-        b2bHome: restHome === 0,
-        b2bAway: restAway === 0,
-        eloDiff,
-        teamGp: Math.min(played.get(g.home.teamId) ?? 0, played.get(g.away.teamId) ?? 0),
-        neutral: g.neutral,
-        // 冷门 = 模型看好的一方输了
-        upset: (prob >= 0.5) !== g.home.win,
-        // 盘口：mktPred 与我们的 pred 同向（主队预期净胜分），方便直接相减
-        mktPred: g.odds ? -g.odds.spread : null,
-        mktTotal: g.odds?.total ?? null,
-        mktProb: g.odds ? marketProb(g.odds, p.spreadSd) : null,
-        // 原始钱线 [主, 客]：平注回测要按真实（含抽水）价格结算
-        ml: g.odds ? [g.odds.homeMl, g.odds.awayMl] : null,
-      });
+        const eloDiff = getElo(g.home.teamId) - getElo(g.away.teamId);
+        const hca = g.neutral ? 0 : p.homeAdv;
+        const margin = strength(g.home.teamId) - strength(g.away.teamId) + hca + restPts;
+        const prob = normalCdf(margin, p.spreadSd);
+        const actual = g.home.pts - g.away.pts;
 
-      played.set(g.home.teamId, (played.get(g.home.teamId) ?? 0) + 1);
-      played.set(g.away.teamId, (played.get(g.away.teamId) ?? 0) + 1);
-      lastPlayed.set(g.home.teamId, today);
-      lastPlayed.set(g.away.teamId, today);
-
-      if (p.inSeasonElo) {
-        const eh = getElo(g.home.teamId);
-        const ea = getElo(g.away.teamId);
-        const diff = eh + (g.neutral ? 0 : ELO_HOME_ADV) - ea;
-        const expHome = 1 / (1 + 10 ** (-diff / 400));
-        const mov = Math.abs(actual);
-        const winnerEloDiff = g.home.win ? diff : -diff;
-        const movMult = ((mov + 3) ** 0.8) / (7.5 + 0.006 * winnerEloDiff);
-        const shift = p.k * movMult * ((g.home.win ? 1 : 0) - expHome);
-        elo.set(g.home.teamId, eh + shift);
-        elo.set(g.away.teamId, ea - shift);
+        records.push({
+          season,
+          gameId: g.gameId,
+          date: g.date,
+          homeId: g.home.teamId,
+          awayId: g.away.teamId,
+          p: prob,
+          homeWin: g.home.win,
+          pred: margin,
+          actual,
+          // 误差分析用的上下文
+          restHome,
+          restAway,
+          b2bHome: restHome === 0,
+          b2bAway: restAway === 0,
+          eloDiff,
+          teamGp: Math.min(played.get(g.home.teamId) ?? 0, played.get(g.away.teamId) ?? 0),
+          neutral: g.neutral,
+          // 冷门 = 模型看好的一方输了
+          upset: (prob >= 0.5) !== g.home.win,
+          // 盘口：mktPred 与我们的 pred 同向（主队预期净胜分），方便直接相减
+          mktPred: g.odds ? -g.odds.spread : null,
+          mktTotal: g.odds?.total ?? null,
+          mktProb: g.odds ? marketProb(g.odds, p.spreadSd) : null,
+          // 原始钱线 [主, 客]：平注回测要按真实（含抽水）价格结算
+          ml: g.odds ? [g.odds.homeMl, g.odds.awayMl] : null,
+        });
       }
+
+      // 当日全部预测已记下，统一更新场次 / 上次出场 / Elo（增量按当日开始时的评级算）
+      const shifts = new Map();
+      for (const g of day) {
+        played.set(g.home.teamId, (played.get(g.home.teamId) ?? 0) + 1);
+        played.set(g.away.teamId, (played.get(g.away.teamId) ?? 0) + 1);
+        lastPlayed.set(g.home.teamId, today);
+        lastPlayed.set(g.away.teamId, today);
+
+        if (p.inSeasonElo) {
+          const eh = getElo(g.home.teamId);
+          const ea = getElo(g.away.teamId);
+          const diff = eh + (g.neutral ? 0 : ELO_HOME_ADV) - ea;
+          const expHome = 1 / (1 + 10 ** (-diff / 400));
+          const mov = Math.abs(g.home.pts - g.away.pts);
+          const winnerEloDiff = g.home.win ? diff : -diff;
+          const movMult = ((mov + 3) ** 0.8) / (7.5 + 0.006 * winnerEloDiff);
+          const shift = p.k * movMult * ((g.home.win ? 1 : 0) - expHome);
+          shifts.set(g.home.teamId, (shifts.get(g.home.teamId) ?? 0) + shift);
+          shifts.set(g.away.teamId, (shifts.get(g.away.teamId) ?? 0) - shift);
+        }
+      }
+      for (const [id, d] of shifts) elo.set(id, getElo(id) + d);
     }
   }
   return records;

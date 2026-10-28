@@ -39,6 +39,8 @@ async function cached(name, fetcher) {
   fs.mkdirSync(HIST_DIR, { recursive: true });
   const file = path.join(HIST_DIR, `${name}.json`);
   if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf8'));
+  // 离线护栏：BACKTEST_OFFLINE=1 时缺缓存直接报错，绝不联网
+  if (process.env.BACKTEST_OFFLINE === '1') throw new Error(`离线模式缺缓存 ${name}，不联网`);
   process.stdout.write(`  抓取 ${name} … `);
   const data = await fetcher();
   fs.writeFileSync(file, JSON.stringify(data));
@@ -279,54 +281,67 @@ async function replaySeason(season, priorSeason, opts) {
   const played = new Map();          // teamId -> 已打场次
   const gp = (id) => played.get(id) ?? 0;
 
-  for (const g of testGames) {
-    const today = dayNum(g.date);
-    const restOf = (id) => {
-      const prev = lastPlayed.get(id);
-      return prev === undefined ? null : today - prev - 1;
-    };
-    const restPts = (restAdjust(restOf(g.home.teamId)) - restAdjust(restOf(g.away.teamId))) * restWeight;
+  // 按比赛日分组（testGames 已按日期排序）：同一天的预测都用当日开始时的评级 / 休息 / 场次，
+  // 先全部记下，再统一更新，避免同日赛果泄漏给同日其他预测
+  for (let i = 0; i < testGames.length;) {
+    let j = i;
+    while (j < testGames.length && testGames[j].date === testGames[i].date) j += 1;
+    const day = testGames.slice(i, j);
+    i = j;
+    const today = dayNum(day[0].date);
 
-    // priorDecay > 0 时，上赛季净效率的权重随本赛季场次累积而衰减：
-    // 赛季初它是唯一可信的信息，打满一定场次后 Elo 已自带本赛季信息，再用就是拖累
-    const strength = (id) => {
-      const n = gp(id);
-      const wn = priorDecay > 0 ? wNet * (priorDecay / (priorDecay + n)) : wNet;
-      const ws = wElo + wn || 1;
-      return (wElo * ((getElo(id) - ELO_BASE) / ELO_PER_POINT) + wn * getNet(id)) / ws
-        + getTurnover(id);
-    };
-    const hca = g.neutral ? 0 : homeAdv;
-    const margin = strength(g.home.teamId) - strength(g.away.teamId) + hca + restPts;
-    const p = normalCdf(margin, spreadSd);
+    for (const g of day) {
+      const restOf = (id) => {
+        const prev = lastPlayed.get(id);
+        return prev === undefined ? null : today - prev - 1;
+      };
+      const restPts = (restAdjust(restOf(g.home.teamId)) - restAdjust(restOf(g.away.teamId))) * restWeight;
 
-    records.push({
-      p,
-      homeWin: g.home.win,
-      pred: margin,
-      actual: g.home.pts - g.away.pts,
-      date: g.date,
-      teamGp: Math.min(gp(g.home.teamId), gp(g.away.teamId)),
-    });
-    played.set(g.home.teamId, gp(g.home.teamId) + 1);
-    played.set(g.away.teamId, gp(g.away.teamId) + 1);
+      // priorDecay > 0 时，上赛季净效率的权重随本赛季场次累积而衰减：
+      // 赛季初它是唯一可信的信息，打满一定场次后 Elo 已自带本赛季信息，再用就是拖累
+      const strength = (id) => {
+        const n = gp(id);
+        const wn = priorDecay > 0 ? wNet * (priorDecay / (priorDecay + n)) : wNet;
+        const ws = wElo + wn || 1;
+        return (wElo * ((getElo(id) - ELO_BASE) / ELO_PER_POINT) + wn * getNet(id)) / ws
+          + getTurnover(id);
+      };
+      const hca = g.neutral ? 0 : homeAdv;
+      const margin = strength(g.home.teamId) - strength(g.away.teamId) + hca + restPts;
+      const p = normalCdf(margin, spreadSd);
 
-    lastPlayed.set(g.home.teamId, today);
-    lastPlayed.set(g.away.teamId, today);
-
-    // 赛后用真实结果更新 Elo（预测已经记下，不存在信息泄漏）
-    if (inSeasonElo) {
-      const eh = getElo(g.home.teamId);
-      const ea = getElo(g.away.teamId);
-      const diff = eh + (g.neutral ? 0 : ELO_HOME_ADV) - ea;
-      const expHome = 1 / (1 + 10 ** (-diff / 400));
-      const mov = Math.abs(g.home.pts - g.away.pts);
-      const winnerEloDiff = g.home.win ? diff : -diff;
-      const movMult = ((mov + 3) ** 0.8) / (7.5 + 0.006 * winnerEloDiff);
-      const shift = k * movMult * ((g.home.win ? 1 : 0) - expHome);
-      elo.set(g.home.teamId, eh + shift);
-      elo.set(g.away.teamId, ea - shift);
+      records.push({
+        p,
+        homeWin: g.home.win,
+        pred: margin,
+        actual: g.home.pts - g.away.pts,
+        date: g.date,
+        teamGp: Math.min(gp(g.home.teamId), gp(g.away.teamId)),
+      });
     }
+
+    // 赛后用真实结果更新（当日预测都已记下，不存在信息泄漏；Elo 增量按当日开始时的评级算）
+    const shifts = new Map();
+    for (const g of day) {
+      played.set(g.home.teamId, gp(g.home.teamId) + 1);
+      played.set(g.away.teamId, gp(g.away.teamId) + 1);
+      lastPlayed.set(g.home.teamId, today);
+      lastPlayed.set(g.away.teamId, today);
+
+      if (inSeasonElo) {
+        const eh = getElo(g.home.teamId);
+        const ea = getElo(g.away.teamId);
+        const diff = eh + (g.neutral ? 0 : ELO_HOME_ADV) - ea;
+        const expHome = 1 / (1 + 10 ** (-diff / 400));
+        const mov = Math.abs(g.home.pts - g.away.pts);
+        const winnerEloDiff = g.home.win ? diff : -diff;
+        const movMult = ((mov + 3) ** 0.8) / (7.5 + 0.006 * winnerEloDiff);
+        const shift = k * movMult * ((g.home.win ? 1 : 0) - expHome);
+        shifts.set(g.home.teamId, (shifts.get(g.home.teamId) ?? 0) + shift);
+        shifts.set(g.away.teamId, (shifts.get(g.away.teamId) ?? 0) - shift);
+      }
+    }
+    for (const [id, d] of shifts) elo.set(id, getElo(id) + d);
   }
   return records;
 }
