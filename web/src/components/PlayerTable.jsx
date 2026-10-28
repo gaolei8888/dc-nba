@@ -57,7 +57,7 @@ const col = (key, cn, width, render, opts = {}) => {
   const abbr = ABBR[opts.abbrKey ?? key];
   return {
     key,
-    label: <Th abbr={abbr} cn={cn} />,
+    label: <Th abbr={abbr} label={cn} />,
     title: opts.hint ? `${cn} ${abbr} — ${opts.hint}` : `${cn} ${abbr}`,
     width,
     render,

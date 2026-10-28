@@ -219,8 +219,8 @@ function FourFactors({ ff }) {
           key: "label", label: "要素", align: "left", width: 138, value: (r) => r.i,
           render: (r) => <span className="row-label"><b>{r.abbr}</b><i>{r.label}</i></span>,
         },
-        { key: "own", label: <Th abbr="TM" cn="己方" />, title: "己方", width: 66, render: (r) => `${rate(r.own)}%` },
-        { key: "opp", label: <Th abbr="OPP" cn="对手" />, title: "对手", width: 66, render: (r) => `${rate(r.opp)}%` },
+        { key: "own", label: <Th abbr="TM" label="己方" />, title: "己方", width: 66, render: (r) => `${rate(r.own)}%` },
+        { key: "opp", label: <Th abbr="OPP" label="对手" />, title: "对手", width: 66, render: (r) => `${rate(r.opp)}%` },
         {
           key: 'diff', label: '优势', width: 66,
           value: (r) => (r.better === 'high' ? r.own - r.opp : r.opp - r.own),

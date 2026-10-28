@@ -1,5 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import { probColor, snapshotAge } from '../lib/format.js';
+import { probColor } from '../lib/format.js';
+import { useI18n } from '../i18n/react.jsx';
+import { errorText } from '../lib/apiError.js';
 
 const LOGO = (teamId) => `https://cdn.nba.com/logos/nba/${teamId}/primary/L/logo.svg`;
 const HEADSHOT = (playerId) => `https://cdn.nba.com/headshots/nba/latest/260x190/${playerId}.png`;
@@ -71,8 +73,9 @@ export function PlayerHeadshot({ player, size = 30 }) {
   );
 }
 
-/** 球队单元格：队标 + 中文名（+ 缩写） */
+/** 球队单元格：队标 + 队名（中文用 cn、英文用 full，+ 缩写） */
 export function TeamCell({ team, onClick, showAbbr = true, size = 22 }) {
+  const { fmt } = useI18n();
   if (!team) return <span className="dim">—</span>;
   return (
     <span
@@ -81,7 +84,7 @@ export function TeamCell({ team, onClick, showAbbr = true, size = 22 }) {
       onClick={onClick}
     >
       <TeamLogo team={team} size={size} />
-      <span className="nm">{team.cn}</span>
+      <span className="nm">{fmt.teamName(team)}</span>
       {showAbbr && <span className="ab">{team.abbr}</span>}
     </span>
   );
@@ -100,35 +103,42 @@ export function PlayerCell({ player, size = 28, children }) {
   );
 }
 
-const INJURY_LABEL = { out: '缺阵', doubtful: '存疑', dayToDay: '每日观察', unknown: '伤病' };
-
 /** 伤病徽标：鼠标悬停显示伤处与预计复出 */
 export function InjuryBadge({ injury }) {
+  const { t } = useI18n();
   if (!injury) return null;
   const parts = [injury.statusRaw, injury.side, injury.type, injury.detail]
     .filter(Boolean).join(' · ');
-  const back = injury.returnDate ? `　预计复出 ${injury.returnDate}` : '';
+  const back = injury.returnDate ? ` · ${t('common.returnDate', { date: injury.returnDate })}` : '';
   return (
     <span
       className={`chip ${injury.status === 'out' ? 'injury-out' : 'injury-dtd'}`}
       style={{ marginLeft: 6 }}
       title={parts + back}
     >
-      {INJURY_LABEL[injury.status] ?? '伤病'}
+      {t(`common.injury.${injury.status}`)}
     </span>
   );
 }
 
 /**
- * 表头标签：英文缩写在上、中文在下。
- * NBA 的缩写是通用语言，但中文用户仍需要一眼看懂，所以两个都留。
+ * 表头标签：缩写在上、本地语言名称在下（中文）。
+ * 英文界面缩写本身就是通用语言，只显示缩写，label 放进悬停说明。
  */
-export function Th({ abbr, cn }) {
-  if (!abbr) return cn;
+export function Th({ abbr, label }) {
+  const { lang } = useI18n();
+  if (!abbr) return label;
+  if (lang === 'en') {
+    return (
+      <span className="th-label" title={typeof label === 'string' ? label : undefined}>
+        <b>{abbr}</b>
+      </span>
+    );
+  }
   return (
     <span className="th-label">
       <b>{abbr}</b>
-      <i>{cn}</i>
+      <i>{label}</i>
     </span>
   );
 }
@@ -173,6 +183,8 @@ export function Meter({ value, max = 1, label }) {
  * columns: [{ key, label, align?, render?(row), value?(row), width?, title? }]
  */
 export function DataTable({ columns, rows, initialSort, onRowClick, rowKey = (r, i) => i, maxHeight }) {
+  const { t, fmt } = useI18n();
+  const intl = fmt.intl;
   const [sort, setSort] = useState(initialSort ?? { key: columns[0].key, dir: 'desc' });
 
   const valueOf = (col, row) => (col.value ? col.value(row) : row[col.key]);
@@ -192,11 +204,11 @@ export function DataTable({ columns, rows, initialSort, onRowClick, rowKey = (r,
       if (x === null || x === undefined) return 1;
       if (y === null || y === undefined) return -1;
       if (typeof x === 'string' || typeof y === 'string') {
-        return String(x).localeCompare(String(y), 'zh') * dir;
+        return String(x).localeCompare(String(y), intl) * dir;
       }
       return (x - y) * dir;
     });
-  }, [rows, sort, columns]);
+  }, [rows, sort, columns, intl]);
 
   const toggle = (key) =>
     setSort((s) => (s.key === key
@@ -238,18 +250,20 @@ export function DataTable({ columns, rows, initialSort, onRowClick, rowKey = (r,
           ))}
         </tbody>
       </table>
-      {sorted.length === 0 && <div className="empty">没有符合条件的数据</div>}
+      {sorted.length === 0 && <div className="empty">{t('common.noMatch')}</div>}
     </div>
   );
 }
 
-export function Loading({ text = '加载中…' }) {
-  return <div className="loading">{text}</div>;
+export function Loading({ text }) {
+  const { t } = useI18n();
+  return <div className="loading">{text ?? t('common.loading')}</div>;
 }
 
 export function ErrorBox({ error }) {
+  const { t } = useI18n();
   if (!error) return null;
-  return <div className="err">{String(error.message ?? error)}</div>;
+  return <div className="err">{errorText(error, t)}</div>;
 }
 
 export function Segmented({ options, value, onChange }) {
@@ -277,30 +291,31 @@ export function Segmented({ options, value, onChange }) {
  * 低于 52.38% 的打平线。所以这里只讲"分歧在哪"，不讲"该买哪边"。
  */
 export function MarketCompare({ market, prediction, home, away }) {
+  const { t, fmt } = useI18n();
   if (!market) return null;
   const fmtLine = (v) => (v > 0 ? `+${v}` : `${v}`);
   // 盘口是抓取时的快照，博彩商随后可能改线。旧到一定程度就要显式警告：
   // 用户看到一条三周前的线却以为是当前的，比看不到盘口更糟。
-  const age = snapshotAge(market.fetchedAt);
+  const age = fmt.snapshotAge(market.fetchedAt);
   const edge = market.edge ?? 0;
   const big = Math.abs(edge) >= 3;
   const favors = edge > 0 ? home : away;
 
   const rows = [
     {
-      k: '让分（主队）',
-      hint: '负数表示主队让分',
+      k: t('common.market.spread'),
+      hint: t('common.market.spreadHint'),
       model: fmtLine(prediction.spread),
       market: fmtLine(market.spread),
     },
     {
-      k: '总分',
-      model: prediction.total?.toFixed(1),
-      market: market.total === null || market.total === undefined ? '—' : market.total.toFixed(1),
+      k: t('common.market.total'),
+      model: fmt.num(prediction.total, 1),
+      market: fmt.num(market.total, 1),
     },
     {
-      k: '主队胜率',
-      hint: market.homeProb === null ? '盘口未提供钱线' : '已去除抽水',
+      k: t('common.market.homeProb'),
+      hint: market.homeProb === null ? t('common.market.noMoneyline') : t('common.market.vigRemoved'),
       model: `${(prediction.homeWinProb * 100).toFixed(0)}%`,
       market: market.homeProb === null || market.homeProb === undefined
         ? '—' : `${(market.homeProb * 100).toFixed(0)}%`,
@@ -310,12 +325,12 @@ export function MarketCompare({ market, prediction, home, away }) {
   return (
     <div className="market">
       <div className="market-head">
-        <span className="market-title">盘口对照</span>
+        <span className="market-title">{t('common.market.title')}</span>
         <span className="dim">
-          {market.provider ?? '博彩'}
+          {market.provider ?? t('common.market.provider')}
           {market.openSpread !== null && market.openSpread !== undefined
             && market.openSpread !== market.spread
-            && ` · 开盘 ${fmtLine(market.openSpread)}`}
+            && ` · ${t('common.market.open', { line: fmtLine(market.openSpread) })}`}
           {age && (
             <span className={age.stale ? 'market-age stale' : 'market-age'} title={market.fetchedAt}>
               {` · ${age.text}`}
@@ -325,12 +340,12 @@ export function MarketCompare({ market, prediction, home, away }) {
       </div>
       {age?.stale && (
         <div className="market-stale">
-          这批盘口是 {age.days} 天前抓的，博彩商此后可能已经改线。以当前实际盘口为准。
+          {t('common.market.stale', { days: age.days })}
         </div>
       )}
       <table className="market-table">
         <thead>
-          <tr><th /><th>模型</th><th>盘口</th></tr>
+          <tr><th /><th>{t('common.market.model')}</th><th>{t('common.market.line')}</th></tr>
         </thead>
         <tbody>
           {rows.map((r) => (
@@ -344,12 +359,11 @@ export function MarketCompare({ market, prediction, home, away }) {
       </table>
       <div className={`market-edge${big ? ' big' : ''}`}>
         {Math.abs(edge) < 0.5
-          ? '模型与市场基本一致'
-          : <>模型比市场更看好 <b>{favors?.abbr ?? (edge > 0 ? '主队' : '客队')}</b> {Math.abs(edge).toFixed(1)} 分</>}
+          ? t('common.market.agree')
+          : t('common.market.favors', { team: favors?.abbr ?? t(edge > 0 ? 'common.market.home' : 'common.market.away'), pts: fmt.num(Math.abs(edge), 1) })}
       </div>
       <div className="market-note">
-        盘口只作对照，不参与模型计算。回测显示跟着分歧下注的让分命中率是 49.1%，
-        低于 52.38% 的打平线——分歧值得看，但不构成下注建议。
+        {t('common.market.note')}
       </div>
     </div>
   );

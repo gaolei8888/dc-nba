@@ -246,7 +246,7 @@ export function ImpactValidation({ impact }) {
           { key: 'n', label: '人数', width: 58 },
           ...names.map((n) => ({
             key: n,
-            label: n === 'IMP' ? <Th abbr="IMP" cn="混合" /> : n,
+            label: n === 'IMP' ? <Th abbr="IMP" label="混合" /> : n,
             title: n,
             width: n === 'IMP' ? 76 : 112,
             render: (r) => {

@@ -94,39 +94,39 @@ export default function Dashboard() {
         { key: 'division', label: '赛区', width: 62, render: (r) => <span className="dim">{DIV_CN[r.division] ?? r.division}</span> },
       ]),
     {
-      key: "total", label: <Th abbr="RTG" cn={rosterMode ? '阵容+战绩' : '综合实力'} />, title: rosterMode ? '阵容先验 + 本季战绩修正：(K·阵容先验 + n·对手调整净胜分)/(K+n)，相对联盟平均的每场分差，实验估计' : '综合实力 RTG — 相对联盟平均的每场净胜分预期', width: 92,
+      key: "total", label: <Th abbr="RTG" label={rosterMode ? '阵容+战绩' : '综合实力'} />, title: rosterMode ? '阵容先验 + 本季战绩修正：(K·阵容先验 + n·对手调整净胜分)/(K+n)，相对联盟平均的每场分差，实验估计' : '综合实力 RTG — 相对联盟平均的每场净胜分预期', width: 92,
       render: (r) => <b className={signClass(r.total)}>{signed(r.total, 2)}</b>,
     },
     ...(rosterMode ? [
-      { key: 'priorTotal', label: <Th abbr="PRI" cn="阵容先验" />, width: 82, title: '只看当前名单 IMP × 预计分钟（含已报缺阵），不看比赛结果',
+      { key: 'priorTotal', label: <Th abbr="PRI" label="阵容先验" />, width: 82, title: '只看当前名单 IMP × 预计分钟（含已报缺阵），不看比赛结果',
         render: (r) => <span className={signClass(r.priorTotal)}>{signed(r.priorTotal, 2)}</span> },
-      { key: 'resultsAdj', label: <Th abbr="RES" cn="战绩修正" />, width: 82,
+      { key: 'resultsAdj', label: <Th abbr="RES" label="战绩修正" />, width: 82,
         title: '本季已赛结果（按对手强度与主场调整的净胜分）带来的修正；已赛越多，修正越大',
         render: (r) => r.resultsAdj == null ? <span className="dim">—</span>
           : <span className={signClass(r.resultsAdj)} title={`已赛 ${r.rosterProjection?.results?.games ?? 0} 场，对手调整净胜分 ${signed(r.rosterProjection?.results?.adjResult, 2)}`}>{signed(r.resultsAdj, 2)}</span> },
       { key: 'legacyRank', label: '旧名次', width: 64, title: '旧 Elo 综合模型的联盟名次，仅供对照', render: (r) => <span className="dim">{r.legacyRank}</span> },
-      { key: 'legacyTotal', label: <Th abbr="OLD" cn="旧模型分" />, width: 82, render: (r) => <span className="dim">{signed(r.legacyTotal, 2)}</span> },
+      { key: 'legacyTotal', label: <Th abbr="OLD" label="旧模型分" />, width: 82, render: (r) => <span className="dim">{signed(r.legacyTotal, 2)}</span> },
       { key: 'coverage', label: 'IMP 覆盖', width: 82, title: '预计240分钟中使用实测IMP（本季混合或上季）的占比；其余为样本收缩估计（未验证）', value: (r) => r.rosterProjection?.knownImpactPct,
         render: (r) => r.rosterProjection?.error ? <span className="neg" title={r.rosterProjection.error}>数据不足</span> : <span className="dim">{num(r.rosterProjection.knownImpactPct * 100, 0)}%</span> },
-    ] : [{ key: "elo", label: <Th abbr="ELO" cn="评级" />, title: "Elo 评级", width: 66, render: (r) => <span className="mono">{num(r.elo, 0)}</span> }]),
+    ] : [{ key: "elo", label: <Th abbr="ELO" label="评级" />, title: "Elo 评级", width: 66, render: (r) => <span className="mono">{num(r.elo, 0)}</span> }]),
     {
-      key: "netRtg", label: <Th abbr="NET" cn="净效率" />, title: "净效率 NET — 本赛季至今百回合净效率", width: 82,
+      key: "netRtg", label: <Th abbr="NET" label="净效率" />, title: "净效率 NET — 本赛季至今百回合净效率", width: 82,
       render: (r) => <span className={signClass(r.netRtg)}>{signed(r.netRtg)}</span>,
     },
     ...(!rosterMode ? [{
-      key: "turnoverAdj", label: <Th abbr="ROS" cn="阵容更迭" />, width: 82,
+      key: "turnoverAdj", label: <Th abbr="ROS" label="阵容更迭" />, width: 82,
       title: "阵容更迭 ROS — 转会、签约、离队带来的实力变化",
       render: (r) => <span className={signClass(r.turnoverAdj)}>{signed(r.turnoverAdj, 2)}</span>,
     }] : []),
     {
-      key: "rosterAdj", label: <Th abbr="OUT" cn="缺阵修正" />, title: rosterMode ? '相对全员健康阵容的变化（按出场概率加权，空出的分钟主要由轮换中段与替补顶上）' : '缺阵修正 OUT — 勾掉的球员对实力的影响', width: 82,
+      key: "rosterAdj", label: <Th abbr="OUT" label="缺阵修正" />, title: rosterMode ? '相对全员健康阵容的变化（按出场概率加权，空出的分钟主要由轮换中段与替补顶上）' : '缺阵修正 OUT — 勾掉的球员对实力的影响', width: 82,
       render: (r) => (r.rosterAdj
         ? <span className={signClass(r.rosterAdj)}>{signed(r.rosterAdj, 2)}</span>
         : <span className="dim">—</span>),
     },
-    { key: "offRtg", label: <Th abbr="ORtg" cn="进攻" />, title: "进攻效率 ORtg", width: 64, render: (r) => num(r.offRtg) },
-    { key: "defRtg", label: <Th abbr="DRtg" cn="防守" />, title: "防守效率 DRtg", width: 64, render: (r) => num(r.defRtg) },
-    { key: "pace", label: <Th abbr="PACE" cn="节奏" />, title: "节奏 PACE", width: 64, render: (r) => num(r.pace) },
+    { key: "offRtg", label: <Th abbr="ORtg" label="进攻" />, title: "进攻效率 ORtg", width: 64, render: (r) => num(r.offRtg) },
+    { key: "defRtg", label: <Th abbr="DRtg" label="防守" />, title: "防守效率 DRtg", width: 64, render: (r) => num(r.defRtg) },
+    { key: "pace", label: <Th abbr="PACE" label="节奏" />, title: "节奏 PACE", width: 64, render: (r) => num(r.pace) },
     {
       key: 'record', label: `${(meta.displayCurrent ? meta.targetSeason : meta.priorSeason)} 战绩`, width: 90,
       render: (r) => <span className="mono dim">{r.record ?? r.priorRecord}</span>,

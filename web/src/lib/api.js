@@ -1,7 +1,8 @@
+import { toApiError } from './apiError.js';
+
 const json = async (res) => {
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `请求失败 (${res.status})`);
+    throw await toApiError(res);
   }
   return res.json();
 };
