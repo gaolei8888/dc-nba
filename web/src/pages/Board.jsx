@@ -359,7 +359,7 @@ function PaperBetting({ teamById }) {
                 ]}
               />
             ) : <div className="empty">没有同时带开盘与收盘价的赛季</div>}
-            <p className="note">长期赢盘口的下注者通常 CLV 为正；区间与 ROI 一样含 0 就是没证据。</p>
+            <p className="note">长期赢盘口的下注者通常 CLV 为正，但正 CLV 不等于赚钱：收盘往我们这边挪得不够多，照样付不起抽水——要和同一行的 ROI 一起看。区间含 0 就是没证据。</p>
           </div>
           <div className="card">
             <h2>为什么赚/亏：概率准不准<span className="sub">模型 vs 该家去水概率，同一批比赛，越低越好</span></h2>
