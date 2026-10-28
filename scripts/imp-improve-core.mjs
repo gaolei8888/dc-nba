@@ -132,16 +132,24 @@ function spmSingle(mdl, p, pad) {
  *   stat: 逐项曲线数组，alpha：feat 路径下每季特征平移到 N+1 岁（Σ g_j）
  *   tot: 总值曲线，align：spm 路径下每季 SPM 平移到第 N 季的岁数（最后的 +g(age_N) 由 cfg.age 负责）
  */
-function spmMulti(mdl, p, pad, multi, aging = null) {
-  if (!eligible(p)) return null;
+function spmMulti(mdl, p, pad, multi, aging = null, relaxed = false) {
+  // relaxed（实验 10）：第 N 季不够门槛也算，小样本交给分钟收缩；只走逐项特征路径
+  if (!eligible(p) && !relaxed) return null;
+  if (relaxed && !((p.min ?? 0) > 0)) return null;
   const single = !multi || multi.mode === 'single';
   if (single && !aging?.stat) {
     const v = spmSingle(mdl, p, pad);
     return v === null ? null : { v, mEff: minutesOf(p) };
   }
   const span = single ? 1 : (multi.span ?? 3);
-  const d = single ? [1] : seasonWeights(multi, span);
   const back = Array.from({ length: span }, (_, j) => allSeasons[idxAll(p.season) - j]).map((s) => (s ? byId[s].get(p.playerId) : null));
+  // lastEligible（实验 10 F2）：只取最近一个够门槛的往季（j≥1）；都没有就取第 N 季
+  let d;
+  if (single) d = [1];
+  else if (multi.mode === 'lastEligible') {
+    const j = back.findIndex((q, i) => i >= 1 && eligible(q));
+    d = back.map((_, i) => (i === (j >= 1 ? j : 0) ? 1 : 0));
+  } else d = seasonWeights(multi, span);
   const ageAt = (q, j) => (Number.isFinite(q?.age) ? q.age : (Number.isFinite(p.age) ? p.age - j : null));
   if (!single && multi.level === 'spm') {
     const items = back.map((q, j) => {
@@ -273,7 +281,7 @@ function statCurves(agePairs, { weight = 'harm', impute = false } = {}) {
  */
 const DEF = {
   k: 3200, mEff: false, pad: 0, lam: 3000, multi: null, src: 'apm', srcLam: 6000, span: 3, hl: 1, prior: null,
-  w: 0.35, c: 0, sides: false, age: 0, ageStat: 0, align: false, ageOpt: null, apmAge: 0,
+  w: 0.35, c: 0, sides: false, age: 0, ageStat: 0, align: false, ageOpt: null, apmAge: 0, relaxed: false,
 };
 
 function predictor(ctx, cfgIn) {
@@ -317,10 +325,11 @@ function predictor(ctx, cfgIn) {
   for (const sk of sideKeys) {
     spmMap[sk] = new Map();
     for (const p of players[s]) {
-      const r = spmMulti(mods[sk], p, cfg.pad, cfg.multi, aging);
+      const r = spmMulti(mods[sk], p, cfg.pad, cfg.multi, aging, cfg.relaxed);
       if (r) spmMap[sk].set(p.playerId, r);
     }
-    mu[sk] = mean([...spmMap[sk].values()].map((r) => r.v));
+    // 人群均值只取够门槛的人（relaxed 时也一样，保持与线上同一个收缩目标）
+    mu[sk] = mean(players[s].filter((p) => eligible(p) && spmMap[sk].has(p.playerId)).map((p) => spmMap[sk].get(p.playerId).v));
   }
   const g = cfg.age ? ageCurve(train, ctx.agePairs, ageOpt) : null;
   const measKey = { t: 'apm', o: 'o', d: 'd' };
@@ -439,6 +448,6 @@ function calibratedValues(upto, cfg, { train: trainIn = null } = {}) {
 }
 
 export {
-  calibratedValues, players, lineups, stints, allSeasons, seasons, byId, minutesOf, apmBy, meas, padsOf, spmModel, spmSingle, spmMulti,
+  calibratedValues, players, rawVec, idxAll, lineups, stints, allSeasons, seasons, byId, minutesOf, apmBy, meas, padsOf, spmModel, spmSingle, spmMulti,
   pairs, ageCurve, statCurves, backfillPairs, DEF, predictor, CTX, scoreCfg, eligible,
 };
