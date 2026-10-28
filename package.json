@@ -28,7 +28,9 @@
     "rapm:lab": "node scripts/rapm-lab.mjs",
     "impact:lab": "node scripts/impact-lab.mjs",
     "injury:fetch": "node scripts/injury-history.mjs",
-    "injury:lab": "node scripts/injury-lab.mjs"
+    "injury:lab": "node scripts/injury-lab.mjs",
+    "shadow": "node scripts/shadow.mjs",
+    "values:push": "sh deploy/player-values.sh"
   },
   "dependencies": {
     "compression": "^1.8.1",

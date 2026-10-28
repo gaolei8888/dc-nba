@@ -65,11 +65,15 @@ elif ! flock -n 9; then
 fi
 
 ledger() {
-  for c in settle capture; do
-    # --late 只对 capture 有意义；$LATE 为空时不传
-    # shellcheck disable=SC2086
-    timeout 300 docker exec -e NODE_NO_WARNINGS=1 "$CONTAINER" node scripts/ledger.mjs "$c" $([ "$c" = capture ] && echo $LATE) \
-      || log "模拟投注账本 $c 失败（不影响线上）"
+  # shadow = 伤病报告影子运行（scripts/shadow.mjs）：同样在运行中的容器里写 data-db/，
+  # capture 在 22:00 / 06:30（--late）那两次各抓 1 份官方报告、记预测；14:30 那次不在时点窗口，只结算
+  for s in ledger shadow; do
+    for c in settle capture; do
+      # --late 只对 capture 有意义；$LATE 为空时不传
+      # shellcheck disable=SC2086
+      timeout 300 docker exec -e NODE_NO_WARNINGS=1 "$CONTAINER" node scripts/$s.mjs "$c" $([ "$c" = capture ] && echo $LATE) \
+        || log "$s $c 失败（不影响线上）"
+    done
   done
 }
 

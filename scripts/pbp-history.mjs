@@ -27,7 +27,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { nbaGet, statsUrl, DATA_DIR, readJsonAuto, writeJsonGz } from '../server/nbaClient.mjs';
-import { readBox, buildStints, checkMinutes } from '../server/pbp.mjs';
+import { fetchGameStints } from '../server/pbp.mjs';
 
 const HISTORY_DIR = path.join(DATA_DIR, 'history');
 const CONCURRENCY = Number(process.env.CONCURRENCY ?? 2);
@@ -40,35 +40,7 @@ const log = (...a) => console.log('·', ...a);
 
 class Throttled extends Error {}
 
-async function fetchGame(gameId) {
-  const [pbp, bx] = await Promise.all([
-    nbaGet(statsUrl('playbyplayv3', { GameID: gameId, StartPeriod: 1, EndPeriod: 14 })),
-    nbaGet(statsUrl('boxscoretraditionalv3', {
-      GameID: gameId, StartPeriod: 1, EndPeriod: 14, StartRange: 0, EndRange: 28800, RangeType: 0,
-    })),
-  ]);
-  const actions = pbp?.game?.actions;
-  if (!actions?.length) throw new Error('PBP 为空');
-  const box = readBox(bx);
-  const { stints, seconds, warnings } = buildStints(actions, box);
-  const bad = checkMinutes(seconds, box);
-  if (bad.length || warnings.length) {
-    const why = warnings[0] ?? `${bad[0].name} box=${bad[0].box}s pbp=${bad[0].pbp}s`;
-    return { gameId, ok: false, why: `${bad.length} 人分钟对不上 / ${warnings.length} 条告警：${why}` };
-  }
-  return {
-    gameId,
-    ok: true,
-    homeId: box.home.teamId,
-    awayId: box.away.teamId,
-    // 压扁成定长数组，一个赛季八万段，对象字面量会把文件撑到几百 MB
-    stints: stints.map((s) => [
-      ...s.home, ...s.away,
-      Math.round(s.poss.home * 100) / 100, Math.round(s.poss.away * 100) / 100,
-      s.pts.home, s.pts.away, s.sec,
-    ]),
-  };
-}
+const fetchGame = (gameId) => fetchGameStints(gameId, (e, p) => nbaGet(statsUrl(e, p)));
 
 /** 固定并发的任务池；比 chunk 分批快，因为不用等最慢的那个 */
 async function pool(items, worker, { concurrency, onDone }) {

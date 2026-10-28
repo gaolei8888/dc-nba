@@ -14,6 +14,7 @@ import * as lab from './lab.mjs';
 import { liveRosterRankings } from './liveRosterRankings.mjs';
 import { buildBoard } from './predictionBoard.mjs';
 import { ledgerRows, ledgerReport } from './ledger.mjs';
+import { shadowAll, shadowSummary } from './injuryShadow.mjs';
 import {
   scorePick, slateDays, submitLivePicks, livePickRows, settleLive, liveBoard, isLiveGame, isLocked,
 } from './livePlay.mjs';
@@ -404,6 +405,11 @@ app.get('/api/paper', wrap((req, res) => {
       ? { available: true, ...ledgerReport(ledgerRows(ledgerDb), { B: 1000 }) }
       : { available: false, reason: LEDGER_OFF ? 'ENABLE_LEDGER=0' : '账本数据库打不开，见服务端日志' },
   });
+}));
+
+/** 伤病报告影子运行：三套预测的前向成绩（scripts/shadow.mjs 写，同账本一个库，只读）。不影响页面显示的预测 */
+app.get('/api/shadow', wrap((req, res) => {
+  res.json(ledgerDb ? { available: true, ...shadowSummary(shadowAll(ledgerDb)) } : { available: false });
 }));
 
 // ---------------------------------------------------------------- 排行榜

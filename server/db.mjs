@@ -126,6 +126,79 @@ BEGIN SELECT RAISE(ABORT, 'paper_bets 只追加：已记录的字段不能改');
 `;
 
 /**
+ * 伤病报告影子运行（见 server/injuryShadow.mjs）：每场三套预测，只记录、不改页面显示的预测。
+ *   - (game_id, variant) 只认第一次；不能删；预测与输入字段不能改；比分只写一次；
+ *   - 开赛后插不进（按真实时钟，且 captured_at 必须早于开赛）；
+ *   - 用到的报告标注时间必须早于 captured_at——库里兜底「不偷看未来」。
+ * injury_reports：抓到的官方报告解析结果，同名只存一次，按标注时间（UTC）找「当时能看到的」那几份。
+ */
+const SHADOW_FROZEN = ['game_id', 'variant', 'params_version', 'captured_at', 'game_date', 'tipoff_utc', 'home_id', 'away_id',
+  'base_margin', 'beta', 'adj_home', 'adj_away', 'margin', 'p_home', 'home_report', 'home_report_as_of',
+  'away_report', 'away_report_as_of', 'values_fitted_at', 'values_built_at', 'data_at', 'inputs'];
+const SHADOW_SCORE = ['home_score', 'away_score', 'home_win', 'settled_at'];
+const NOW_SQL = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
+export const SHADOW_SCHEMA = `
+CREATE TABLE IF NOT EXISTS shadow_predictions (
+  game_id           TEXT NOT NULL,
+  variant           TEXT NOT NULL CHECK (variant IN ('base', 'r22', 'r0630')),
+  params_version    INTEGER NOT NULL,
+  captured_at       TEXT NOT NULL,
+  game_date         TEXT NOT NULL,
+  tipoff_utc        TEXT NOT NULL,
+  home_id           INTEGER NOT NULL,
+  away_id           INTEGER NOT NULL,
+  base_margin       REAL NOT NULL,
+  beta              REAL,
+  adj_home          REAL,
+  adj_away          REAL,
+  margin            REAL NOT NULL,
+  p_home            REAL NOT NULL,
+  home_report       TEXT,
+  home_report_as_of TEXT,
+  away_report       TEXT,
+  away_report_as_of TEXT,
+  values_fitted_at  TEXT,
+  values_built_at   TEXT,
+  data_at           TEXT,
+  inputs            TEXT,
+  home_score        INTEGER,
+  away_score        INTEGER,
+  home_win          INTEGER,
+  settled_at        TEXT,
+  PRIMARY KEY (game_id, variant)
+);
+CREATE TRIGGER IF NOT EXISTS shadow_dup BEFORE INSERT ON shadow_predictions
+WHEN EXISTS (SELECT 1 FROM shadow_predictions WHERE game_id = NEW.game_id AND variant = NEW.variant)
+BEGIN SELECT RAISE(IGNORE); END;
+CREATE TRIGGER IF NOT EXISTS shadow_after_tipoff BEFORE INSERT ON shadow_predictions
+WHEN NEW.tipoff_utc <= ${NOW_SQL} OR NEW.captured_at >= NEW.tipoff_utc
+BEGIN SELECT RAISE(ABORT, 'shadow_predictions：开赛后不能记'); END;
+CREATE TRIGGER IF NOT EXISTS shadow_lookahead BEFORE INSERT ON shadow_predictions
+WHEN NEW.home_report_as_of >= NEW.captured_at OR NEW.away_report_as_of >= NEW.captured_at
+BEGIN SELECT RAISE(ABORT, 'shadow_predictions：用了记录时刻之后（未来）的报告'); END;
+CREATE TRIGGER IF NOT EXISTS shadow_no_delete BEFORE DELETE ON shadow_predictions
+BEGIN SELECT RAISE(ABORT, 'shadow_predictions 只追加：不能删除'); END;
+CREATE TRIGGER IF NOT EXISTS shadow_frozen BEFORE UPDATE ON shadow_predictions
+WHEN ${changed(SHADOW_FROZEN)}
+  OR (OLD.settled_at IS NOT NULL AND (${changed(SHADOW_SCORE)}))
+  OR (NEW.settled_at IS NULL AND (${changed(SHADOW_SCORE)}))
+BEGIN SELECT RAISE(ABORT, 'shadow_predictions 只追加：已记录的字段不能改'); END;
+CREATE TABLE IF NOT EXISTS injury_reports (
+  name        TEXT PRIMARY KEY,
+  as_of       TEXT NOT NULL,
+  fetched_at  TEXT NOT NULL,
+  json        TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS injury_reports_dup BEFORE INSERT ON injury_reports
+WHEN EXISTS (SELECT 1 FROM injury_reports WHERE name = NEW.name)
+BEGIN SELECT RAISE(IGNORE); END;
+CREATE TRIGGER IF NOT EXISTS injury_reports_no_delete BEFORE DELETE ON injury_reports
+BEGIN SELECT RAISE(ABORT, 'injury_reports 只追加：不能删除'); END;
+CREATE TRIGGER IF NOT EXISTS injury_reports_frozen BEFORE UPDATE ON injury_reports
+BEGIN SELECT RAISE(ABORT, 'injury_reports 只追加：不能改'); END;
+`;
+
+/**
  * 人机对赌「本季实战」（见 server/livePlay.mjs）。和回放的 picks 表分开：回放可立即结算、
  * 题目答案早已公开，实战是开赛前下判断、赛后才知道结果，两边战绩不能混。
  *   - 一人一场一行；开赛前可改（选择与模型快照一起改），开赛后改不了——触发器按真实时钟兜底，
@@ -186,7 +259,8 @@ export function openWith(schema, label, dbPath = DB_PATH) {
     return null;
   }
 }
-export const openLedger = (dbPath = DB_PATH) => openWith(LEDGER_SCHEMA, '模拟投注账本', dbPath);
+// 影子运行与账本同一个句柄：同是「开赛前记下、赛后结算」的前向记录，同一个开关（ENABLE_LEDGER）
+export const openLedger = (dbPath = DB_PATH) => openWith(LEDGER_SCHEMA + SHADOW_SCHEMA, '模拟投注账本', dbPath);
 
 /**
  * 打开数据库。任何失败都不抛，只记原因并让 isEnabled() 返回 false。

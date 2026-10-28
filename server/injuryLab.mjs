@@ -25,6 +25,43 @@ export function rotValue(list, val, { unknownV = -1, repl = -2 } = {}) {
   return (sum + repl * rem) / 48;
 }
 
+/** 一场的段 -> { home: Map(id -> 分钟), away: Map }。段格式见 scripts/pbp-history.mjs：前 10 位是主 5 客 5，x[14] 是秒 */
+export function stintMinutes(st) {
+  const home = new Map(); const away = new Map();
+  for (const x of st) {
+    for (let i = 0; i < 5; i++) home.set(x[i], (home.get(x[i]) ?? 0) + x[14] / 60);
+    for (let i = 5; i < 10; i++) away.set(x[i], (away.get(x[i]) ?? 0) + x[14] / 60);
+  }
+  return { home, away };
+}
+
+/**
+ * 常规轮换：比赛日 date 之前最近 W 场的场均分钟（缺席算 0）。recent: [{ date, mins: Map 或 {id: 分钟} }]，按日期升序。
+ * 不足 3 场返回 null（调整记 0）
+ */
+export function usualRotation(recent, date, W = 10) {
+  const past = recent.filter((g) => g.date < date).slice(-W);
+  if (past.length < 3) return null;
+  const tot = new Map();
+  for (const g of past) for (const [id, m] of g.mins instanceof Map ? g.mins : Object.entries(g.mins)) tot.set(Number(id), (tot.get(Number(id)) ?? 0) + m);
+  return [...tot].map(([id, m]) => ({ id, m: m / past.length }));
+}
+
+/**
+ * RAPM 的训练段：parts = [{ w, games: [{ date, st }] }]，w = 1 的是本季，只取 before 之前的场；
+ * 往季（w < 1）整季都用，回合与得分按 w 缩放（效率不变、权重变小），秒数不变。
+ */
+export function weightedStints(parts, before) {
+  const merged = [];
+  for (const { w, games } of parts) {
+    for (const g of games) {
+      if (w === 1 && g.date >= before) continue;
+      for (const x of g.st) merged.push(w === 1 ? x : [...x.slice(0, 10), x[10] * w, x[11] * w, x[12] * w, x[13] * w, x[14]]);
+    }
+  }
+  return merged;
+}
+
 /**
  * 按报告的预期缺阵调整。statusOf(id) -> 状态或 undefined（不在报告上），pPlay[状态] = 出场概率。
  * 球队没交名单（NOT YET SUBMITTED）或报告里没有这场：调用方别调这个，调整记 0。

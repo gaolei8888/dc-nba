@@ -19,7 +19,9 @@ import { computeRapm } from '../server/stintRapm.mjs';
 import { bootstrapCI, phaseOf } from '../server/fusionLab.mjs';
 import { nbaGet, statsUrl, toRows } from '../server/nbaClient.mjs';
 import { decisionInstant, toEt } from '../server/injuryReport.mjs';
-import { STATUS_KEYS, matchName, nameIndex, playRates, reportAdj, rotValue, tipMinutes } from '../server/injuryLab.mjs';
+import {
+  STATUS_KEYS, matchName, nameIndex, playRates, reportAdj, rotValue, stintMinutes, tipMinutes, usualRotation, weightedStints,
+} from '../server/injuryLab.mjs';
 import { gamesFrom, placeBets, summarize, PRIMARY, TUNING_SEASON } from '../server/paperBetting.mjs';
 import { US_BOOKS } from '../server/books.mjs';
 
@@ -38,12 +40,8 @@ const games = {};
 for (const s of ALL) {
   const f = JSON.parse(zlib.gunzipSync(fs.readFileSync(`data/history/stints_${s}.json.gz`)));
   games[s] = Object.entries(f.games).map(([gid, [home, away, st]]) => {
-    const mh = new Map(); const ma = new Map();
-    for (const x of st) {
-      for (let i = 0; i < 5; i++) mh.set(x[i], (mh.get(x[i]) ?? 0) + x[14] / 60);
-      for (let i = 5; i < 10; i++) ma.set(x[i], (ma.get(x[i]) ?? 0) + x[14] / 60);
-    }
-    return { gid, date: dateOf.get(gid), home, away, st, mins: { [home]: mh, [away]: ma } };
+    const m = stintMinutes(st);
+    return { gid, date: dateOf.get(gid), home, away, st, mins: { [home]: m.home, [away]: m.away } };
   }).filter((g) => g.date).sort((a, b) => a.date.localeCompare(b.date) || a.gid.localeCompare(b.gid));
 }
 const firstGame = new Map();   // `${赛季}|${队}` -> Map(id -> 本季第一次为该队上场的日期)；姓名消歧只用比赛日之前的
@@ -58,21 +56,12 @@ const rosterBefore = (season, team, date) => new Set([...(firstGame.get(`${seaso
 const dayNum = (d) => Math.round(Date.parse(`${d}T00:00:00Z`) / 86400000);
 function fitAsOf(season, date) {
   const si = ALL.indexOf(season);
-  const merged = [];
-  for (let a = 0; a <= 2; a++) {
-    const s = ALL[si - a];
-    if (!s) continue;
-    const w = 0.5 ** a;
-    for (const g of games[s]) {
-      if (a === 0 && g.date >= date) continue;
-      for (const x of g.st) merged.push(w === 1 ? x : [...x.slice(0, 10), x[10] * w, x[11] * w, x[12] * w, x[13] * w, x[14]]);
-    }
-  }
+  const merged = weightedStints([0, 1, 2].filter((a) => ALL[si - a]).map((a) => ({ w: 0.5 ** a, games: games[ALL[si - a]] })), date);
   const v = new Map();
   for (const [k, o] of computeRapm(merged, { lambda: LAMBDA, minPoss: 0.25 })) if (k !== '__hca') v.set(k, o.rapm);
   return v;
 }
-const CTX = 'data/history/injury-lab-context.json';
+const CTX = process.env.INJURY_CTX ?? 'data/history/injury-lab-context.json';
 let ctx;   // gid -> { season, date, h|a: { team, usual:[{id,m}], val:{id:v}|null, today:[id], prev:[id] } }
 if (fs.existsSync(CTX)) ctx = read(CTX);
 else {
@@ -85,19 +74,17 @@ else {
       if (EVAL.includes(season) && dn - lastFit >= REFIT_DAYS) { val = fitAsOf(season, g.date); lastFit = dn; }
       const out = { season, date: g.date };
       for (const [side, t] of [['h', g.home], ['a', g.away]]) {
-        const past = (hist.get(t) ?? []).slice(-W);
+        const past = hist.get(t) ?? [];
         const today = [...g.mins[t].keys()];
-        if (past.length < 3) { out[side] = { team: t, usual: null, today }; continue; }
-        const tot = new Map();
-        for (const mm of past) for (const [id, m] of mm) tot.set(id, (tot.get(id) ?? 0) + m);
-        const usual = [...tot].map(([id, m]) => ({ id, m: m / past.length }));
+        const usual = usualRotation(past, g.date, W);
+        if (!usual) { out[side] = { team: t, usual: null, today }; continue; }
         out[side] = {
-          team: t, usual, today, prev: [...past[past.length - 1].keys()],
+          team: t, usual, today, prev: [...past[past.length - 1].mins.keys()],
           val: val ? Object.fromEntries(usual.map((p) => [p.id, val.get(p.id) ?? null]).filter(([, v]) => v !== null)) : null,
         };
       }
       ctx[g.gid] = out;
-      for (const t of [g.home, g.away]) { if (!hist.has(t)) hist.set(t, []); hist.get(t).push(g.mins[t]); }
+      for (const t of [g.home, g.away]) { if (!hist.has(t)) hist.set(t, []); hist.get(t).push({ date: g.date, mins: g.mins[t] }); }
     }
     console.log(`上下文 ${season} 完成`);
   }
@@ -292,6 +279,25 @@ for (const slot of SLOTS) {
     console.log(`  留出 ${hold}: ${STATUS_KEYS.map((s) => `${s} ${t[s].p.toFixed(3)}`).join('  ')}`);
   }
 }
+
+// ---------------------------------------------------------------- 影子运行要冻结的参数：P 用全部赛季、β 用全部评估季选（同一网格）
+// INJURY_PARAMS_OUT=server/injury-params-v1.json 时写出，否则只打印
+const frozen = {
+  version: 1, lambda: LAMBDA, minPoss: 0.25, seasonWeights: [1, 0.5, 0.25], window: W, refitDays: REFIT_DAYS, lagMin: LAG_MIN, spreadSd: 12, opts: OPTS, slots: {},
+};
+for (const slot of SLOTS) {
+  const rt = rates(slot, ALL);
+  const pPlay = Object.fromEntries(STATUS_KEYS.map((s) => [s, Number(rt[s].p.toFixed(4))]));
+  const adj = adjFor(`r${slot}`, pPlay);
+  let best = 0; let bl = Infinity;
+  for (const b of BETAS) {
+    const l = mean(recs.map((r) => ll(lab.normalCdf(r.pred + b * (adj.get(r.gameId) ?? 0), 12), r.homeWin)));
+    if (l < bl) { bl = l; best = b; }
+  }
+  frozen.slots[slot] = { beta: Number(best.toFixed(2)), pPlay };
+}
+console.log('\n冻结参数（影子运行用）：', JSON.stringify(frozen));
+if (process.env.INJURY_PARAMS_OUT) fs.writeFileSync(process.env.INJURY_PARAMS_OUT, `${JSON.stringify(frozen, null, 2)}\n`);
 
 // ---------------------------------------------------------------- 预注册的模拟投注规则，只报告（docs/paper-betting-verdict.md）
 console.log('\n模拟投注（预注册规则，只报告不调参；样本外 = 2022-23 之后）');

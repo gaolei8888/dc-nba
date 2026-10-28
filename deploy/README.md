@@ -159,3 +159,38 @@ cp data-prev/*.json data/ && docker compose build && docker compose up -d
 - 本地：`ENABLE_LEADERBOARD=0 node server/index.mjs`（非 production）也能玩，选择按浏览器档案 id 记在 `DB_PATH`（默认 `data/app.db`）。
   `PLAY_NOW=2026-10-29T00:30:00Z` 可把服务端「现在」拨到某一刻演示锁定（production 下忽略）。
   在副本上演练：复制库要用 `sqlite3 app.db ".backup copy.db"`（WAL 模式，直接 cp 会漏掉 -wal 里的新行）。
+
+## 伤病报告影子运行（2026-10-28 起，`server/injuryShadow.mjs`）
+
+依据 `docs/injury-report-experiment-verdict.md`。每场常规赛记三套赛前预测，**只记录，页面上显示的预测不变**：
+
+| 方案 | 何时记（北京） | 内容 |
+| --- | --- | --- |
+| `base` | 22:00 那次 | 线上默认预测（与模拟投注账本同一个 `predictSchedule`，不套缺阵勾选） |
+| `r22` | 22:00 那次 | base 净胜分 + β·(主调整 − 客调整)，用「现在 − 15 分钟」之前最新的官方报告 |
+| `r0630` | 06:30 那次（`--late`） | 同上，06:30 时能看到的报告；06:30 前就开打的下午场在 22:00 那次就记（沿用 22:00 的报告，与实验同） |
+
+谁做什么：
+
+| 谁 | 何时（北京） | 做什么 |
+| --- | --- | --- |
+| 服务器 cron（已有三行，不改） | 22:00 / 06:30 / 14:30 | `refresh.sh` 收尾时 `docker exec dc-nba node scripts/shadow.mjs settle` + `capture [--late]`。22:00 / 06:30 各抓 **1 份**官方 PDF（`ak-static.cms.nba.com`，2026-10-28 实测服务器直连 200），镜像里的 `pdftotext` 解析，存进库表 `injury_reports`；14:30 那次不在时点窗口，只结算 |
+| 本机 launchd `cn.tzspace.dc-nba.player-values` | 每天 21:15（本地 05:15 与 06:15 各排一次，按北京日期去重） | `deploy/player-values.sh`：增量抓本季新结束比赛的 PBP（stats.nba.com 只能本机抓），每 7 天重拟合 RAPM，把 `player-values.json` 拿 `.refresh.lock` 推到服务器 `data/`，22:00 那次刷新烤进镜像 |
+
+- **冻结参数** `server/injury-params-v1.json`（`npm run injury:lab` 写出，影子期内不改）：λ=2000、minPoss 0.25、本季 1 + 上季 0.5 + 上上季 0.25、
+  轮换 = 比赛日之前最近 10 场、β：22:00 **0.60** / 06:30 **0.65**（在 2022–26 四个评估季上合起来选；LOSO 各折 0.50–0.70）、
+  P(出场 | 状态) 用 2021–26 全部赛季。
+- **库**：`shadow_predictions`（主键 `(game_id, variant)`）与 `injury_reports`，和 `paper_bets` 同一个库、同一个句柄、同一个开关 `ENABLE_LEDGER`。
+  触发器：重复插入忽略（含 OR REPLACE）、不能删、预测与输入字段不能改、比分只写一次、**开赛后插不进**、
+  **用到的报告标注时间必须早于 `captured_at`**（不偷看未来）。
+- **过期就只记基线**：`player-values.json` 的 RAPM 超过 9 天或轮换超过 3 天（本机几天没开），`r22`/`r0630` 不记，`base` 照记。
+- **请求量**：官方报告每次 capture ≤ 15、每天 ≤ 40（正常每次 1 个；S3 对不存在的文件回 403 AccessDenied XML，按「没有」跳过，别的 403 熔断），
+  熔断状态在 `data-db/injury-fetch-state.json`。本机 PBP：leaguegamelog 1 + commonallplayers 1 + 每场 2 个，
+  一周约 50 场 ≈ 100 个，按天跑每天 15–30 个；显式上限每次 180 / 每天 500（与全量 ingest 共享单日计数），单次最多 80 场，剩下的下次续。
+- **页面**：预测总表 → 统计 最下面「影子模式（不影响显示的预测）」卡片，`/api/shadow`。
+- **切换（预注册）**：06:30 方案与基线配对满 300 场、Δ 对数损失 < 0（且没比基线差 0.005 以上）再提出切换，由高磊决定。
+
+演练（本地副本，不碰线上）：`DB_PATH=/tmp/x.db SHADOW_NOW=2026-10-28T14:05:00Z node scripts/shadow.mjs capture`，`… show`。
+本机 launchd：`launchctl list | grep dc-nba`；日志 `~/Library/Logs/dc-nba-player-values.log`。**本机要在北京 21:15 前后醒着**（睡着会在醒来时补跑）。
+
+Docker 镜像多了 `poppler-utils`：服务器连 `dl-cdn.alpinelinux.org` 会挂住，Dockerfile 默认换成 `mirrors.aliyun.com`（`APK_MIRROR` 构建参数）。

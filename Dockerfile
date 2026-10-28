@@ -27,6 +27,12 @@ ENV ALLOW_REFRESH=0
 
 RUN addgroup -g 1001 -S nodejs && adduser -S app -u 1001 -G nodejs
 
+# 伤病报告影子运行要 pdftotext（poppler）解析官方 PDF（scripts/shadow.mjs，不引 npm 依赖）。
+# 线上服务器连不上 dl-cdn.alpinelinux.org（2026-10-28 实测挂住），阿里云镜像可用；本地构建也能用它
+ARG APK_MIRROR=mirrors.aliyun.com
+RUN sed -i "s#dl-cdn.alpinelinux.org#${APK_MIRROR}#g" /etc/apk/repositories \
+  && apk add --no-cache poppler-utils
+
 # 只装生产依赖（就一个 express），devDependencies 里的 vite/react 不进运行镜像
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
@@ -40,6 +46,8 @@ COPY --chown=app:nodejs data ./data
 COPY --chown=app:nodejs scripts/backup-db.mjs ./scripts/backup-db.mjs
 # 模拟投注账本：deploy/refresh.sh 在容器健康后 docker exec 调它写 data-db/ 里的库
 COPY --chown=app:nodejs scripts/ledger.mjs ./scripts/ledger.mjs
+# 伤病报告影子运行：同样由 refresh.sh 在容器健康后 docker exec
+COPY --chown=app:nodejs scripts/shadow.mjs ./scripts/shadow.mjs
 COPY --from=builder --chown=app:nodejs /app/web/dist ./web/dist
 
 USER app

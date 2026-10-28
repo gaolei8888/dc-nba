@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  dc-nba 影子运行：每天把本季球员价值 / 轮换推到服务器（deploy/player-values.sh）。
+  安装（本机仓库在 /Users/lei/Documents/work/dc/dc-nba，node 在 nvm 的 v22.17.0；换了就改下面的路径）：
+    cp deploy/cn.tzspace.dc-nba.player-values.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/cn.tzspace.dc-nba.player-values.plist
+  卸载：launchctl bootout gui/$(id -u)/cn.tzspace.dc-nba.player-values
+  手动跑一次：launchctl kickstart gui/$(id -u)/cn.tzspace.dc-nba.player-values
+  本地 05:15 与 06:15 各叫一次 = 北京 21:15（冬令时 / 夏令时各中一个），另一个由脚本按北京日期跳过。
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>cn.tzspace.dc-nba.player-values</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>/Users/lei/Documents/work/dc/dc-nba/deploy/player-values.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/lei/Documents/work/dc/dc-nba</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>DC_NBA_NODE</key>
+    <string>/Users/lei/.nvm/versions/node/v22.17.0/bin/node</string>
+    <key>PATH</key>
+    <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>5</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>15</integer></dict>
+  </array>
+  <key>StandardOutPath</key>
+  <string>/Users/lei/Library/Logs/dc-nba-player-values.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/lei/Library/Logs/dc-nba-player-values.log</string>
+</dict>
+</plist>

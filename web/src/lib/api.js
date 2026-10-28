@@ -44,6 +44,7 @@ export const api = {
   schedule: (params) => get('/schedule', params),
   predictionBoard: (params) => get('/predictions/summary', params),
   paper: () => get('/paper'),
+  shadow: () => get('/shadow'),
   rankings: (params) => get('/rankings', params),
   predict: (body) => post('/predict', body),
   simulate: (body) => post('/simulate', body),

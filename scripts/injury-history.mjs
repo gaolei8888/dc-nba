@@ -15,8 +15,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
-import { chromeHeaders, createPoliteClient } from '../server/politeFetch.mjs';
+import { asPdf, injuryClient, pdfText } from '../server/injuryFetch.mjs';
 import { REPORT_BASE, candidates, decisionInstant, isS3Missing, parseReportText } from '../server/injuryReport.mjs';
 
 const env = (k, d) => (process.env[k] ? Number(process.env[k]) : d);
@@ -25,26 +24,11 @@ const SEASONS = process.argv.slice(2).length ? process.argv.slice(2) : ['2022-23
 const LAG_MIN = env('INJURY_LAG_MIN', 15);
 const MAX_BACK = { hour: 8, minute: 12 };   // 往前最多找几份（旧版 8 小时、新版 3 小时）
 
-// 像从 official.nba.com 的伤病报告页点开 PDF：顶层导航，不是 fetch
-const { Origin, ...base } = chromeHeaders({ referer: 'https://official.nba.com/', origin: '' });
-const http = createPoliteClient({
-  name: 'nba-injury',
-  headers: {
-    ...base,
-    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-    'sec-fetch-site': 'cross-site', 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document', priority: 'u=0, i',
-  },
+const http = injuryClient({
   gapMs: [env('INJURY_MIN_GAP_MS', 1500), env('INJURY_MAX_GAP_MS', 3000)],
-  pauseEvery: [25, 50],
-  pauseMs: [5000, 15000],
   maxPerRun: env('INJURY_MAX_REQUESTS', 4000),
   maxPerDay: env('INJURY_MAX_PER_DAY', 6000),
-  timeoutMs: 30000,
 });
-const asPdf = (r) => {
-  if (!r.bytes || r.bytes.subarray(0, 5).toString() !== '%PDF-') throw new Error('不是 PDF');
-  return r.bytes;
-};
 
 for (const d of ['pdf', 'json']) fs.mkdirSync(path.join(DIR, d), { recursive: true });
 const indexPath = path.join(DIR, 'index.json');
@@ -73,7 +57,7 @@ async function have(name) {
   sinceHit.misses = []; sinceHit.keys = [];
   fs.writeFileSync(`${pdf}.tmp`, bytes);
   fs.renameSync(`${pdf}.tmp`, pdf);
-  const text = execFileSync('pdftotext', ['-layout', pdf, '-'], { encoding: 'utf8', maxBuffer: 64 << 20 });
+  const text = pdfText(pdf);
   fs.writeFileSync(path.join(DIR, 'json', `${name}.json`), JSON.stringify(parseReportText(text)));
   return true;
 }

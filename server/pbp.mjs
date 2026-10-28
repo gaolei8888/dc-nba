@@ -295,3 +295,36 @@ export function checkMinutes(seconds, box, tol = 45) {
   }
   return bad;
 }
+
+/**
+ * 抓一场并还原段：PBP（阵容变动）+ box score（首发、姓名→ID、分钟数），逐人对账，对不上整场丢。
+ * get(endpoint, params) -> payload 由调用方注入（scripts 里是 nbaGet(statsUrl(…))，走 politeFetch）。
+ * 返回 { gameId, ok:true, homeId, awayId, stints:[定长数组] } 或 { gameId, ok:false, why }；请求失败直接抛。
+ */
+export async function fetchGameStints(gameId, get) {
+  const [pbp, bx] = await Promise.all([
+    get('playbyplayv3', { GameID: gameId, StartPeriod: 1, EndPeriod: 14 }),
+    get('boxscoretraditionalv3', { GameID: gameId, StartPeriod: 1, EndPeriod: 14, StartRange: 0, EndRange: 28800, RangeType: 0 }),
+  ]);
+  const actions = pbp?.game?.actions;
+  if (!actions?.length) throw new Error('PBP 为空');
+  const box = readBox(bx);
+  const { stints, seconds, warnings } = buildStints(actions, box);
+  const bad = checkMinutes(seconds, box);
+  if (bad.length || warnings.length) {
+    const why = warnings[0] ?? `${bad[0].name} box=${bad[0].box}s pbp=${bad[0].pbp}s`;
+    return { gameId, ok: false, why: `${bad.length} 人分钟对不上 / ${warnings.length} 条告警：${why}` };
+  }
+  return {
+    gameId,
+    ok: true,
+    homeId: box.home.teamId,
+    awayId: box.away.teamId,
+    // 压扁成定长数组，一个赛季八万段，对象字面量会把文件撑到几百 MB
+    stints: stints.map((s) => [
+      ...s.home, ...s.away,
+      Math.round(s.poss.home * 100) / 100, Math.round(s.poss.away * 100) / 100,
+      s.pts.home, s.pts.away, s.sec,
+    ]),
+  };
+}
