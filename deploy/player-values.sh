@@ -33,7 +33,7 @@ log "开始（北京 $(TZ=Asia/Shanghai date '+%F %H:%M')）"
 s=0
 NBA_MAX_REQUESTS=${NBA_MAX_REQUESTS:-180} NBA_MAX_PER_DAY=${NBA_MAX_PER_DAY:-500} $NODE scripts/player-values.mjs || s=$?
 # 3 = 中途被拦或到上限，文件仍是完整可用的（少几场），照推
-if [ "$s" != 0 ] && [ "$s" != 3 ]; then log "生成失败（$s），不推送"; exit 1; fi
+if [ "$s" != 0 ] && [ "$s" != 3 ]; then log "生成失败（${s}），不推送"; exit 1; fi
 [ -s "$OUT" ] || { log "没有 $OUT"; exit 1; }
 
 # 拿服务器刷新同一把锁再替换，免得 refresh.sh 拷数据拷到一半
