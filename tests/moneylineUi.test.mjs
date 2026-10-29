@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   FILTER_KEYS, SCENARIOS, SLIPPAGE_OPTIONS, modelOf, scenariosOf, bookOptions, splitOptions, seasonsOf,
-  defaultState, withScenario, withModel, withSplit, toFilters, clvNotApplicable, domainOf, linear, ciDomain,
+  defaultState, withScenario, bookLabelKey, shownScenario, withModel, withSplit, toFilters, clvNotApplicable, domainOf, linear, ciDomain,
 } from '../web/src/lib/moneylineUi.js';
 import * as view from '../server/moneylineView.mjs';
 import { SPLITS } from '../server/betSplits.mjs';
@@ -55,7 +55,10 @@ test('模型版本决定可选情景；换情景时博彩公司与策略回默�
 
 test('可选项：博彩公司、切分、赛季', () => {
   assert.deepEqual(bookOptions('closeBest', ['draftkings']), ['best']);
-  assert.deepEqual(bookOptions('forward', ['draftkings', 'betmgm']), ['chain', 'draftkings']);
+  assert.deepEqual(bookOptions('forward', ['draftkings', 'betmgm']), ['chain']);
+  assert.equal(bookLabelKey('forward', 'chain'), 'lab.beat.filter.forwardBook');
+  assert.equal(bookLabelKey('close', 'chain'), 'lab.beat.filter.chain');
+  assert.equal(bookLabelKey('close', 'betmgm'), 'board.book.betmgm');
   assert.deepEqual(bookOptions('close', ['draftkings', 'betmgm']), ['chain', 'draftkings', 'betmgm']);
   assert.deepEqual(splitOptions('forward'), ['test', 'all']);
   assert.deepEqual(seasonsOf('close', 'validate', splits), ['2023-24', '2024-25']);
@@ -85,4 +88,12 @@ test('比例尺：数值域含额外值、全等时扩宽、无值为 null；线
   assert.ok(Math.abs(x(0.1) - 300) < 1e-9);
   const y = linear([0, 1], [100, 0]);          // 倒置值域（SVG 纵轴）
   assert.equal(y(0.25), 75);
+});
+
+test('结果区按已显示视图的情景标注：加载新筛选时旧视图不被新情景的来源条冒认', () => {
+  const st = { ...defaultState(), scenario: 'forward' };
+  assert.equal(shownScenario({ filters: { scenario: 'close' } }, st), 'close');   // 旧视图仍是收盘情景
+  assert.equal(shownScenario({ filters: { scenario: 'forward' } }, st), 'forward');
+  assert.equal(shownScenario(null, st), 'forward');                              // 还没有视图
+  assert.equal(shownScenario({ available: false }, st), 'forward');              // 前向不可用的回应没有 filters
 });

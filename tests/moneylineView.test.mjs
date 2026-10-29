@@ -90,7 +90,7 @@ test('多重比较：只用选择期（收盘 = 验证期）的可选策略，�
 test('缺价警告带缺失率；最优价情景带 bestPrice 警告、沿用收盘选定策略', () => {
   const v = moneylineView(tinyReport, validateFilters({}, tinyReport));
   assert.deepEqual(v.coverage, { total: 4, priced: 3, missingRate: 0.25, missing: { noUsBook: 1 } });
-  assert.deepEqual(v.warnings.find((w) => w.code === 'srv.ml.warn.missingPrices').params, { rate: 0.25 });
+  assert.deepEqual(v.warnings.find((w) => w.code === 'srv.ml.warn.missingPrices').params, { n: 1, total: 4, rate: 0.25 });
 
   const fb = validateFilters({ scenario: 'closeBest' }, tinyReport);
   assert.equal(fb.book, 'best');

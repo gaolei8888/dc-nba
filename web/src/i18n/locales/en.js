@@ -122,7 +122,7 @@ export default {
       warn: {
         closingPrice: 'Simulated at closing prices. It does not show what could have been bet earlier in the day.',
         previouslySeen: 'The 2025-26 test period was already examined in earlier analysis, so it is not a fully clean test.',
-        missingPrices: '{rate, pct1} of games had no usable US sportsbook price and are left out.',
+        missingPrices: '{n, int} of {total, int} games ({rate, pctTiny1}) had no usable US sportsbook price and are left out.',
         currentAsClose: '{n} games had no closing price; the current price was used in its place.',
         smallSample: 'Only {bets} bets, below the {need}-bet threshold for a conclusion.',
         bestPrice: 'Best-price scenario: the best price across books is picked after the fact. Results are biased upward; sensitivity check only, not part of the main conclusion.',
@@ -1254,6 +1254,7 @@ export default {
         book: 'Sportsbook', strategy: 'Strategy', slippage: 'Slippage',
         allSeasons: 'All seasons', defaultStrategy: 'Pre-selected strategy ({id})', noStrategy: 'No pre-selected strategy',
         chain: 'Price chain (DraftKings → ESPN BET → BetMGM → Caesars → others)',
+        forwardBook: 'DraftKings (decision-time price; the only book in the ledger)',
         reset: 'Reset to defaults',
         slip: '{n} pts',
         inSample: '{season} (in-sample)',
@@ -1283,6 +1284,7 @@ export default {
         basis: { asLogged: 'As logged (pre-registered edge3 rule)', recomputed: 'Recomputed against break-even (secondary result)' },
         builtAt: 'Report built {date}',
       },
+      stale: 'Recomputing for the new filters; the dimmed results below are from the previous filters…',
       exploratory: 'Exploratory: not the pre-selected strategy or not the default settings. No verdict.',
       verdictTitle: 'Verdict',
       verdictRule: 'Pre-registered rule: at least {min} bets, and the lower bound of the 95% game-day block bootstrap interval for ROI after default costs must be above 0.',
@@ -1305,6 +1307,8 @@ export default {
         tooFew: 'Not enough data to draw a chart',
         range: '{from} → {to}', end: 'Final {v}', axis: '{lo} to {hi}',
         selected: '★ selected', baseline: 'baseline',
+        nTag: 'n = {n}',
+        binTip: '{name} · {lo}–{hi}% · n = {n} · {pred} → {actual}',
       },
       bucket: {
         title: 'Buckets', sub: 'Chosen strategy; each bucket with a 95% game-day interval',

@@ -10,7 +10,7 @@ import { LineChart, CiBars, ReliabilityPlot } from '../components/MiniCharts.jsx
 import {
   SCENARIOS, SLIPPAGE_OPTIONS, MODELS, FORWARD_PRIMARY,
   modelOf, splitKeyOf, bookOptions, splitOptions, seasonsOf,
-  defaultState, withScenario, withModel, withSplit, toFilters, clvNotApplicable,
+  defaultState, withScenario, withModel, withSplit, toFilters, clvNotApplicable, bookLabelKey, shownScenario,
 } from '../lib/moneylineUi.js';
 
 /**
@@ -23,8 +23,7 @@ import {
  *   - 最优价只作敏感性，不当主结果；测试期 2025-26 标「已被看过」；2022-23 标样本内。
  *   - 发给接口的只有 Filters 字段（toFilters）。不提供让分 / 大小分入口。
  */
-// eslint-disable-next-line no-unused-vars
-export function MoneylineTab({ meta }) {
+export function MoneylineTab() {
   const { t } = useI18n();
   const [ml, setMl] = useState(null);
   const [metaErr, setMetaErr] = useState(null);
@@ -44,7 +43,7 @@ const tr = (t, key, raw) => { const v = t(key); return v === key ? String(raw) :
 const americanText = (v) => (typeof v === 'number' ? (v > 0 ? `+${v}` : `${v}`) : '—');
 
 function MoneylineBody({ ml }) {
-  const { t, fmt } = useI18n();
+  const { t } = useI18n();
   const { teamById } = useApp();
   const [state, setState] = useState(defaultState);
   const [view, setView] = useState(null);
@@ -68,10 +67,10 @@ function MoneylineBody({ ml }) {
   const splits = ml.splits;
   const inSample = useMemo(() => new Set((ml.fits ?? []).filter((f) => f.inSample).map((f) => f.season)), [ml]);
   const seasonLabel = (s) => (inSample.has(s) ? t('lab.beat.filter.inSample', { season: s }) : s);
-  const bookName = (k) => {
-    if (k === 'chain') return t('lab.beat.filter.chain');
-    const v = t(`board.book.${k}`);
-    return v === `board.book.${k}` ? k : v;
+  const bookName = (k, scen = 'close') => {
+    const key = bookLabelKey(scen, k);
+    const v = t(key);
+    return v === key ? k : v;
   };
   const familyOf = (id) => (id === FORWARD_PRIMARY ? 'ledger' : (ml.strategies ?? []).find((s) => s.id === id)?.family);
   const strategyName = (id) => {
@@ -152,7 +151,7 @@ function MoneylineBody({ ml }) {
           <div className="field">
             <label>{t('lab.beat.filter.book')}</label>
             <select value={state.book} disabled={scenario === 'closeBest'} onChange={(e) => set({ book: e.target.value })}>
-              {bookOptions(scenario, ml.books).map((b) => <option key={b} value={b}>{bookName(b)}</option>)}
+              {bookOptions(scenario, ml.books).map((b) => <option key={b} value={b}>{bookName(b, scenario)}</option>)}
             </select>
           </div>
           <div className="field">
@@ -170,18 +169,22 @@ function MoneylineBody({ ml }) {
         </div>
       </div>
 
-      <SourceBar ml={ml} scenario={scenario} view={view} />
-
       <ErrorBox error={err} />
       {!view && !err && <Loading text={t('lab.replaying')} />}
-      {busy && view && <div className="note" style={{ marginBottom: 8 }}>{t('lab.replaying')}</div>}
-      {view && view.available === false && (
-        <div className="card">
-          <p className="note">{t('lab.beat.forwardUnavailable', { reason: t(view.reasonCode ?? 'srv.reason.ledgerUnavailable') })}</p>
+      {busy && view && <div className="warn-box" role="status" data-testid="ml-loading">{t('lab.beat.stale')}</div>}
+      {/* 来源条与结果都按已显示视图的情景标注（shownScenario）；新筛选加载中时整块变暗，避免旧数字挂在新情景的标签下 */}
+      {(view || !err) && (
+        <div aria-busy={busy} data-testid="ml-result" style={busy ? { opacity: 0.45, pointerEvents: 'none', transition: 'opacity .15s' } : undefined}>
+          <SourceBar ml={ml} scenario={shownScenario(view, state)} view={view} />
+          {view && view.available === false && (
+            <div className="card">
+              <p className="note">{t('lab.beat.forwardUnavailable', { reason: t(view.reasonCode ?? 'srv.reason.ledgerUnavailable') })}</p>
+            </div>
+          )}
+          {view && view.available !== false && view.summary && (
+            <Result view={view} dim={dim} setDim={setDim} teamById={teamById} strategyName={strategyName} bookName={bookName} seasonLabel={seasonLabel} />
+          )}
         </div>
-      )}
-      {view && view.available !== false && view.summary && (
-        <Result view={view} dim={dim} setDim={setDim} teamById={teamById} strategyName={strategyName} bookName={bookName} seasonLabel={seasonLabel} />
       )}
     </>
   );
@@ -213,7 +216,7 @@ function SourceBar({ ml, scenario, view }) {
             <div className="note">
               {t(`lab.beat.source.priceAt.${scenario}`)}
               {' · '}{t('lab.beat.source.modelTag', { v: labels?.modelVersion ?? 'replay-elo-wf' })}
-              {cov && cov.total != null && <>{' · '}{t('lab.beat.source.coverage', { priced: cov.priced, total: cov.total })}</>}
+              {cov && cov.total != null && <>{' · '}{t('lab.beat.source.coverage', { priced: fmt.num(cov.priced, 0), total: fmt.num(cov.total, 0) })}</>}
               {ml.builtAt && <>{' · '}{t('lab.beat.source.builtAt', { date: fmt.date(String(ml.builtAt).slice(0, 10)) })}</>}
             </div>
           )}
@@ -225,8 +228,8 @@ function SourceBar({ ml, scenario, view }) {
             <div className="note">
               {t('lab.beat.source.priceAt.forward')}
               {' · '}{t('lab.beat.source.modelTag', { v: labels?.modelVersion ?? 'production-logged' })}
-              {fwd.available && <>{' · '}{t('lab.beat.source.forwardCounts', { captured: fwd.captured ?? 0, pending: fwd.pending ?? 0 })}</>}
-              {fwd.available && fwd.unmatched > 0 && <>{' · '}{t('lab.beat.source.forwardUnmatched', { n: fwd.unmatched })}</>}
+              {fwd.available && <>{' · '}{t('lab.beat.source.forwardCounts', { captured: fmt.num(fwd.captured ?? 0, 0), pending: fmt.num(fwd.pending ?? 0, 0) })}</>}
+              {fwd.available && fwd.unmatched > 0 && <>{' · '}{t('lab.beat.source.forwardUnmatched', { n: fmt.num(fwd.unmatched, 0) })}</>}
               {labels?.forwardBasis && <>{' · '}{t(`lab.beat.source.basis.${labels.forwardBasis}`)}</>}
             </div>
           )}
@@ -272,7 +275,7 @@ function Result({ view, dim, setDim, teamById, strategyName, bookName, seasonLab
   let clvValue; let clvSub;
   if (clvNotApplicable(scenario)) { clvValue = t('lab.beat.tile.clvNA'); clvSub = t('lab.beat.tile.clvNAHint'); } else if (s.clv) {
     clvValue = pp(s.clv.mean);
-    clvSub = t('lab.beat.tile.clvHint', { n: s.clv.n, beat: fmt.pct(s.clv.beatClose, 0) });
+    clvSub = t('lab.beat.tile.clvHint', { n: fmt.num(s.clv.n, 0), beat: fmt.pct(s.clv.beatClose, 0) });
   } else { clvValue = '—'; }
 
   const strategyRows = (view.strategies ?? []).map((r) => ({
@@ -286,7 +289,7 @@ function Result({ view, dim, setDim, teamById, strategyName, bookName, seasonLab
   }));
   const edgeLabel = (k) => (k === '<0' ? '<0%' : k === '10+' ? '≥10%' : k === 'n/a' ? t('lab.beat.bucket.key.na') : `${k.replace('-', '–')}%`);
   const edgeRows = (view.buckets?.edge ?? []).map((b) => ({
-    key: b.key, label: edgeLabel(b.key), value: b.roi, lo: b.ci?.lo ?? null, hi: b.ci?.hi ?? null, tag: `n ${b.n}`,
+    key: b.key, label: edgeLabel(b.key), value: b.roi, lo: b.ci?.lo ?? null, hi: b.ci?.hi ?? null, tag: t('lab.beat.chart.nTag', { n: fmt.num(b.n, 0) }),
   }));
   const cal = view.calibration ?? {};
   // 「已被看过」与「最优价」已在数据来源条上醒目显示，警告列表里不重复
@@ -325,7 +328,7 @@ function Result({ view, dim, setDim, teamById, strategyName, bookName, seasonLab
         <div className="card" style={{ marginBottom: 14 }}>
           <h2>{t('lab.beat.verdictTitle')}</h2>
           <p style={{ fontSize: 15, fontWeight: 650, margin: '4px 0 8px' }}>{renderMsg(view.verdict, t)}</p>
-          <p className="note">{t('lab.beat.verdictRule', { min: view.verdict.params?.min ?? 300 })}</p>
+          <p className="note">{t('lab.beat.verdictRule', { min: fmt.num(view.verdict.params?.min ?? 300, 0) })}</p>
         </div>
       )}
 
@@ -337,10 +340,10 @@ function Result({ view, dim, setDim, teamById, strategyName, bookName, seasonLab
           label={t('lab.beat.tile.roi')} value={fmt.pct(s.roi, 1)} className={sign(s.roi)}
           sub={ciDay ? t('lab.beat.tile.roiHint', { lo: fmt.pct(ciDay.lo, 1), hi: fmt.pct(ciDay.hi, 1) }) : t('lab.beat.tile.roiNoCi')}
         />
-        <Tile label={t('lab.beat.tile.hitRate')} value={fmt.pct(s.hitRate, 1)} sub={t('lab.beat.tile.hitHint', { wins: s.wins, losses: s.losses })} />
+        <Tile label={t('lab.beat.tile.hitRate')} value={fmt.pct(s.hitRate, 1)} sub={t('lab.beat.tile.hitHint', { wins: fmt.num(s.wins, 0), losses: fmt.num(s.losses, 0) })} />
         <Tile
           label={t('lab.beat.tile.drawdown')} value={fmt.num(dd.units, 1)} unit={units}
-          sub={t(dd.recovered === false ? 'lab.beat.tile.drawdownOpen' : 'lab.beat.tile.drawdownHint', { days: dd.days ?? 0, bets: dd.bets ?? 0 })}
+          sub={t(dd.recovered === false ? 'lab.beat.tile.drawdownOpen' : 'lab.beat.tile.drawdownHint', { days: fmt.num(dd.days ?? 0, 0), bets: fmt.num(dd.bets ?? 0, 0) })}
         />
         <Tile label={t('lab.beat.tile.clv')} value={clvValue} sub={clvSub} />
       </div>
@@ -369,7 +372,7 @@ function Result({ view, dim, setDim, teamById, strategyName, bookName, seasonLab
             {t('lab.beat.chart.calib')}
             {cal.n > 0 && (
               <span className="sub">
-                {t('lab.beat.chart.calibSub', { n: cal.n, model: fmt.num(cal.model?.brier, 4), market: fmt.num(cal.market?.brier, 4) })}
+                {t('lab.beat.chart.calibSub', { n: fmt.num(cal.n, 0), model: fmt.num(cal.model?.brier, 4), market: fmt.num(cal.market?.brier, 4) })}
               </span>
             )}
           </h2>
@@ -404,7 +407,7 @@ function Result({ view, dim, setDim, teamById, strategyName, bookName, seasonLab
           <h2>{t('lab.beat.power.title')}</h2>
           <p className="note">
             {pw.sd == null ? t('lab.beat.power.none')
-              : pw.needed != null ? t('lab.beat.power.needed', { n: fmt.num(pw.needed, 0), bets: s.bets })
+              : pw.needed != null ? t('lab.beat.power.needed', { n: fmt.num(pw.needed, 0), bets: fmt.num(s.bets, 0) })
                 : t('lab.beat.power.never', {
                   n1: fmt.num(pw.neededAt?.['0.01'], 0), n2: fmt.num(pw.neededAt?.['0.02'], 0), n3: fmt.num(pw.neededAt?.['0.03'], 0),
                 })}
@@ -420,7 +423,7 @@ function Result({ view, dim, setDim, teamById, strategyName, bookName, seasonLab
                 {t('lab.beat.mc.body', {
                   split: mc.selectOn ? t(`lab.beat.split.${mc.selectOn}`) : '—',
                   seasons: (mc.seasons ?? []).map(seasonLabel).join(t('lab.listSep')) || '—',
-                  tried: mc.tried ?? 0,
+                  tried: fmt.num(mc.tried ?? 0, 0),
                   alpha: fmt.num(mc.bonferroniAlpha, 4),
                 })}
                 {mc.selected == null && <>{' '}{t('lab.beat.mc.selectedNone')}</>}
@@ -442,7 +445,7 @@ function Result({ view, dim, setDim, teamById, strategyName, bookName, seasonLab
       </div>
 
       <div className="card">
-        <h2>{t('lab.beat.bets.title')} <span className="sub">{t('lab.beat.bets.sub', { n: (view.bets ?? []).length })}</span></h2>
+        <h2>{t('lab.beat.bets.title')} <span className="sub">{t('lab.beat.bets.sub', { n: fmt.num((view.bets ?? []).length, 0) })}</span></h2>
         {(view.bets ?? []).length === 0 ? <div className="empty">{t('lab.beat.empty')}</div> : (
           <DataTable
             rows={view.bets.map((b, i) => ({ ...b, idx: i }))}
@@ -454,7 +457,7 @@ function Result({ view, dim, setDim, teamById, strategyName, bookName, seasonLab
               { key: 'matchup', label: t('lab.beat.bets.col.matchup'), align: 'left', width: 96, value: (r) => `${team(r.awayId)}@${team(r.homeId)}`, render: (r) => t('lab.beat.bets.matchup', { away: team(r.awayId), home: team(r.homeId) }) },
               { key: 'side', label: t('lab.beat.bets.col.side'), width: 56, render: (r) => tr(t, `lab.beat.bets.side.${r.side}`, r.side) },
               { key: 'priceAt', label: t('lab.beat.bets.col.priceAt'), width: 70, render: (r) => (r.priceAt ? tr(t, `lab.beat.bets.priceAt.${r.priceAt}`, r.priceAt) : '—') },
-              { key: 'book', label: t('lab.beat.bets.col.book'), width: 90, render: (r) => (r.book ? bookName(r.book) : '—') },
+              { key: 'book', label: t('lab.beat.bets.col.book'), width: 90, render: (r) => (r.book ? bookName(r.book, r.scenario) : '—') },
               { key: 'pModel', label: t('lab.beat.bets.col.p'), width: 70, render: (r) => fmt.pct(r.pModel, 1) },
               { key: 'american', label: t('lab.beat.bets.col.odds'), width: 64, render: (r) => <span className="mono">{americanText(r.american)}</span> },
               { key: 'stake', label: t('lab.beat.bets.col.stake'), width: 64, render: (r) => fmt.num(r.stake, 2) },

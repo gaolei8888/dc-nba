@@ -68,7 +68,7 @@ export default function Lab() {
       {tab === 'measure' && <MeasureTab meta={meta} />}
       {tab === 'whatif' && <WhatIfTab meta={meta} teams={teams} teamById={teamById} />}
       {tab === 'market' && <MarketTab meta={meta} />}
-      {tab === 'beat' && <MoneylineTab meta={meta} />}
+      {tab === 'beat' && <MoneylineTab />}
     </>
   );
 }

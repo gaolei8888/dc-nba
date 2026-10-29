@@ -67,6 +67,8 @@ const signed = (v, d = 1) => (isNil(v) ? '—' : `${v > 0 ? '+' : ''}${v.toFixed
 const rate = (v, d = 1) => (isNil(v) ? '—' : (v * 100).toFixed(d));
 // 服务端 verdictOf 的既有格式：负号用「−」
 const pctSigned = (v, d = 1) => (isNil(v) ? '—' : `${v < 0 ? '−' : v > 0 ? '+' : ''}${Math.abs(v * 100).toFixed(d)}%`);
+// 小比例：大于 0 但按 1 位小数会显示成 0.0% 时写「<0.1%」，避免「0.0% 的比赛被剔除」这种自相矛盾
+const pctTiny = (v, d = 1) => (isNil(v) ? '—' : v > 0 && Number((v * 100).toFixed(d)) === 0 ? `<${(10 ** -d).toFixed(d)}%` : pct(v, d));
 const roi = (v, d = 1) => (isNil(v) ? '—' : `${v < 0 ? '−' : ''}${Math.abs(v * 100).toFixed(d)}%`);
 
 export const DIV_CODES = ['Atlantic', 'Central', 'Southeast', 'Northwest', 'Pacific', 'Southwest'];
@@ -169,6 +171,7 @@ export function createFormat({ locale, fallback, tz, intl, teamById } = {}) {
     fix3: (v) => num(v, 3),
     pct0: (v) => pct(v, 0),
     pct1: (v) => pct(v, 1),
+    pctTiny1: (v) => pctTiny(v, 1),
     signed1: (v) => signed(v, 1),
     pctSigned1: (v) => pctSigned(v, 1),
     roi: (v) => roi(v, 1),

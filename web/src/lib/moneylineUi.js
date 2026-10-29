@@ -25,12 +25,24 @@ export const splitKeyOf = (scenario) => (scenario === 'closeBest' ? 'close' : sc
 /** 情景的默认博彩公司选项 */
 export const defaultBook = (scenario) => (scenario === 'closeBest' ? 'best' : 'chain');
 
-/** 情景可选的博彩公司：closeBest 只有 best；前向只有选价链与 DraftKings；其余 = 选价链 + 各美国公司 */
+/**
+ * 情景可选的博彩公司：closeBest 只有 best；前向账本只记 DraftKings，只给一个选项（'chain' 在前向即 DraftKings，
+ * 界面按 bookLabelKey 标成「DraftKings（决策时点价格）」，不显示选价链）；其余 = 选价链 + 各美国公司
+ */
 export function bookOptions(scenario, books = []) {
   if (scenario === 'closeBest') return ['best'];
-  if (scenario === 'forward') return ['chain', FORWARD_BOOK];
+  if (scenario === 'forward') return ['chain'];
   return ['chain', ...books];
 }
+
+/** 博彩公司选项的文案键：前向的 'chain' 是 DraftKings 决策时点价；其余 'chain' 是选价链；单家公司用 board.book.<id> */
+export function bookLabelKey(scenario, book) {
+  if (book === 'chain') return scenario === 'forward' ? 'lab.beat.filter.forwardBook' : 'lab.beat.filter.chain';
+  return `board.book.${book}`;
+}
+
+/** 结果区该按哪个情景标注：已显示的视图自己的情景（新筛选还在加载时，旧视图仍按旧情景标注）；没有视图时用当前筛选 */
+export const shownScenario = (view, state) => view?.filters?.scenario ?? state?.scenario ?? 'close';
 
 /** 情景可选的切分：前向账本只有测试期（2026-27）与全部 */
 export const splitOptions = (scenario) => (scenario === 'forward' ? ['test', 'all'] : ['train', 'validate', 'test', 'all']);

@@ -75,9 +75,8 @@
 | 开盘价 | opening price | — | 待确认 |
 | 收盘价 | closing price | — | 待确认 |
 | 历史价格情景模拟 | Historical price simulation | historical results, actual returns | 待确认 |
-| 回撤持续 | drawdown duration | — | 待确认 |
-| 最长连亏 | longest losing streak | — | 待确认 |
 | 按比赛日区块自助法 | game-day block bootstrap | — | 待确认 |
+| 按比赛日区间（95% 区间，按比赛日区块自助法） | game-day interval | — | 待确认 |
 | 功效分析 | power analysis | — | 待确认 |
 | 多重比较 | multiple comparisons | — | 待确认 |
 | 训练 / 验证 / 测试期 | training / validation / test period | — | 待确认 |

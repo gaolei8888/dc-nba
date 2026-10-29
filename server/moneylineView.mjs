@@ -335,7 +335,9 @@ export function moneylineView(data, filters, { forward } = {}) {
   if (filters.scenario === 'closeBest') warnings.push(msg('srv.ml.warn.bestPrice'));
   if (previouslySeen) warnings.push(msg('srv.ml.warn.previouslySeen'));
   if (!isForward && seasons.some((s) => IN_SAMPLE_SEASONS.includes(s))) warnings.push(msg('srv.ml.warn.inSample'));
-  if (coverage.missingRate > 0) warnings.push(msg('srv.ml.warn.missingPrices', { rate: coverage.missingRate }));
+  // 只要有比赛被剔除就警告；带场数（剔除 / 总数），比例极小时前端显示「<0.1%」而不是「0.0%」
+  const nMissingGames = coverage.total - coverage.priced;
+  if (nMissingGames > 0) warnings.push(msg('srv.ml.warn.missingPrices', { n: nMissingGames, total: coverage.total, rate: coverage.missingRate }));
   const nCurrent = candidates.filter((c) => (c.flags ?? []).includes('currentAsClose')).length;
   if (nCurrent > 0) warnings.push(msg('srv.ml.warn.currentAsClose', { n: nCurrent }));
   if (coverage.unmatched > 0) warnings.push(msg('srv.ml.warn.forwardUnmatched', { n: coverage.unmatched }));

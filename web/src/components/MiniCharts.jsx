@@ -130,7 +130,7 @@ export function ReliabilityPlot({ model, market, label }) {
                 points={ps.map((b) => `${s(b.predicted).toFixed(1)},${sy(b.actual).toFixed(1)}`).join(' ')} />
               {ps.map((b) => (
                 <circle key={b.lo} cx={s(b.predicted)} cy={sy(b.actual)} r="3" fill={se.color}>
-                  <title>{`${se.name} · ${b.lo}–${b.hi}% · n ${b.n} · ${fmt.pct(b.predicted, 1)} → ${fmt.pct(b.actual, 1)}`}</title>
+                  <title>{t('lab.beat.chart.binTip', { name: se.name, lo: fmt.num(b.lo, 0), hi: fmt.num(b.hi, 0), n: fmt.num(b.n, 0), pred: fmt.pct(b.predicted, 1), actual: fmt.pct(b.actual, 1) })}</title>
                 </circle>
               ))}
             </g>

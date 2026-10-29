@@ -65,6 +65,8 @@ test('formatters：与服务端既有格式逐字一致', () => {
   const f = en.formatters;
   assert.equal(f.int(1596.4), '1596'); assert.equal(f.fix1(2.25), '2.3'); assert.equal(f.fix2(0.5), '0.50'); assert.equal(f.fix3(0.1234), '0.123');
   assert.equal(f.pct0(0.478), '48%'); assert.equal(f.pct1(0.4783), '47.8%');
+  assert.equal(f.pctTiny1(0.0004), '<0.1%'); assert.equal(f.pctTiny1(0.0008), '0.1%');
+  assert.equal(f.pctTiny1(0.25), '25.0%'); assert.equal(f.pctTiny1(0), '0.0%');
   assert.equal(f.signed1(2.34), '+2.3'); assert.equal(f.signed1(-2.34), '-2.3');
   assert.equal(f.pctSigned1(-0.052), '−5.2%'); assert.equal(f.pctSigned1(0.052), '+5.2%'); assert.equal(f.pctSigned1(0), '0.0%');
   assert.equal(f.roi(-0.052), '−5.2%'); assert.equal(f.roi(0.052), '5.2%');
