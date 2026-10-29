@@ -14,9 +14,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR, readJsonAuto } from '../server/nbaClient.mjs';
-import { computeApm, decayedApm } from '../server/rapm.mjs';
-import { buildSamples, fit, apply, blend, mean, DECAY_SPAN, DECAY_HALFLIFE } from '../server/impact.mjs';
-import { shrinkByMinutes, MINUTES_SHRINK } from '../server/impactShrink.mjs';
+import { computeApm } from '../server/rapm.mjs';
+import { mean } from '../server/impact.mjs';
+import { labValuesUpto, loadBoxSeasons } from '../server/impFallbackLab.mjs';
 import { gameMinutes } from '../server/continuityLab.mjs';
 import * as lab from '../server/lab.mjs';
 import { bootstrapCI, phaseOf } from '../server/fusionLab.mjs';
@@ -52,40 +52,18 @@ for (const s of ALL) {
   stints[s] = readJsonAuto(path.join(HISTORY, `stints_${s}.json.gz`));
 }
 
-// ---------------------------------------------------------------- 球员价值：逐字照抄 scripts/minutes-backtest.mjs 的 valuesUpto（收缩 IMP）
+// ---------------------------------------------------------------- 球员价值：与 scripts/minutes-backtest.mjs 的 valuesUpto 同口径（收缩 IMP）
+// 已抽成 server/impFallbackLab.mjs 的 labValuesUpto（输出逐位相同）。IMP_FALLBACK=primary|sens 时补上回退先验
+// （docs/superpowers/specs/2026-10-30-imp-fallback-prior-prereg.md；scripts/imp-fallback-lab.mjs 用），默认不补。
 const apmBySeason = new Map(ALL.map((s) => [s, computeApm(lineups[s], { lambda: 6000 })]));
+const IMP_FALLBACK = process.env.IMP_FALLBACK || null;
+if (IMP_FALLBACK && !['primary', 'sens'].includes(IMP_FALLBACK)) throw new Error(`未知 IMP_FALLBACK=${IMP_FALLBACK}`);
+const valueCtx = { seasons: ALL, players, lineups, apmBySeason, box: IMP_FALLBACK ? loadBoxSeasons(HISTORY) : null };
+const fallbackIds = new Map();   // upto -> Set(用回退值的球员)
 function valuesUpto(upto) {
-  const seen = ALL.slice(0, ALL.indexOf(upto) + 1);
-  const spm = fit(buildSamples(seen.flatMap((s) => players[s]), { apmBySeason }), 3000);
-  const dec = decayedApm(seen.slice(-DECAY_SPAN).map((s) => ({ season: s, rows: lineups[s] })),
-    { span: DECAY_SPAN, halfLife: DECAY_HALFLIFE, lambda: 6000 });
-  const cal = [];
-  for (const s of seen) {
-    const decS = decayedApm(ALL.slice(Math.max(0, ALL.indexOf(s) - DECAY_SPAN + 1), ALL.indexOf(s) + 1)
-      .map((x) => ({ season: x, rows: lineups[x] })), { span: DECAY_SPAN, halfLife: DECAY_HALFLIFE, lambda: 6000 });
-    const byTeam = new Map();
-    for (const p of players[s]) {
-      if (!p.teamId || !(p.min > 0) || !(p.gp > 0)) continue;
-      if (!byTeam.has(p.teamId)) byTeam.set(p.teamId, []);
-      byTeam.get(p.teamId).push(p);
-    }
-    for (const squad of byTeam.values()) {
-      const tot = squad.reduce((a, p) => a + p.min * p.gp, 0);
-      cal.push({
-        x: squad.reduce((a, p) => a + ((p.min * p.gp) / tot) * (blend(apply(spm, p), decS.get(p.playerId)?.apm ?? null) ?? 0), 0),
-        y: squad.reduce((a, p) => a + ((p.min * p.gp) / tot) * (p.netRtg ?? 0), 0),
-      });
-    }
-  }
-  const mx = mean(cal.map((r) => r.x)); const my = mean(cal.map((r) => r.y));
-  const scale = cal.reduce((a, r) => a + (r.x - mx) * (r.y - my), 0) / cal.reduce((a, r) => a + (r.x - mx) ** 2, 0) / 5;
-  const mu = mean(players[upto].map((p) => apply(spm, p)).filter((v) => v !== null));
-  const out = new Map();
-  for (const p of players[upto]) {
-    const raw = blend(apply(spm, p), dec.get(p.playerId)?.apm ?? null);
-    if (raw !== null) out.set(p.playerId, shrinkByMinutes(raw, (p.gp ?? 0) * (p.min ?? 0), mu, MINUTES_SHRINK) * scale);
-  }
-  return out;
+  const v = labValuesUpto(valueCtx, upto, { fallback: IMP_FALLBACK });
+  fallbackIds.set(upto, new Set(v.fallback.keys()));
+  return v.shrunk;
 }
 // 季 X 的比赛用 valuesUpto(X−1)；2021-22 没有更早的 lineups，用 valuesUpto(2021-22)（只做热身，整季早于任何评估比赛）
 const fitCache = new Map();
@@ -239,6 +217,24 @@ const A = Object.fromEntries(GRID.map((s) => [s, replayElo(dataset, EVAL, { upda
 const E = Object.fromEntries(C_GRID.map((c) => [c, replayElo(dataset, EVAL, { update, mode: { s: 0, c } })]));
 const recs = P0;   // 逐场顺序以 P0 为准（各重放同序）
 for (const r of [...Object.values(A), ...Object.values(E)]) if (r.length !== recs.length || r.some((x, i) => x.gameId !== recs[i].gameId)) throw new Error('重放顺序不一致');
+
+// ---------------------------------------------------------------- IMP 回退实验的逐场导出（INJURY_ELO_DUMP=文件；scripts/imp-fallback-lab.mjs 用）
+// P1 固定 β=0.5（影子冻结值），P 表每折只用其余赛季；affected = 任一队健康基线里有用回退值的球员。导出后退出，不写本实验的输出文件。
+if (process.env.INJURY_ELO_DUMP) {
+  const preBy = new Map(EVAL.map((h) => [h, preD(pTable(ALL.filter((s) => s !== h)), 'H')]));
+  const uptoOf = (s) => (s === ALL[0] ? ALL[0] : ALL[ALL.indexOf(s) - 1]);
+  const games = recs.map((r) => {
+    const d = preBy.get(r.season).get(r.gameId);
+    const c = ctx.get(r.gameId);
+    const fb = fallbackIds.get(uptoOf(r.season)) ?? new Set();
+    const affected = !!c.sides && [c.sides.h, c.sides.a].some((x) => x.H.some((p) => fb.has(p.id)));
+    return { gameId: r.gameId, season: r.season, date: r.date, homeWin: r.homeWin ? 1 : 0, p: predictProb(r.pred, d.h, d.a, 0.5), dH: d.h, dA: d.a, affected };
+  });
+  const cover = Object.fromEntries([...fallbackIds].map(([u, ids]) => [u, ids.size]));
+  fs.writeFileSync(process.env.INJURY_ELO_DUMP, JSON.stringify({ fallback: IMP_FALLBACK, cover, games }));
+  console.log(`导出 ${games.length} 场到 ${process.env.INJURY_ELO_DUMP}（回退：${IMP_FALLBACK ?? '无'}）`);
+  process.exit(0);
+}
 
 // ---------------------------------------------------------------- 候选 -> 逐场概率；LOSO 选参
 const ll = (p, y) => -Math.log(Math.max(y ? p : 1 - p, 1e-12));

@@ -28,13 +28,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR, readJsonAuto } from '../server/nbaClient.mjs';
-import { computeApm, decayedApm } from '../server/rapm.mjs';
-import { buildSamples, fit, apply, blend, mean, DECAY_SPAN, DECAY_HALFLIFE } from '../server/impact.mjs';
-import { shrinkByMinutes, MINUTES_SHRINK } from '../server/impactShrink.mjs';
+import { computeApm } from '../server/rapm.mjs';
+import { labValuesUpto, loadBoxSeasons } from '../server/impFallbackLab.mjs';
 import { replaySeason, eloStartFor, teamGamesFromStints, leagueCenter, logLoss } from '../server/continuityLab.mjs';
 import { expand, score, normalCdf } from '../server/lab.mjs';
 import { bootstrapCI } from '../server/fusionLab.mjs';
-import { resultsUpdate, gamePred } from '../server/rosterResults.mjs';
+import { resultsUpdate, gamePred, RESULTS } from '../server/rosterResults.mjs';
 import { minutesLab, newRows } from '../server/minutesLab.mjs';
 import { projectExpectedRotation, rosterRating } from '../server/rosterProjection.mjs';
 
@@ -67,46 +66,16 @@ for (const s of ALL_SEASONS) {
 }
 const apmBySeason = new Map(ALL_SEASONS.map((s) => [s, computeApm(lineups[s], { lambda: 6000 })]));
 
-/** 截至 upto 季（含）的球员价值，只用 ≤upto 季的数据（与 continuity-backtest 逐行相同） */
+/**
+ * 截至 upto 季（含）的球员价值，只用 ≤upto 季的数据（与 continuity-backtest 逐行相同；已抽成 server/impFallbackLab.mjs 的
+ * labValuesUpto，输出逐位相同）。IMP_FALLBACK=primary|sens 时 shrunk 表补上回退先验（scripts/imp-fallback-lab.mjs 用），默认不补。
+ */
+const IMP_FALLBACK = process.env.IMP_FALLBACK || null;
+if (IMP_FALLBACK && !['primary', 'sens'].includes(IMP_FALLBACK)) { console.error(`未知 IMP_FALLBACK=${IMP_FALLBACK}`); process.exit(1); }
+const valueCtx = { seasons: ALL_SEASONS, players, lineups, apmBySeason, box: IMP_FALLBACK ? loadBoxSeasons(HISTORY) : null };
 function valuesUpto(upto) {
-  const seen = ALL_SEASONS.slice(0, ALL_SEASONS.indexOf(upto) + 1);
-  const spm = fit(buildSamples(seen.flatMap((s) => players[s]), { apmBySeason }), 3000);
-  const dec = decayedApm(seen.slice(-DECAY_SPAN).map((s) => ({ season: s, rows: lineups[s] })),
-    { span: DECAY_SPAN, halfLife: DECAY_HALFLIFE, lambda: 6000 });
-  const rawOf = (p, s) => blend(apply(spm, p), (s === upto ? dec : null)?.get(p.playerId)?.apm ?? null);
-  const cal = [];
-  for (const s of seen) {
-    const decS = decayedApm(ALL_SEASONS.slice(Math.max(0, ALL_SEASONS.indexOf(s) - DECAY_SPAN + 1), ALL_SEASONS.indexOf(s) + 1)
-      .map((x) => ({ season: x, rows: lineups[x] })), { span: DECAY_SPAN, halfLife: DECAY_HALFLIFE, lambda: 6000 });
-    const byTeam = new Map();
-    for (const p of players[s]) {
-      if (!p.teamId || !(p.min > 0) || !(p.gp > 0)) continue;
-      if (!byTeam.has(p.teamId)) byTeam.set(p.teamId, []);
-      byTeam.get(p.teamId).push(p);
-    }
-    for (const squad of byTeam.values()) {
-      const tot = squad.reduce((a, p) => a + p.min * p.gp, 0);
-      cal.push({
-        x: squad.reduce((a, p) => a + ((p.min * p.gp) / tot) * (blend(apply(spm, p), decS.get(p.playerId)?.apm ?? null) ?? 0), 0),
-        y: squad.reduce((a, p) => a + ((p.min * p.gp) / tot) * (p.netRtg ?? 0), 0),
-      });
-    }
-  }
-  const mx = mean(cal.map((r) => r.x)); const my = mean(cal.map((r) => r.y));
-  const scale = cal.reduce((a, r) => a + (r.x - mx) * (r.y - my), 0) / cal.reduce((a, r) => a + (r.x - mx) ** 2, 0) / 5;
-  const imp = new Map(); const shrunk = new Map(); const minutes = new Map(); const priorMpg = new Map();
-  const pool = players[upto].map((p) => apply(spm, p)).filter((v) => v !== null);
-  const mu = mean(pool);
-  for (const p of players[upto]) {
-    const m = (p.gp ?? 0) * (p.min ?? 0);
-    minutes.set(p.playerId, m);
-    if ((p.gp ?? 0) >= 10 && p.min > 0) priorMpg.set(p.playerId, p.min);
-    const raw = rawOf(p, upto);
-    if (raw === null) continue;
-    imp.set(p.playerId, raw * scale);
-    shrunk.set(p.playerId, shrinkByMinutes(raw, m, mu, MINUTES_SHRINK) * scale);
-  }
-  return { values: new Map([['imp', imp], ['shrunk', shrunk]]), minutes, priorMpg, scale };
+  const v = labValuesUpto(valueCtx, upto, { fallback: IMP_FALLBACK });
+  return { values: new Map([['imp', v.imp], ['shrunk', v.shrunk]]), minutes: v.minutes, priorMpg: v.priorMpg, scale: v.scale, fallback: v.fallback };
 }
 
 const t0 = Date.now();
@@ -116,9 +85,12 @@ const lab = PRIOR === 'batch1' ? minutesLab({
   injDir: process.env.INJURY_DIR ?? path.join(HISTORY, 'injury-reports'), allSeasons: ALL_SEASONS,
 }) : null;
 const b1Stats = { sides: 0, failed: 0, carried: 0, fallback: 0 };
+const affectedSides = new Set();   // 阵容先验里健康时分钟 > 0 的人有用回退值的 队·场（IMP_FALLBACK 时才非空）
+const cover = {};
 for (const s of SEASONS) {
   const prev = prevOf(s);
   const v = valuesUpto(prev);
+  cover[prev] = v.fallback.size;
   const center = new Map([...v.values].map(([k, m]) => [k, leagueCenter(v.minutes, m)]));
   const { rows } = replaySeason(expand(dataset.seasons[s]), eloStartFor(dataset, s, P), P, {
     stints: new Map(Object.entries(stints[s].games)),
@@ -131,8 +103,11 @@ for (const s of SEASONS) {
     const values = v.values.get('shrunk'); const c = center.get('shrunk');
     for (const g of lab.buildContexts(s)) for (const side of [g.home, g.away]) {
       b1Stats.sides += 1;
-      try { b1.set(`${g.gameId}|${side.teamId}`, rosterRating(projectExpectedRotation(newRows(side, 'report', values))) - c); }
-      catch { b1Stats.failed += 1; }
+      try {
+        const rot = projectExpectedRotation(newRows(side, 'report', values));
+        b1.set(`${g.gameId}|${side.teamId}`, rosterRating(rot) - c);
+        if (rot.players.some((x) => x.healthyMinutes > 0 && v.fallback.has(x.playerId))) affectedSides.add(`${g.gameId}|${side.teamId}`);
+      } catch { b1Stats.failed += 1; }
     }
   }
   rowsBy[s] = rows.map((r) => {
@@ -211,6 +186,22 @@ for (const s of SEASONS) {
   predsBy.set(`${s}|elo`, eloPreds(rowsBy[s]));
 }
 const elo = (s) => predsBy.get(`${s}|elo`);
+// ---------------------------------------------------------------- IMP 回退实验的逐场导出（RR_DUMP=文件；scripts/imp-fallback-lab.mjs 用）
+// 线上配置 RESULTS（K=12、近期加权）与只看阵容（K=∞），不重新选参；导出后退出，不打印本回测的报告。
+if (process.env.RR_DUMP) {
+  const cfgLive = { K: RESULTS.K, recency: RESULTS.recency };
+  const games = SEASONS.flatMap((s) => {
+    const live = seasonPreds(rowsBy[s], cfgLive); const ros = preds(s, ROSTER);
+    return live.map((x, i) => ({
+      gameId: x.row.gameId, season: s, date: x.row.date, homeWin: x.homeWin ? 1 : 0, p: x.p, pRoster: ros[i].p,
+      affected: affectedSides.has(`${x.row.gameId}|${x.row.homeId}`) || affectedSides.has(`${x.row.gameId}|${x.row.awayId}`),
+    }));
+  });
+  fs.writeFileSync(process.env.RR_DUMP, JSON.stringify({ fallback: IMP_FALLBACK, cover, b1Stats, games }));
+  console.log(`导出 ${games.length} 场到 ${process.env.RR_DUMP}（回退：${IMP_FALLBACK ?? '无'}）`);
+  process.exit(0);
+}
+
 const meanLoss = (ps) => ps.reduce((a, x) => a + logLoss(x), 0) / ps.length;
 const pick = (trainSeasons, grid) => {
   let best = null;
