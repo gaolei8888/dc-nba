@@ -41,13 +41,15 @@ export function gate(feature, { accountsOn, user, state, now = Date.now() }) {
 /**
  * 预测总表预告。字段映射（均为现有负载里的真实字段）：
  *   completed = full.overall.n（已结束场数），remaining = full.upcomingDist.n（未开打场数）。
- * summary[0] 原样转发（可能是字符串或 { code, params }，不关心形状）。
+ * summary[0] 与 summaryMsg[0] 原样转发（可能是字符串或 { code, params }，不关心形状）。
  */
 export function teaserBoard(full) {
   return {
     locked: true,
     seasonYear: full?.seasonYear ?? null,
     summary: full?.summary?.length ? [full.summary[0]] : [],
+    // 与 summary 逐句对应的消息码，前端按语言渲染；同样只取第 0 条，缺失时为空数组
+    summaryMsg: full?.summaryMsg?.length ? [full.summaryMsg[0]] : [],
     teaser: { completed: full?.overall?.n ?? null, remaining: full?.upcomingDist?.n ?? null },
   };
 }

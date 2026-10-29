@@ -43,15 +43,18 @@ test('gate：账号功能关闭时一律放行（现状不变）；失效会话 
 test('teaserBoard 只留预告字段，summary[0] 原样转发', () => {
   const full = { seasonYear: 2026, oddsFetchedAt: 'x', ...buildBoard(GAMES, { teamName: String }) };
   const t = teaserBoard(full);
-  assert.deepEqual(Object.keys(t).sort(), ['locked', 'seasonYear', 'summary', 'teaser']);
+  assert.deepEqual(Object.keys(t).sort(), ['locked', 'seasonYear', 'summary', 'summaryMsg', 'teaser']);
   assert.equal(t.locked, true);
   assert.deepEqual(t.summary, [full.summary[0]]);
+  assert.deepEqual(t.summaryMsg, [full.summaryMsg[0]]);
+  assert.equal(t.summaryMsg.length, 1);
   assert.deepEqual(t.teaser, { completed: full.overall.n, remaining: full.upcomingDist.n });
   assert.equal(t.teaser.completed, 2);
   assert.equal(t.teaser.remaining, 2);
-  for (const k of ['overall', 'completed', 'upcoming', 'byTeam', 'misses', 'market', 'baselines', 'summaryMsg', 'oddsFetchedAt']) assert.equal(k in t, false, k);
+  for (const k of ['overall', 'completed', 'upcoming', 'byTeam', 'misses', 'market', 'baselines', 'oddsFetchedAt']) assert.equal(k in t, false, k);
   const obj = { code: 'srv.board.overall', params: { n: 2 } };
   assert.deepEqual(teaserBoard({ ...full, summary: [obj, 'x'] }).summary, [obj]);
+  assert.deepEqual(teaserBoard({ ...full, summaryMsg: undefined }).summaryMsg, []);
   assert.deepEqual(teaserBoard({ seasonYear: 2026, summary: [], overall: { n: 0 }, upcomingDist: { n: 0 } }).summary, []);
 });
 
