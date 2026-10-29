@@ -142,6 +142,7 @@ export default function Players() {
           rows={rows}
           mode={mode}
           maxHeight={640}
+          showRank
           onRowClick={(p) => go(`team/${p.teamId}`)}
           nameColumn={{
             key: 'name', label: t('players.player'), align: 'left', width: 216,

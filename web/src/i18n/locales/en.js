@@ -13,7 +13,7 @@ export default {
       home: 'Home',
       neutral: 'Neutral',
     },
-    loading: 'Loading…', noData: 'No data', clear: 'Clear', noMatch: 'Nothing matches',
+    loading: 'Loading…', noData: 'No data', clear: 'Clear', noMatch: 'Nothing matches', rank: 'Rank (current filters and sort)',
     injury: { out: 'Out', doubtful: 'Doubtful', dayToDay: 'Day-to-day', unknown: 'Injury' },
     returnDate: 'Expected back {date}',
     market: {

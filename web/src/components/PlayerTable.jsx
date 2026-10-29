@@ -292,7 +292,7 @@ export const modeOptions = (t) => MODE_KEYS.map((value) => ({ value, label: t(`p
  * nameColumn 可覆盖首列（例如球队页加缺阵勾选框）
  */
 export default function PlayerTable({
-  rows, mode = 'base', nameColumn, extraColumns = [], onRowClick, maxHeight,
+  rows, mode = 'base', nameColumn, extraColumns = [], onRowClick, maxHeight, showRank = false,
 }) {
   const { t } = useI18n();
   const stats = useMemo(() => buildColumns(MODES[mode] ?? BASE_COLUMNS, t), [mode, t]);
@@ -309,6 +309,7 @@ export default function PlayerTable({
       rowKey={(r) => r.playerId}
       onRowClick={onRowClick}
       maxHeight={maxHeight}
+      showRank={showRank}
     />
   );
 }

@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { probColor } from '../lib/format.js';
 import { useI18n } from '../i18n/react.jsx';
 import { errorText } from '../lib/apiError.js';
+import { competitionRanks } from '../lib/rank.js';
 
 const LOGO = (teamId) => `https://cdn.nba.com/logos/nba/${teamId}/primary/L/logo.svg`;
 const HEADSHOT = (playerId) => `https://cdn.nba.com/headshots/nba/latest/260x190/${playerId}.png`;
@@ -181,21 +182,24 @@ export function Meter({ value, max = 1, label }) {
 /**
  * 可排序数据表。
  * columns: [{ key, label, align?, render?(row), value?(row), width?, title? }]
+ * showRank：最前面加一列名次，按当前显示的行（筛选之后）和当前排序列算，并列同名次。
  */
-export function DataTable({ columns, rows, initialSort, onRowClick, rowKey = (r, i) => i, maxHeight }) {
+export function DataTable({ columns, rows, initialSort, onRowClick, rowKey = (r, i) => i, maxHeight, showRank = false }) {
   const { t, fmt } = useI18n();
   const intl = fmt.intl;
   const [sort, setSort] = useState(initialSort ?? { key: columns[0].key, dir: 'desc' });
 
   const valueOf = (col, row) => (col.value ? col.value(row) : row[col.key]);
 
+  // 列集合换掉之后（比如球员表从"基础"切到"防守拼抢"），旧的排序键可能已经不存在。
+  // 以前这里直接 return rows，表会静默地变成未排序——看起来像乱序的 bug。
+  // 退回 initialSort，实在没有就用第一列。
+  const sortCol = columns.find((c) => c.key === sort.key)
+    ?? columns.find((c) => c.key === initialSort?.key)
+    ?? columns[0];
+
   const sorted = useMemo(() => {
-    // 列集合换掉之后（比如球员表从"基础"切到"防守拼抢"），旧的排序键可能已经不存在。
-    // 以前这里直接 return rows，表会静默地变成未排序——看起来像乱序的 bug。
-    // 退回 initialSort，实在没有就用第一列。
-    const col = columns.find((c) => c.key === sort.key)
-      ?? columns.find((c) => c.key === initialSort?.key)
-      ?? columns[0];
+    const col = sortCol;
     if (!col) return rows;
     const dir = sort.dir === 'asc' ? 1 : -1;
     return [...rows].sort((a, b) => {
@@ -208,7 +212,12 @@ export function DataTable({ columns, rows, initialSort, onRowClick, rowKey = (r,
       }
       return (x - y) * dir;
     });
-  }, [rows, sort, columns, intl]);
+  }, [rows, sort, sortCol, intl]);
+
+  const ranks = useMemo(
+    () => (showRank && sortCol ? competitionRanks(sorted.map((r) => valueOf(sortCol, r))) : null),
+    [showRank, sorted, sortCol],
+  );
 
   const toggle = (key) =>
     setSort((s) => (s.key === key
@@ -220,6 +229,7 @@ export function DataTable({ columns, rows, initialSort, onRowClick, rowKey = (r,
       <table className="data">
         <thead>
           <tr>
+            {ranks && <th className="rank" title={t('common.rank')}>#</th>}
             {columns.map((c) => (
               <th
                 key={c.key}
@@ -241,6 +251,7 @@ export function DataTable({ columns, rows, initialSort, onRowClick, rowKey = (r,
               className={onRowClick ? 'clickable' : ''}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
             >
+              {ranks && <td className="rank dim">{ranks[i] ?? '—'}</td>}
               {columns.map((c) => (
                 <td key={c.key} className={c.align === 'left' ? 'left' : ''}>
                   {c.render ? c.render(row, i) : valueOf(c, row)}

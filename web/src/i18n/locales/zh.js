@@ -13,7 +13,7 @@ export default {
       home: '主',
       neutral: '中立',
     },
-    loading: '加载中…', noData: '暂无数据', clear: '清除', noMatch: '没有符合条件的数据',
+    loading: '加载中…', noData: '暂无数据', clear: '清除', noMatch: '没有符合条件的数据', rank: '排名（按当前筛选与排序）',
     injury: { out: '缺阵', doubtful: '存疑', dayToDay: '每日观察', unknown: '伤病' },
     returnDate: '预计复出 {date}',
     market: {

@@ -371,6 +371,7 @@ table.data th {
 table.data th.left, table.data td.left { text-align: left; }
 table.data th:hover { color: var(--text); }
 table.data th.sorted { color: var(--team); }
+table.data th.rank, table.data td.rank { width: 36px; text-align: right; font-variant-numeric: tabular-nums; cursor: default; }
 table.data td {
   padding: 5px 8px;
   text-align: right;
