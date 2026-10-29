@@ -22,6 +22,7 @@ import Lab from './pages/Lab.jsx';
 import Today from './pages/Today.jsx';
 import Board from './pages/Board.jsx';
 import Login from './pages/Login.jsx';
+import Legal from './pages/Legal.jsx';
 import { useI18n } from './i18n/react.jsx';
 
 // ------------------------------------------------------------ 全局数据
@@ -262,6 +263,7 @@ export default function App() {
   else if (head === 'profiles') page = <Profiles />;
   else if (head === 'lab') page = <Lab />;
   else if (head === 'login') page = <Login returnTo={rest.join('/')} />;
+  else if (head === 'terms' || head === 'privacy') page = <Legal doc={head} />;
   else page = <Dashboard />;
 
   const activeKey = head === 'team' ? 'teams' : head;

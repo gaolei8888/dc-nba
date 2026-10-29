@@ -1388,6 +1388,9 @@ export default {
     sessionInvalid: '登录已过期，请重新登录',
     prefsInvalid: '语言或时区设置无效',
   },
+  legal: {
+    meta: '版本 {version} · 最后更新 {date}',
+  },
   lock: {
     cta: '登录后查看完整战绩统计与模拟投注',
     badge: '登录后可见',

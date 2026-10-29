@@ -715,3 +715,9 @@ table.data th.left .th-label { align-items: flex-start; }
   .mobile-account > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mobile-account .btn { flex: none; padding: 5px 12px; font-size: 12px; }
 }
+
+/* 用户协议 / 隐私政策 */
+.legal-page { max-width: 760px; }
+.legal-body section + section { margin-top: 18px; }
+.legal-body h2 { margin: 0 0 8px; font-size: 15px; }
+.legal-body p { margin: 0 0 8px; font-size: 13px; line-height: 1.7; color: var(--text); }

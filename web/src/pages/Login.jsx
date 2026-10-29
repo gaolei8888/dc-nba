@@ -101,6 +101,11 @@ export default function Login({ returnTo }) {
       setMsg({ kind: 'ok', text: t('auth.codeSent', { min: Math.round((Number(r.ttlSec) || 300) / 60) }) });
       codeRef.current?.focus();
     } catch (e) {
+      // 图形验证服务端一次性有效：带着验证码的请求失败后，除非是验证码本身答错 / 缺失（会附带新题），旧题作废
+      if (captcha && !(e instanceof ApiError && String(e.code).startsWith('auth.captcha'))) {
+        setCaptcha(null);
+        setAnswer('');
+      }
       takeCaptcha(e);
       if (e instanceof ApiError && e.code === 'auth.cooldown' && Number(e.params?.sec) > 0) setLeft(Number(e.params.sec));
       showErr(e);
@@ -130,8 +135,8 @@ export default function Login({ returnTo }) {
   };
 
   const agree = rich(t('auth.agree', { terms: '\u0001', privacy: '\u0002' }), {
-    '\u0001': <a href="#/terms">{t('auth.terms')}</a>,
-    '\u0002': <a href="#/privacy">{t('auth.privacy')}</a>,
+    '\u0001': <a href="#/terms" target="_blank" rel="noopener">{t('auth.terms')}</a>,
+    '\u0002': <a href="#/privacy" target="_blank" rel="noopener">{t('auth.privacy')}</a>,
   });
 
   return (
@@ -185,9 +190,9 @@ export default function Login({ returnTo }) {
           <span>{t('auth.code')}</span>
           <span className="login-row">
             <input
-              ref={codeRef} type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6}
+              ref={codeRef} type="text" inputMode="numeric" autoComplete="one-time-code"
               value={code} placeholder={t('auth.codePlaceholder')} aria-label={t('auth.code')}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
             />
             <button
               type="button" className="btn"
