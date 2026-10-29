@@ -1290,7 +1290,7 @@ export default {
       verdictRule: 'Pre-registered rule: at least {min} bets, and the lower bound of the 95% game-day block bootstrap interval for ROI after default costs must be above 0.',
       forwardUnavailable: 'The live ledger is not available: {reason}',
       empty: 'No bets under the current filters.',
-      unit: { units: ' units' },
+      unit: { units: ' units', pp: '{v} pp' },
       tile: {
         bets: 'Bets', staked: 'Staked', profit: 'Net profit', roi: 'ROI',
         roiHint: '95% game-day interval [{lo}, {hi}]', roiNoCi: 'Too few bets for an interval',

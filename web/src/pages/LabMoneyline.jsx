@@ -270,7 +270,7 @@ function Result({ view, dim, setDim, teamById, strategyName, bookName, seasonLab
   const units = t('lab.beat.unit.units');
   const dd = s.maxDrawdown ?? {};
   const pctCi = (c) => (c?.lo == null ? '—' : `[${fmt.pct(c.lo, 1)}, ${fmt.pct(c.hi, 1)}]`);
-  const pp = (v) => (v == null ? '—' : `${fmt.signed(v * 100, 1)} pp`);
+  const pp = (v) => (v == null ? '—' : t('lab.beat.unit.pp', { v: fmt.signed(v * 100, 1) }));
 
   let clvValue; let clvSub;
   if (clvNotApplicable(scenario)) { clvValue = t('lab.beat.tile.clvNA'); clvSub = t('lab.beat.tile.clvNAHint'); } else if (s.clv) {

@@ -1277,7 +1277,7 @@ export default {
       verdictRule: '预先写定的标准：至少 {min} 注，且扣除默认成本后 ROI 的 95% 按比赛日区块自助法区间下界大于 0，才算有证据。',
       forwardUnavailable: '本季前向账本暂不可用：{reason}',
       empty: '当前筛选下没有下注。',
-      unit: { units: ' 单位' },
+      unit: { units: ' 单位', pp: '{v} 个百分点' },
       tile: {
         bets: '总投注数', staked: '总下注额', profit: '净利润', roi: 'ROI',
         roiHint: '95% 按比赛日区间 [{lo}, {hi}]', roiNoCi: '注数太少，没有区间',

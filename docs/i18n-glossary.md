@@ -68,6 +68,7 @@
 | 阵容更迭 ΔROS | Roster turnover | Roster churn, Roster shuffle | 已定 |
 | 北京时间 | Beijing time | CST, China Standard Time | 已定 |
 | 注 / 单位 | units (stakes); bets (counts) | — | 已定 |
+| 个百分点（概率 / CLV 之差的单位，同 paper.clv.pp） | pp | — | 已定 |
 | 锋卫摇摆等位置 | G-F / F-C (code shown as-is) | swingman | 已定 |
 | 期望值 EV | expected value (EV) | — | 待确认 |
 | 优势 Edge | edge | advantage score | 待确认 |
