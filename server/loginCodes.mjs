@@ -39,6 +39,8 @@ export function bjDayStart(now) {
   return new Date(bjMs - (((bjMs % DAY_MS) + DAY_MS) % DAY_MS) - BJ_OFFSET_MS).toISOString();
 }
 
+/** 日志里的外部错误文本可能回显完整手机号：长数字串一律抹掉 */
+const scrubDigits = (t) => String(t).replace(/\+?\d{7,}/g, '***').slice(0, 120);
 const iso = (ms) => new Date(ms).toISOString();
 const hashCode = (salt, e164, code) =>
   crypto.createHash('sha256').update(`${salt}:${e164}:${code}`).digest('hex');
@@ -46,11 +48,22 @@ const count = (h, sql, ...args) => h.prepare(sql).get(...args).n;
 
 /** 同一号码同时只允许一个在途请求（检查 + 发送期间占位） */
 const inflight = new Set();
+/**
+ * 在途（已通过检查、发送器还没返回）的占位计数，按库句柄分开。
+ * sms_sends 要等发送器返回后才写，只看库里的行，不同号码的并发请求会一起越过 IP / 全站上限；
+ * 所以检查时把在途数也算进去，发送前占位、finally 里释放。
+ */
+const pendingByDb = new WeakMap();
+const pendingOf = (h) => {
+  let p = pendingByDb.get(h);
+  if (!p) { p = { ip: new Map(), site: 0 }; pendingByDb.set(h, p); }
+  return p;
+};
 /** 全站触顶的服务器日志每个北京日只打一次 */
 let capWarnedDay = null;
 
 /** 只读检查：能不能给这个号码 / IP 再发一条 */
-export function checkSendAllowed(h, { e164, ip, now, limits = DEFAULT_LIMITS }) {
+export function checkSendAllowed(h, { e164, ip, now, limits = DEFAULT_LIMITS, pendingIp = 0, pendingSite = 0 }) {
   const day = bjDayStart(now);
 
   const last = h.prepare('SELECT at FROM sms_sends WHERE e164 = ? ORDER BY id DESC LIMIT 1').get(e164);
@@ -63,13 +76,13 @@ export function checkSendAllowed(h, { e164, ip, now, limits = DEFAULT_LIMITS }) 
   }
   let ipSendsLastHour = 0;
   if (ip) {
-    ipSendsLastHour = count(h, 'SELECT COUNT(*) n FROM sms_sends WHERE ip = ? AND at > ?', ip, iso(now - HOUR_MS));
-    const ipToday = count(h, 'SELECT COUNT(*) n FROM sms_sends WHERE ip = ? AND at >= ?', ip, day);
+    ipSendsLastHour = pendingIp + count(h, 'SELECT COUNT(*) n FROM sms_sends WHERE ip = ? AND at > ?', ip, iso(now - HOUR_MS));
+    const ipToday = pendingIp + count(h, 'SELECT COUNT(*) n FROM sms_sends WHERE ip = ? AND at >= ?', ip, day);
     if (ipSendsLastHour >= limits.ipHourly || ipToday >= limits.ipDaily) {
       return { ok: false, status: 429, code: 'auth.ipLimit' };
     }
   }
-  const siteToday = count(h, 'SELECT COUNT(*) n FROM sms_sends WHERE at >= ?', day);
+  const siteToday = pendingSite + count(h, 'SELECT COUNT(*) n FROM sms_sends WHERE at >= ?', day);
   if (siteToday >= limits.siteDaily) {
     if (capWarnedDay !== day) {
       capWarnedDay = day;
@@ -87,8 +100,25 @@ export async function requestCode(h, { e164, ip, now, limits = DEFAULT_LIMITS, s
   }
   inflight.add(e164); // 同步占位，之后才有 await
   try {
-    const gate = checkSendAllowed(h, { e164, ip, now, limits });
+    const pend = pendingOf(h);
+    const gate = checkSendAllowed(h, { e164, ip, now, limits, pendingIp: ip ? (pend.ip.get(ip) ?? 0) : 0, pendingSite: pend.site });
     if (!gate.ok) return gate;
+    // 同步占位（下面第一个 await 之前），防止不同号码的并发请求一起越过 IP / 全站上限
+    pend.site += 1;
+    if (ip) pend.ip.set(ip, (pend.ip.get(ip) ?? 0) + 1);
+    try {
+      return await sendAndStore(h, { e164, ip, now, sender });
+    } finally {
+      pend.site -= 1;
+      if (ip) { const n = (pend.ip.get(ip) ?? 1) - 1; if (n > 0) pend.ip.set(ip, n); else pend.ip.delete(ip); }
+    }
+  } finally {
+    inflight.delete(e164);
+  }
+}
+
+async function sendAndStore(h, { e164, ip, now, sender }) {
+  {
 
     const code = sender.ownsCode ? null : newCode();
     let res;
@@ -102,7 +132,7 @@ export async function requestCode(h, { e164, ip, now, limits = DEFAULT_LIMITS, s
       .run(e164, ip ?? null, iso(now), sender.id, ok ? 1 : 0, ok ? (res.providerId ?? null) : null,
         ok ? null : String(res?.error ?? 'unknown').slice(0, 300));
     if (!ok) {
-      console.warn(`!! [sms] 发送失败 ${maskPhone(e164)} via ${sender.id}: ${String(res?.error ?? 'unknown').slice(0, 120)}`);
+      console.warn(`!! [sms] 发送失败 ${maskPhone(e164)} via ${sender.id}: ${scrubDigits(res?.error ?? 'unknown')}`);
       return { ok: false, status: 502, code: 'auth.smsFailed' };
     }
     const salt = code === null ? null : crypto.randomBytes(16).toString('hex');
@@ -112,8 +142,6 @@ export async function requestCode(h, { e164, ip, now, limits = DEFAULT_LIMITS, s
                  salt = excluded.salt, created_at = excluded.created_at, expires_at = excluded.expires_at, attempts = 0`)
       .run(e164, sender.id, code === null ? null : hashCode(salt, e164, code), salt, iso(now), iso(now + CODE_TTL_MS));
     return { ok: true, resendAfterSec: RESEND_MS / 1000, ttlSec: CODE_TTL_MS / 1000 };
-  } finally {
-    inflight.delete(e164);
   }
 }
 
@@ -126,6 +154,8 @@ export async function verifyCode(h, { e164, code, now, sender }) {
     drop();
     return { ok: false, code: 'auth.codeExpired' };
   }
+  // 发码时的通道与现在的发送器不一致（中途切换了短信通道）：码在另一边，不能拿来校验，也不烧尝试次数
+  if (row.provider !== sender.id) return { ok: false, code: 'auth.codeExpired' };
   // 先记一次尝试再校验：校验中途（异步）进来的并发请求也占名额，不能借此绕过 5 次
   const attempts = row.attempts + 1;
   h.prepare('UPDATE login_codes SET attempts = ? WHERE e164 = ?').run(attempts, e164);
@@ -135,7 +165,7 @@ export async function verifyCode(h, { e164, code, now, sender }) {
     try {
       good = (await sender.check(e164, String(code ?? '')))?.ok === true;
     } catch (e) {
-      console.warn(`!! [sms] 校验调用失败 ${maskPhone(e164)}: ${String(e?.message ?? e).slice(0, 120)}`);
+      console.warn(`!! [sms] 校验调用失败 ${maskPhone(e164)}: ${scrubDigits(e?.message ?? e)}`);
       good = false;
     }
   } else {
@@ -148,7 +178,10 @@ export async function verifyCode(h, { e164, code, now, sender }) {
   return { ok: false, code: 'auth.codeInvalid', params: { left: MAX_ATTEMPTS - attempts } };
 }
 
-/** 今日（北京）发送概况，给 /api/health 报警用。sentToday 含失败的调用（都计入限额） */
+/**
+ * 今日（北京）发送概况，给 /api/health 报警用。
+ * sentToday 统计的是「发送尝试」数，含失败的调用，与全站上限的计数口径一致；failedToday 是其中失败的。
+ */
 export function smsStats(h, { now, limits = DEFAULT_LIMITS }) {
   const day = bjDayStart(now);
   const sentToday = count(h, 'SELECT COUNT(*) n FROM sms_sends WHERE at >= ?', day);

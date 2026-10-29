@@ -89,15 +89,17 @@ test('同一 IP 每小时 5 次、每天 20 次（不同号码）', async () => 
   assert.deepEqual(await req(h, { e164: phone(5), sender: s }),
     { ok: false, status: 429, code: 'auth.ipLimit' });
   // 每小时 5 次，分 4 个小时发满 20 次
+  // 小时上限放宽，单测每天 20 次的分支
+  const L = { ...BIG, ipDaily: 20 };
   const h2 = fresh();
   let n = 0;
   for (let hr = 0; hr < 4; hr++) {
     for (let i = 0; i < 5; i++, n++) {
-      const r = await req(h2, { e164: phone(n), now: T0 + hr * 3_600_000 + 1000, sender: s });
+      const r = await req(h2, { e164: phone(n), now: T0 + hr * 3_600_000 + 1000, limits: L, sender: s });
       assert.equal(r.ok, true, `第 ${n + 1} 次`);
     }
   }
-  const r21 = await req(h2, { e164: phone(20), now: T0 + 4 * 3_600_000, sender: s });
+  const r21 = await req(h2, { e164: phone(20), now: T0 + 4 * 3_600_000, limits: L, sender: s });
   assert.deepEqual(r21, { ok: false, status: 429, code: 'auth.ipLimit' });
 });
 
@@ -229,4 +231,55 @@ test('发送器抛异常：按失败处理，不存码', async () => {
   assert.deepEqual(await req(h, { sender: s }), { ok: false, status: 502, code: 'auth.smsFailed' });
   assert.equal(h.prepare('SELECT COUNT(*) n FROM login_codes').get().n, 0);
   assert.equal(h.prepare('SELECT error FROM sms_sends').get().error, 'net down');
+});
+
+test('并发：同一 IP 对 6 个不同号码同时请求，最多发 5 条', async () => {
+  const s = fake({ delayMs: 30 }); const h = fresh();
+  const phone = (i) => `+86138001${String(i).padStart(5, '0')}`;
+  const rs = await Promise.all([0, 1, 2, 3, 4, 5].map((i) => req(h, { e164: phone(i), sender: s })));
+  assert.equal(s.calls.length, 5);
+  assert.equal(rs.filter((r) => r.ok).length, 5);
+  assert.equal(rs.find((r) => !r.ok).code, 'auth.ipLimit');
+  // 占位已释放：失败不残留
+  assert.equal(h.prepare('SELECT COUNT(*) n FROM sms_sends').get().n, 5);
+});
+
+test('并发：全站上限 N，N+1 个不同号码 / IP 同时请求，最多发 N 条', async () => {
+  const s = fake({ delayMs: 30 }); const h = fresh();
+  const limits = { ...BIG, siteDaily: 3 };
+  const phone = (i) => `+86138001${String(i).padStart(5, '0')}`;
+  const rs = await Promise.all([0, 1, 2, 3].map((i) => req(h, { e164: phone(i), ip: `9.9.9.${i}`, limits, sender: s })));
+  assert.equal(s.calls.length, 3);
+  assert.deepEqual(rs.find((r) => !r.ok), { ok: false, status: 503, code: 'auth.smsDailyCap' });
+});
+
+test('并发占位在发送失败后也释放', async () => {
+  const h = fresh();
+  const limits = { ...BIG, siteDaily: 1 };
+  await req(h, { sender: fake({ fail: true }), limits: { ...BIG, siteDaily: 2 } });
+  const s = fake();
+  // 失败那条已记入库（计 1），上限 2 还剩 1 条；若占位泄漏，这里会被挡
+  assert.equal((await req(h, { e164: '+8613800138001', now: T0 + 1000, sender: s, limits: { ...BIG, siteDaily: 2 } })).ok, true);
+  void limits;
+});
+
+test('通道中途切换：provider 不一致，明确失效且不烧尝试次数', async () => {
+  const h = fresh(); const s = fake();
+  await req(h, { sender: s });
+  const other = fake(); other.id = 'tencent';
+  assert.deepEqual(await verifyCode(h, { e164: P, code: '123456', now: T0 + 1000, sender: other }),
+    { ok: false, code: 'auth.codeExpired' });
+  assert.equal(h.prepare('SELECT attempts FROM login_codes').get().attempts, 0);
+});
+
+test('失败日志里不出现完整手机号', async () => {
+  const h = fresh();
+  const logs = []; const orig = console.warn; console.warn = (...a) => logs.push(a.join(' '));
+  try {
+    const s = { id: 'x', async send(e164) { return { ok: false, error: `bad number ${e164} rejected` }; } };
+    await req(h, { sender: s });
+  } finally { console.warn = orig; }
+  const line = logs.join('\n');
+  assert.ok(line.includes('[sms]'));
+  assert.equal(line.includes('13800138000'), false);
 });
