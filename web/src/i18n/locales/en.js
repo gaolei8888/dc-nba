@@ -117,7 +117,7 @@ export default {
     },
     ml: {
       reason: {
-        noData: 'The moneyline backtest report has not been built yet. Run npm run ml:backtest.',
+        noData: 'The backtest report has not been generated yet.',
       },
       warn: {
         closingPrice: 'Simulated at closing prices. It does not show what could have been bet earlier in the day.',

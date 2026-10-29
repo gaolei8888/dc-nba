@@ -117,7 +117,7 @@ export default {
     },
     ml: {
       reason: {
-        noData: '未找到独赢盘回测报告：请先运行 npm run ml:backtest 生成。',
+        noData: '回测报告尚未生成。',
       },
       warn: {
         closingPrice: '按收盘价模拟：不代表当天更早决策时能拿到这个价。',

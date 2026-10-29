@@ -97,3 +97,15 @@ test('结果区按已显示视图的情景标注：加载新筛选时旧视图�
   assert.equal(shownScenario(null, st), 'forward');                              // 还没有视图
   assert.equal(shownScenario({ available: false }, st), 'forward');              // 前向不可用的回应没有 filters
 });
+
+test('报告缺失文案对访客中性：不让访客去跑 npm（运维提示只进服务端日志）', async () => {
+  const zh = (await import('../web/src/i18n/locales/zh.js')).default;
+  const en = (await import('../web/src/i18n/locales/en.js')).default;
+  for (const loc of [zh, en]) {
+    const text = loc.srv.ml.reason.noData;
+    assert.equal(typeof text, 'string');
+    assert.doesNotMatch(text, /npm|ml:backtest|run /i);
+  }
+  assert.equal(zh.srv.ml.reason.noData, '回测报告尚未生成。');
+  assert.equal(en.srv.ml.reason.noData, 'The backtest report has not been generated yet.');
+});
