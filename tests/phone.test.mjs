@@ -29,3 +29,22 @@ test('isMainland 与 countriesFor', () => {
   assert.deepEqual(countriesFor(false), [{ cc: '86', iso: 'CN' }]);
   assert.equal(countriesFor(true).length, COUNTRIES.length);
 });
+
+test('normalizePhone：非 86/1 国家的无前缀、00 前缀与区号不符', () => {
+  const sg = { ok: true, e164: '+6565123456' };
+  assert.deepEqual(normalizePhone('65', '65123456'), sg); // 本地号恰以区号数字开头
+  assert.deepEqual(normalizePhone('65', '+65 6512 3456'), sg);
+  assert.deepEqual(normalizePhone('65', '6565123456'), sg);
+  assert.deepEqual(normalizePhone('44', '447700900123'), { ok: true, e164: '+447700900123' });
+  assert.deepEqual(normalizePhone('44', '0044 7700 900123'), { ok: true, e164: '+447700900123' });
+  assert.deepEqual(normalizePhone('852', '9123 4567'), { ok: true, e164: '+85291234567' });
+  assert.deepEqual(normalizePhone('44', '+1 2025550147'), { ok: false, code: 'auth.phoneInvalid' });
+  assert.deepEqual(normalizePhone('65', '0065 6512 3456'), sg);
+  assert.deepEqual(normalizePhone('65', '0044 7700900123'), { ok: false, code: 'auth.phoneInvalid' });
+});
+
+test('countriesFor 返回值不会污染 COUNTRIES', () => {
+  assert.throws(() => { 'use strict'; COUNTRIES.push({ cc: '9', iso: 'XX' }); });
+  const l = countriesFor(true); l.pop();
+  assert.equal(countriesFor(true).length, COUNTRIES.length);
+});

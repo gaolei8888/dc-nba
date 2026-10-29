@@ -1,11 +1,17 @@
 // 手机号规范化（E.164）与脱敏：纯函数，无 I/O。
 
 // 顺序固定；显示名走 i18n 键 country.<iso>
-export const COUNTRIES = [
+export const COUNTRIES = Object.freeze([
   { cc: '86', iso: 'CN' }, { cc: '1', iso: 'US' }, { cc: '852', iso: 'HK' }, { cc: '853', iso: 'MO' },
   { cc: '886', iso: 'TW' }, { cc: '65', iso: 'SG' }, { cc: '44', iso: 'GB' }, { cc: '81', iso: 'JP' },
   { cc: '82', iso: 'KR' }, { cc: '61', iso: 'AU' },
-];
+].map((c) => Object.freeze(c)));
+
+// 其余国家 / 地区：去掉前导 0 后的本地号形态（用来区分“已含区号”与“本地号”）
+const LOCAL_SHAPE = {
+  '852': /^[2-9]\d{7}$/, '853': /^[2-9]\d{7}$/, '886': /^\d{8,9}$/, '65': /^[3689]\d{7}$/,
+  '44': /^\d{10}$/, '81': /^\d{9,10}$/, '82': /^\d{8,10}$/, '61': /^\d{9}$/,
+};
 
 const INVALID = { ok: false, code: 'auth.phoneInvalid' };
 
@@ -16,7 +22,8 @@ function validLocal(cc, local) {
   if (cc === '1') return /^[2-9]\d{2}[2-9]\d{6}$/.test(local) ? local : null;
   const n = local.replace(/^0/, ''); // 去掉国内长途前缀 0
   const total = cc.length + n.length;
-  return total >= 8 && total <= 15 ? n : null;
+  if (total < 8 || total > 15) return null;
+  return (LOCAL_SHAPE[cc] ?? /^\d+$/).test(n) ? n : null;
 }
 
 export function normalizePhone(cc, input) {
@@ -32,8 +39,8 @@ export function normalizePhone(cc, input) {
     if (!s.startsWith(cc)) return INVALID; // 区号必须与所选一致
     local = validLocal(cc, s.slice(cc.length));
   } else {
-    // 无 +：以所选区号开头且剥掉后合规则剥掉，否则按本地号处理
-    local = (s.startsWith(cc) ? validLocal(cc, s.slice(cc.length)) : null) ?? validLocal(cc, s);
+    // 无 +：先按本地号解读；本地解读不合规时，才尝试剥掉开头的区号
+    local = validLocal(cc, s) ?? (s.startsWith(cc) ? validLocal(cc, s.slice(cc.length)) : null);
   }
   return local ? { ok: true, e164: `+${cc}${local}` } : INVALID;
 }
@@ -59,5 +66,5 @@ export function maskPhone(e164) {
 }
 
 export function countriesFor(overseasOn) {
-  return overseasOn ? COUNTRIES : COUNTRIES.filter((c) => c.cc === '86');
+  return overseasOn ? [...COUNTRIES] : COUNTRIES.filter((c) => c.cc === '86');
 }
