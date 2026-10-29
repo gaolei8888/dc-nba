@@ -10,12 +10,12 @@
 //   - 作废注（含非法报价）不计入 staked 与 ROI 分母；非法报价作废（invalid_price）在汇总里单列。
 //   - 比分相等是数据错误（NBA 无平局）→ 作废，reason 'tie_score'；比分方向与 homeWin 矛盾 → 作废，reason 'score_mismatch'。
 import { selectPrice } from './priceSelect.mjs';
-import { isValidAmerican, americanToDecimal, edgeOf, evPerUnit, kellyFraction, worsenAmerican, devigPair } from './oddsMath.mjs';
+import { isValidAmerican, americanToDecimal, worsenAmerican, devigPair } from './oddsMath.mjs';
+import { pickBet, stakeFor } from './betStrategies.mjs';
 import { settleBet, outcomeOf } from './betSettlement.mjs';
 
 export const DEFAULT_COSTS = { feeOnWin: 0, slippagePts: 0, maxStake: null };
 
-const EPS = 1e-12;   // 与 paperBetting.decide 一致
 const BANKROLL_EPS = 1e-9;   // 资金低于此值视为耗尽（避免浮点残余继续下微注）
 
 const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
@@ -49,50 +49,9 @@ export function buildCandidates(games, { scenario, book = 'chain', splitOf }) {
   return { candidates, missing, priced: candidates.length, total };
 }
 
-// ---------------------------------------------------------------------------
-// 策略（Task 8 内联桩；Task 9 改为从 betStrategies.mjs 导入 pickBet / stakeFor）
-
+// 策略逻辑（pickBet / stakeFor）见 betStrategies.mjs；这里只保留引擎用到的取价小工具。
 const sideP = (c, side) => (side === 'home' ? c.pHome : 1 - c.pHome);
 const sideMl = (c, side) => (side === 'home' ? c.ml[0] : c.ml[1]);
-
-function sideStats(c, side) {
-  const a = sideMl(c, side);
-  const p = sideP(c, side);
-  if (!isValidAmerican(a)) return { side, edge: null, ev: null };
-  return { side, edge: edgeOf(p, a), ev: evPerUnit(p, a) };
-}
-
-/** 数据质量门槛（C 用）：价格时点与情景一致、无退价/跳价/挑价标记 */
-function qualityOk(c) {
-  const bad = ['currentAsClose', 'skippedAnomaly', 'bestPrice'];
-  return c.priceAt === c.scenario && !(c.flags ?? []).some((f) => bad.includes(f));
-}
-
-function pickBet(c, s) {
-  const both = [sideStats(c, 'home'), sideStats(c, 'away')];
-  if (s.family === 'A') {
-    let side;
-    if (s.pick === 'home') side = 'home';
-    else if (s.pick === 'favorite') side = americanToDecimal(c.ml[1]) < americanToDecimal(c.ml[0]) ? 'away' : 'home';
-    else side = c.pHome >= 0.5 ? 'home' : 'away';
-    return both.find((x) => x.side === side);
-  }
-  // B/C/D：两侧都要有合法价，取 edge 较大的一侧
-  if (both.some((x) => x.edge == null)) return null;
-  const best = both[0].edge >= both[1].edge ? both[0] : both[1];
-  if (s.family === 'B') return best.edge > EPS && best.edge >= s.minEdge - EPS ? best : null;
-  if (s.family === 'C') return best.ev > EPS && qualityOk(c) ? best : null;
-  if (s.family === 'D') {
-    const f = kellyFraction(sideP(c, best.side), sideMl(c, best.side), { mult: s.kelly.mult, cap: s.kelly.cap });
-    return f > 0 ? best : null;
-  }
-  throw new Error(`未知策略族: ${String(s.family)}`);
-}
-
-function stakeFor(s, { p, american, bankroll, flatStake = 1, cap }) {
-  if (s.family !== 'D') return flatStake;
-  return bankroll * kellyFraction(p, american, { mult: s.kelly.mult, cap: cap ?? s.kelly.cap });
-}
 
 // ---------------------------------------------------------------------------
 // 结果与 CLV
