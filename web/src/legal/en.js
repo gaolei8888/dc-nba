@@ -75,7 +75,8 @@ export default {
         h: '1. What we collect',
         p: [
           'Sign-up and sign-in: your phone number (with its country or region code), when you registered and when you last signed in.',
-          'Sign-in security: a log of text-message codes sent (phone number, send time and result) and the network (IP) address that requested the code. Image-check answers are kept only as hashes in server memory and are never written to disk.',
+          'Sign-in security: a log of text-message codes sent (the full phone number, send time, result, the provider\'s message id and any error text, and the network (IP) address that requested the code). A code that has not yet been used or has not expired is held in the database as a hash alongside the phone number. Image-check answers are kept only as hashes in server memory and are never written to disk.',
+          'When you view pages, team logos and player headshots are loaded from the NBA\'s CDN (cdn.nba.com). Your browser requests them directly, so the CDN receives your IP address and browser user agent.',
           'Sessions: a session token created when you sign in. The server stores only its hash. It lasts 30 days and stops working when you sign out.',
           'Player data: the player name you choose, your predictions in "You vs. the Model" and your leaderboard results. Without an account, this exists as an anonymous player.',
           'Preferences: the interface language and time zone you pick.',
@@ -86,8 +87,8 @@ export default {
       {
         h: '2. Why we collect it',
         p: [
-          'Phone number: to verify who you are, sign you in and let you recover your account.',
-          'Sign-in records, send logs and IP addresses: to prevent API abuse, bulk sign-ups and text-message abuse, to keep the service secure and to track text-message volume.',
+          'Phone number: to verify who you are, sign you in and let you sign back in.',
+          'Sign-in records, send logs and the IP address of code requests: to prevent API abuse, bulk sign-ups and text-message abuse, to keep the service secure and to track text-message volume.',
           'Player data and preferences: to run "You vs. the Model" and the leaderboard, and, once you sign in, to sync your record across devices and keep your language and time zone.',
           'We process this information because it is necessary to provide the service to you, and on the basis of your consent to this policy before you sign in.',
         ],
@@ -102,17 +103,17 @@ export default {
       {
         h: '4. Where it is stored and for how long',
         p: [
-          'Your information is stored on servers located in the People\'s Republic of China.',
-          'Account information: kept while your account exists, and deleted or anonymized after the account is closed.',
-          'Text-message send logs: kept for 180 days. [TO BE FILLED BY OWNER: confirm the retention period and whether an automatic cleanup job exists]',
+          'Your information is stored on servers located in the People\'s Republic of China. [TO BE CONFIRMED BY OWNER: server location]',
+          'Account profile information: can be deleted after you ask to close your account. Text-message send logs (including the full phone number and the IP of the code request) and append-only game, pick and paper-betting records are retained for security and audit purposes. Retention period: [TO BE FILLED BY OWNER].',
+          'Text-message send log retention period: [TO BE FILLED BY OWNER]',
           'Session tokens: expire after 30 days or when you sign out. [TO BE FILLED BY OWNER: how often expired session records are cleaned up]',
-          'Sign-in IP and other security records: [TO BE FILLED BY OWNER: retention period]',
+          'Code-request IP and other security record retention period: [TO BE FILLED BY OWNER]',
         ],
       },
       {
         h: '5. Sharing and disclosure',
         p: [
-          'We do not sell your personal information and do not provide it to third parties, except: to the SMS provider above, as needed to send the text message; with your separate consent; or where laws or a competent authority require it.',
+          'We do not sell your personal information and do not actively provide it to third parties, except: to the SMS provider above, as needed to send the text message; the NBA\'s CDN, which receives your IP and browser user agent when your browser requests images (see section 1); with your separate consent; or where laws or a competent authority require it.',
           'The leaderboard publicly shows your player name and results, never your phone number. Please do not use your phone number or other sensitive details as a player name.',
         ],
       },
