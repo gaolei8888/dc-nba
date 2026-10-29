@@ -704,3 +704,14 @@ table.data th.left .th-label { align-items: flex-start; }
 .login-consent input { margin-top: 3px; }
 .login-consent a { color: var(--team); }
 .login-submit { width: 100%; padding: 9px 14px; }
+
+/* 窄屏账号条：侧栏隐藏（≤780px）时放在主区顶部，只有登录 / 退出；宽屏不显示 */
+.mobile-account { display: none; }
+@media (max-width: 780px) {
+  .mobile-account {
+    display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+    margin-bottom: 12px; font-size: 12px; color: var(--text-dim); min-width: 0;
+  }
+  .mobile-account > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mobile-account .btn { flex: none; padding: 5px 12px; font-size: 12px; }
+}

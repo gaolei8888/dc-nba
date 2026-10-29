@@ -266,6 +266,39 @@ export default function App() {
 
   const activeKey = head === 'team' ? 'teams' : head;
   const showLock = !!ctx.accounts.enabled && !session;
+  const loginTarget = `login/${head === 'login' ? rest.join('/') : [head, ...rest].filter(Boolean).join('/')}`;
+  /**
+   * 账号区：侧栏里一份；≤780px 侧栏隐藏时，主区顶部的窄条再放一份（只有登录 / 退出，不是导航菜单）。
+   * accounts.enabled 为假时两处都不出现。
+   */
+  const accountUi = (where) => {
+    if (!ctx.accounts.enabled) return null;
+    if (session) {
+      const who = t('auth.loggedInAs', { phone: session.user?.phone ?? '' });
+      return (
+        <div className={where === 'side' ? 'side-account' : 'mobile-account'}>
+          <span title={who}>{who}</span>
+          <button className={where === 'side' ? 'nav-item' : 'btn'} onClick={ctx.logout}>{t('auth.logout')}</button>
+        </div>
+      );
+    }
+    if (where === 'side') {
+      return (
+        <button
+          className="btn primary"
+          style={{ width: '100%', marginTop: 6, padding: '5px 8px', fontSize: 11.5 }}
+          onClick={() => go(loginTarget)}
+        >
+          {t('auth.loginOrRegister')}
+        </button>
+      );
+    }
+    return (
+      <div className="mobile-account">
+        <button className="btn primary" onClick={() => go(loginTarget)}>{t('auth.loginOrRegister')}</button>
+      </div>
+    );
+  };
 
   return (
     <AppCtx.Provider value={ctx}>
@@ -322,22 +355,7 @@ export default function App() {
             >
               {t('app.manageProfiles')}
             </button>
-            {ctx.accounts.enabled && (session ? (
-              <div className="side-account">
-                <span title={t('auth.loggedInAs', { phone: session.user?.phone ?? '' })}>
-                  {t('auth.loggedInAs', { phone: session.user?.phone ?? '' })}
-                </span>
-                <button className="nav-item" onClick={ctx.logout}>{t('auth.logout')}</button>
-              </div>
-            ) : (
-              <button
-                className="btn primary"
-                style={{ width: '100%', marginTop: 6, padding: '5px 8px', fontSize: 11.5 }}
-                onClick={() => go(`login/${head === 'login' ? rest.join('/') : [head, ...rest].filter(Boolean).join('/')}`)}
-              >
-                {t('auth.loginOrRegister')}
-              </button>
-            ))}
+            {accountUi('side')}
           </div>
 
           {(ctx.injuries.players?.length ?? 0) > 0 && (
@@ -401,7 +419,7 @@ export default function App() {
           </div>
         </nav>
 
-        <main className="main">{page}</main>
+        <main className="main">{accountUi('mobile')}{page}</main>
       </div>
     </AppCtx.Provider>
   );
