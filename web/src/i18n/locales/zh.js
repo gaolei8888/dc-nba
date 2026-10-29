@@ -116,9 +116,16 @@ export default {
     },
     ml: {
       verdict: {
-        evidence: '测试期 {bets} 注、ROI {roi, pct1}（95% 区间 [{lo, pct1}, {hi, pct1}]）：有证据表明能赢盘口——仍需前向账本确认',
-        noEvidence: '测试期 {bets} 注、ROI {roi, pct1}（95% 区间 [{lo, pct1}, {hi, pct1}]）：无证据表明模型能赢盘口',
-        tooFew: '仅 {bets} 注，少于 {min} 注的结论门槛：无证据表明模型能赢盘口',
+        test: {
+          evidence: '测试期 {bets} 注、ROI {roi, pct1}（95% 区间 [{lo, pct1}, {hi, pct1}]）：有证据表明模型能赢盘口——仍需前向账本确认',
+          noEvidence: '测试期 {bets} 注、ROI {roi, pct1}（95% 区间 [{lo, pct1}, {hi, pct1}]）：无证据表明模型能赢盘口',
+          tooFew: '测试期仅 {bets} 注，少于 {min} 注的结论门槛：无证据表明模型能赢盘口',
+        },
+        live: {
+          evidence: '前向账本 {bets} 注、ROI {roi, pct1}（95% 区间 [{lo, pct1}, {hi, pct1}]）：有证据表明模型能赢盘口',
+          noEvidence: '前向账本 {bets} 注、ROI {roi, pct1}（95% 区间 [{lo, pct1}, {hi, pct1}]）：无证据表明模型能赢盘口',
+          tooFew: '前向账本仅 {bets} 注，少于 {min} 注的结论门槛：无证据表明模型能赢盘口',
+        },
       },
     },
   },

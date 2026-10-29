@@ -97,17 +97,47 @@ test('perBetSd / powerAnalysis：用该流水自己的方差', () => {
   assert.equal(powerAnalysis(twoDays, { B: 200 }).betsNeeded, null);
 });
 
-test('mlVerdict：下界 > 0 且 ≥ 300 注才是 evidence', () => {
+test('mlVerdict：下界 > 0 且 ≥ 300 注才是 evidence；文案按期别区分', () => {
   assert.equal(MIN_BETS, 300);
-  assert.equal(mlVerdict({ roi: 0.02, bets: 300, ci: { lo: 0.001, hi: 0.05 } }).code, 'srv.ml.verdict.evidence');
-  assert.equal(mlVerdict({ roi: 0.02, bets: 299, ci: { lo: 0.001, hi: 0.05 } }).code, 'srv.ml.verdict.tooFew');
-  assert.equal(mlVerdict({ roi: 0.01, bets: 1000, ci: { lo: -0.01, hi: 0.03 } }).code, 'srv.ml.verdict.noEvidence');
-  assert.equal(mlVerdict({ roi: 0.01, bets: 1000, ci: { lo: 0, hi: 0.03 } }).code, 'srv.ml.verdict.noEvidence');
-  assert.equal(mlVerdict({ roi: null, bets: 0, ci: null }).code, 'srv.ml.verdict.tooFew');
-  assert.equal(mlVerdict({ roi: 0.1, bets: 500, ci: null }).code, 'srv.ml.verdict.noEvidence');
-  assert.deepEqual(mlVerdict({ roi: 0.02, bets: 300, ci: { lo: 0.001, hi: 0.05 } }).params,
+  for (const period of ['test', 'live']) {
+    const c = (o) => mlVerdict({ period, ...o }).code;
+    assert.equal(c({ roi: 0.02, bets: 300, ci: { lo: 0.001, hi: 0.05 } }), `srv.ml.verdict.${period}.evidence`);
+    assert.equal(c({ roi: 0.02, bets: 299, ci: { lo: 0.001, hi: 0.05 } }), `srv.ml.verdict.${period}.tooFew`);
+    assert.equal(c({ roi: 0.01, bets: 1000, ci: { lo: -0.01, hi: 0.03 } }), `srv.ml.verdict.${period}.noEvidence`);
+    assert.equal(c({ roi: 0.01, bets: 1000, ci: { lo: 0, hi: 0.03 } }), `srv.ml.verdict.${period}.noEvidence`);
+    assert.equal(c({ roi: null, bets: 0, ci: null }), `srv.ml.verdict.${period}.tooFew`);
+    assert.equal(c({ roi: 0.1, bets: 500, ci: null }), `srv.ml.verdict.${period}.noEvidence`);
+  }
+  assert.deepEqual(mlVerdict({ period: 'test', roi: 0.02, bets: 300, ci: { lo: 0.001, hi: 0.05 } }).params,
     { bets: 300, roi: 0.02, lo: 0.001, hi: 0.05, min: 300 });
-  assert.deepEqual(mlVerdict({ roi: null, bets: 0, ci: null }).params, { bets: 0, roi: null, lo: null, hi: null, min: 300 });
+  assert.deepEqual(mlVerdict({ period: 'live', roi: null, bets: 0, ci: null }).params, { bets: 0, roi: null, lo: null, hi: null, min: 300 });
+  for (const bad of [undefined, 'forward', 'toString']) {
+    assert.throws(() => mlVerdict({ period: bad, roi: 0, bets: 0, ci: null }), /period/);
+  }
+});
+
+test('mlVerdict 文案：期别写进每条（含 tooFew）；英文用 Live ledger', async () => {
+  const { lookup } = await import('../web/src/i18n/core.js');
+  const zh = (await import('../web/src/i18n/locales/zh.js')).default;
+  const en = (await import('../web/src/i18n/locales/en.js')).default;
+  for (const k of ['evidence', 'noEvidence', 'tooFew']) {
+    assert.match(lookup(zh, `srv.ml.verdict.test.${k}`), /^测试期/);
+    assert.match(lookup(zh, `srv.ml.verdict.live.${k}`), /^前向账本/);
+    assert.match(lookup(en, `srv.ml.verdict.test.${k}`), /^Test period:/);
+    assert.match(lookup(en, `srv.ml.verdict.live.${k}`), /^Live ledger:/);
+    assert.doesNotMatch(lookup(en, `srv.ml.verdict.live.${k}`), /Forward/i);
+  }
+  for (const p of ['test', 'live']) {
+    assert.match(lookup(zh, `srv.ml.verdict.${p}.evidence`), /有证据表明模型能赢盘口/);
+    assert.match(lookup(zh, `srv.ml.verdict.${p}.noEvidence`), /无证据表明模型能赢盘口/);
+  }
+});
+
+test('blockBootstrap：非作废注缺 date / season → 抛错，不并成一块', () => {
+  assert.throws(() => blockBootstrap([...twoDays, win({ date: undefined, gameId: 'x' })], { by: 'day', B: 10 }), /date/);
+  assert.throws(() => blockBootstrap([win({ season: null })], { by: 'season', B: 10 }), /season/);
+  // 作废注缺 date 不影响（先剔除作废）
+  assert.equal(blockBootstrap([...twoDays, bet({ result: 'void', profit: 0, date: undefined })], { by: 'day', B: 10 }).n, 4);
 });
 
 test('bucketRoi：每桶 n 之和 = 非作废注数；键齐全', () => {
@@ -160,7 +190,7 @@ test('bucketRoi：缺字段的非作废注进 n/a 桶，n 之和仍等于非作�
 });
 
 test('calibrationVsMarket：市场概率用同一价两侧去水', () => {
-  const r = calibrationVsMarket([{ pHome: 0.7, ml: [-150, 130], homeWin: true }]);
+  const r = calibrationVsMarket([{ pHome: 0.7, ml: [-150, 130], books: ['draftkings', 'draftkings'], homeWin: true }]);
   assert.equal(r.n, 1);
   const pm = 0.6 / (0.6 + 100 / 230);
   assert.ok(Math.abs(pm - 0.5798319) < 1e-7);
@@ -172,18 +202,26 @@ test('calibrationVsMarket：市场概率用同一价两侧去水', () => {
   assert.deepEqual(r.reliability.market, [{ lo: 50, hi: 60, n: 1, predicted: 0.5798, actual: 1 }]);
 });
 
-test('calibrationVsMarket：同一批比赛（缺价/无结果的两边都剔除）；对数损失截断 1e-9；分档 n 之和 = n', () => {
+test('calibrationVsMarket：同一批比赛；剔除并计数（数据错误/跨公司拼价/缺价）；对数损失截断 1e-9；分档 n 之和 = n', () => {
+  const dk = ['draftkings', 'draftkings'];
   const cands = [
-    { pHome: 1, ml: [-150, 130], homeWin: false },        // 模型 p=1 判错 → 截断到 −log(1e-9)
-    { pHome: 0.3, ml: [120, -140], homeWin: false },
-    { pHome: 0.5, ml: null, homeWin: true },              // 缺价 → 剔除
-    { pHome: 0.5, ml: [-110, -110], homeWin: null },      // 无结果（作废）→ 剔除
-    { pHome: 0.5, ml: [50, -110], homeWin: true },        // 非法价 → 剔除
+    { pHome: 1, ml: [-150, 130], books: dk, homeWin: false },        // 模型 p=1 判错 → 截断到 −log(1e-9)
+    { pHome: 0.3, ml: [120, -140], books: dk, homeWin: false },
+    { pHome: 0.5, ml: null, books: dk, homeWin: true },              // 缺价 → noPrice
+    { pHome: 0.5, ml: [50, -110], books: dk, homeWin: true },        // 非法价 → noPrice
+    { pHome: 0.5, ml: [-110, -110], homeWin: true },                 // 缺 books → noPrice
+    { pHome: 0.5, ml: [-110, -110], books: dk, homeWin: null },      // 无结果（作废）→ dataError
+    { pHome: 0.5, ml: [-110, -110], books: dk, homeWin: true, actual: 0 },    // 比分相等 → dataError（引擎同款判定）
+    { pHome: 0.5, ml: [-110, -110], books: dk, homeWin: true, actual: -3 },   // 比分与 homeWin 矛盾 → dataError
+    { pHome: 0.5, ml: [105, 110], books: ['draftkings', 'betmgm'], homeWin: true },           // 跨公司 → mixedBooks
+    { pHome: 0.5, ml: [105, 110], books: dk, flags: ['bestPrice'], homeWin: true },           // 最优价标记 → mixedBooks
   ];
   const r = calibrationVsMarket(cands);
   assert.equal(r.n, 2);
+  assert.deepEqual(r.excluded, { dataError: 3, mixedBooks: 2, noPrice: 3 });
   const expModel = (-Math.log(1e-9) - Math.log(0.7)) / 2;
   assert.ok(Math.abs(r.model.logloss - expModel) < 1e-9);
   for (const k of ['model', 'market']) assert.equal(r.reliability[k].reduce((s, b) => s + b.n, 0), 2);
-  assert.deepEqual(calibrationVsMarket([]), { n: 0, model: null, market: null, reliability: { model: [], market: [] } });
+  assert.deepEqual(calibrationVsMarket([]),
+    { n: 0, excluded: { dataError: 0, mixedBooks: 0, noPrice: 0 }, model: null, market: null, reliability: { model: [], market: [] } });
 });

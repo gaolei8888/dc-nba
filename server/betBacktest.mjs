@@ -56,8 +56,8 @@ const sideMl = (c, side) => (side === 'home' ? c.ml[0] : c.ml[1]);
 // ---------------------------------------------------------------------------
 // 结果与 CLV
 
-/** 比赛结果，多一层数据错误检查：比分相等或与 homeWin 矛盾 → 作废并给 reason */
-function outcomeFor(c) {
+/** 比赛结果，多一层数据错误检查：比分相等或与 homeWin 矛盾 → 作废并给 reason（betStats 校准复用） */
+export function outcomeFor(c) {
   if (typeof c.actual === 'number' && c.void !== true) {
     if (c.actual === 0) return { homeWin: null, void: true, reason: 'tie_score' };
     if (typeof c.homeWin === 'boolean' && (c.actual > 0) !== c.homeWin) return { homeWin: null, void: true, reason: 'score_mismatch' };

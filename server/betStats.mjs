@@ -12,6 +12,7 @@ import { rng } from './fusionLab.mjs';
 import { calibration } from './lab.mjs';
 import { devigPair, breakEven, isValidAmerican } from './oddsMath.mjs';
 import { msg } from './messages.mjs';
+import { outcomeFor } from './betBacktest.mjs';
 
 export const MIN_BETS = 300;
 
@@ -73,7 +74,13 @@ const pointOf = (bets) => {
   return { roi: p / s, hitRate: w / bets.length, realizedEdge: (w - be) / bets.length };
 };
 
-const BLOCK_KEY = { day: (b) => String(b.date), season: (b) => String(b.season), bet: null };
+/** 块键：缺 date / season 的非作废注无法归块 → 直接抛错（不静默并成 'undefined' 一块） */
+const keyBy = (field) => (b) => {
+  const k = b[field];
+  if (typeof k !== 'string' || !k) throw new Error(`注单缺 ${field}，无法按块 bootstrap: ${String(b.gameId)}`);
+  return k;
+};
+const BLOCK_KEY = { day: keyBy('date'), season: keyBy('season') };
 
 // ---------------------------------------------------------------------------
 // 公开接口
@@ -119,7 +126,11 @@ export function designEffect(ledger, { B = 2000, seed = 7 } = {}) {
   return variance(day) / vi;
 }
 
-/** 每注单位收益率 profit / stake 的样本标准差（n − 1）；不足 2 注 → null */
+/**
+ * 每注单位收益率 profit / stake 的样本标准差（n − 1）；不足 2 注 → null。
+ * 不按 stake 加权：固定金额策略下与 Σprofit/Σstake 的方差一致；Kelly 等变动注额时只是近似
+ * （大注权重被低估），功效分析的结论按近似看待。
+ */
 export function perBetSd(ledger) {
   const r = settled(ledger ?? []).map((b) => b.profit / b.stake);
   if (r.length < 2) return null;
@@ -231,22 +242,30 @@ const scoreProbs = (rows) => {
 };
 
 /**
- * 模型 vs 去水市场：同一批比赛（需有布尔 homeWin、有限 pHome、两侧合法价）。
- * 市场主队概率 = 所选价 ml = [主, 客] 两侧按比例去水；仅用于比较谁更准，不用于结算。
+ * 模型 vs 去水市场：同一批比赛，只收能公平去水的候选；其余按原因计入 excluded：
+ *   - dataError：引擎会判作废的（无结果、比分相等、比分与 homeWin 矛盾）——直接复用 betBacktest.outcomeFor；
+ *   - mixedBooks：两侧来自不同公司或带 bestPrice 标记（挑最优价拼出的对）——不同公司 / 时点的两侧不能一起去水；
+ *   - noPrice：缺 ml、任一侧非法价、缺 books、或 pHome 非有限数。
+ * 市场主队概率 = 同一家同一时点 ml = [主, 客] 两侧按比例去水；仅用于比较谁更准，不用于结算。
  * reliability 的 Bin 同 lab.calibration（10 档，空档省略，n 之和 = n）。
  */
 export function calibrationVsMarket(candidates) {
   const model = []; const market = [];
+  const excluded = { dataError: 0, mixedBooks: 0, noPrice: 0 };
   for (const c of candidates ?? []) {
-    if (typeof c.homeWin !== 'boolean' || !fin(c.pHome) || !Array.isArray(c.ml)) continue;
+    const out = outcomeFor(c);
+    if (out.void) { excluded.dataError += 1; continue; }
+    if (!fin(c.pHome) || !Array.isArray(c.ml) || !Array.isArray(c.books) || !c.books[0]) { excluded.noPrice += 1; continue; }
+    if (c.books[0] !== c.books[1] || (c.flags ?? []).includes('bestPrice')) { excluded.mixedBooks += 1; continue; }
     const dv = devigPair(c.ml[0], c.ml[1]);
-    if (!dv) continue;
-    model.push({ p: c.pHome, homeWin: c.homeWin });
-    market.push({ p: dv.home, homeWin: c.homeWin });
+    if (!dv) { excluded.noPrice += 1; continue; }
+    model.push({ p: c.pHome, homeWin: out.homeWin });
+    market.push({ p: dv.home, homeWin: out.homeWin });
   }
-  if (!model.length) return { n: 0, model: null, market: null, reliability: { model: [], market: [] } };
+  if (!model.length) return { n: 0, excluded, model: null, market: null, reliability: { model: [], market: [] } };
   return {
     n: model.length,
+    excluded,
     model: scoreProbs(model),
     market: scoreProbs(market),
     reliability: { model: calibration(model), market: calibration(market) },
@@ -256,13 +275,30 @@ export function calibrationVsMarket(candidates) {
 // ---------------------------------------------------------------------------
 // 结论（预先写定）
 
+// 消息码逐个写成字面量，供 serverMessages 测试的扫描器核对各语言都有
+const VERDICT = {
+  test: {
+    evidence: (p) => msg('srv.ml.verdict.test.evidence', p),
+    noEvidence: (p) => msg('srv.ml.verdict.test.noEvidence', p),
+    tooFew: (p) => msg('srv.ml.verdict.test.tooFew', p),
+  },
+  live: {
+    evidence: (p) => msg('srv.ml.verdict.live.evidence', p),
+    noEvidence: (p) => msg('srv.ml.verdict.live.noEvidence', p),
+    tooFew: (p) => msg('srv.ml.verdict.live.tooFew', p),
+  },
+};
+
 /**
- * ci.lo > 0 且 bets ≥ 300 → evidence；bets < 300 → tooFew（仍是「无证据」）；否则 noEvidence。
+ * 预先写定的结论规则；period 必填：'test'（历史回测测试期）或 'live'（前向账本），文案按期别区分（M17）。
+ * bets < 300 → tooFew（仍是「无证据」）；否则 ci.lo > 0 → evidence；其余（含 ci 为 null）→ noEvidence。
  * roi 显式传入（M2）。前向账本用同一规则、用它自己的区间。
  */
-export function mlVerdict({ roi = null, bets, ci }) {
+export function mlVerdict({ period, roi = null, bets, ci }) {
+  if (!Object.hasOwn(VERDICT, String(period))) throw new Error(`period 非法: ${String(period)}`);
+  const v = VERDICT[period];
   const params = { bets, roi, lo: ci?.lo ?? null, hi: ci?.hi ?? null, min: MIN_BETS };
-  if (!(bets >= MIN_BETS)) return msg('srv.ml.verdict.tooFew', params);
-  if (ci && ci.lo > 0) return msg('srv.ml.verdict.evidence', params);
-  return msg('srv.ml.verdict.noEvidence', params);
+  if (!(bets >= MIN_BETS)) return v.tooFew(params);
+  if (ci && ci.lo > 0) return v.evidence(params);
+  return v.noEvidence(params);
 }

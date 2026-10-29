@@ -116,9 +116,16 @@ export default {
     },
     ml: {
       verdict: {
-        evidence: 'Test period: {bets} bets, ROI {roi, pct1} (95% CI [{lo, pct1}, {hi, pct1}]): evidence the model beats the market — still needs the live ledger to confirm',
-        noEvidence: 'Test period: {bets} bets, ROI {roi, pct1} (95% CI [{lo, pct1}, {hi, pct1}]): No evidence the model beats the market',
-        tooFew: 'Only {bets} bets, below the {min}-bet threshold: No evidence the model beats the market',
+        test: {
+          evidence: 'Test period: {bets} bets, ROI {roi, pct1} (95% CI [{lo, pct1}, {hi, pct1}]): evidence the model beats the market — still needs the live ledger to confirm',
+          noEvidence: 'Test period: {bets} bets, ROI {roi, pct1} (95% CI [{lo, pct1}, {hi, pct1}]): No evidence the model beats the market',
+          tooFew: 'Test period: only {bets} bets, below the {min}-bet threshold: No evidence the model beats the market',
+        },
+        live: {
+          evidence: 'Live ledger: {bets} bets, ROI {roi, pct1} (95% CI [{lo, pct1}, {hi, pct1}]): evidence the model beats the market',
+          noEvidence: 'Live ledger: {bets} bets, ROI {roi, pct1} (95% CI [{lo, pct1}, {hi, pct1}]): No evidence the model beats the market',
+          tooFew: 'Live ledger: only {bets} bets, below the {min}-bet threshold: No evidence the model beats the market',
+        },
       },
     },
   },
