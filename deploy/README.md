@@ -116,6 +116,31 @@ scp data/paper-backtest.json dev@gpu.tzspace.cn:/home/dev/work/works/dc-nba/data
 本地：`ENABLE_LEADERBOARD=0 node server/index.mjs` 也能看账本，库默认 `data/app.db`；
 `DB_PATH=/tmp/x.db node scripts/ledger.mjs capture|settle|show` 可在副本上演练。
 
+## 独赢盘回测（模型实验室「模型能否打败市场？」，见 `docs/moneyline-backtest-report.md`）
+
+历史部分读一个静态报告 `data/moneyline-backtest.json`（gitignore）。**服务器上生成不了**：运行镜像不带
+`scripts/`，`.dockerignore` 也排除了 `data/history/`。所以在本机生成、再放进服务器的 `data/`，部署前后都可以：
+
+```bash
+npm run ml:backtest          # 纯离线，读 data/backtest.json + data/history/books_<赛季>.json，约 1 秒
+scp data/moneyline-backtest.json dev@gpu.tzspace.cn:/home/dev/work/works/dc-nba/data/
+```
+
+数据是烤进镜像的（见 `Dockerfile`），所以放进 `data/` 后要等下一次重建镜像才生效：最近一次定时刷新，
+或者部署时紧接着跑的那次 `refresh.sh`（避开北京 22:00 / 06:30 / 14:30 前后 30 分钟）。此后每次 `refresh.sh`
+都先把 `data/*.json` 拷进临时目录，会一直带着它（`push-refresh.sh` 也会推本机这份）。
+漏了这一步页面不会崩，只显示「回测报告尚未生成」；本季前向账本直接读 `paper_bets`，不依赖这个文件。
+
+核对（重建之后；两边 sha 应一致；`builtAt` 是本机生成时间；`selected` 当前应为 close B-edge7 / open B-edge10）：
+
+```bash
+shasum -a 256 data/moneyline-backtest.json
+ssh dev@gpu.tzspace.cn 'sha256sum /home/dev/work/works/dc-nba/data/moneyline-backtest.json'
+curl -s https://ai.tzspace.cn/works/dc-nba/api/lab/moneyline/meta | jq '{available, builtAt, selected}'
+```
+
+报告里的 `inputs.sha` 记着生成时所用 `backtest.json` 与各季 `books_*.json` 的 sha256；本机这些输入变了就重跑、重新上传。
+
 ## 怎么确认它真的在跑
 
 不要看 crontab，看结果：
