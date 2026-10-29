@@ -50,6 +50,7 @@ export default {
     labDataMissing: '缺少回测数据：请先运行回测数据构建。',
     profileCode: '存档码无法识别，请确认复制完整',
     profileVersion: '存档码版本不支持',
+    badFilter: '筛选条件不合法（{field}）',
   },
   srv: {
     reason: {
@@ -115,11 +116,21 @@ export default {
       insufficient: '该队阵容数据不足，无法估计',
     },
     ml: {
+      warn: {
+        closingPrice: '按收盘价模拟：不代表当天更早决策时能拿到这个价。',
+        previouslySeen: '测试期 2025-26 已在此前分析中被看过，不是完全干净的测试。',
+        missingPrices: '{rate, pct1} 的比赛没有可用的美国博彩公司价格，未计入。',
+        currentAsClose: '{n} 场没有收盘价，用「当前价」代替收盘价。',
+        smallSample: '只有 {bets} 注，少于结论门槛 {need} 注。',
+        bestPrice: '最优价情景：事后从各家挑最好的价，结果偏乐观，只作敏感性参考，不进主结论。',
+        inSample: '筛选包含训练期 2022-23：该季参数是样本内拟合的。',
+      },
       verdict: {
         test: {
           evidence: '测试期 {bets} 注、ROI {roi, pct1}（95% 区间 [{lo, pct1}, {hi, pct1}]）：有证据表明模型能赢盘口——仍需前向账本确认',
           noEvidence: '测试期 {bets} 注、ROI {roi, pct1}（95% 区间 [{lo, pct1}, {hi, pct1}]）：无证据表明模型能赢盘口',
           tooFew: '测试期仅 {bets} 注，少于 {min} 注的结论门槛：无证据表明模型能赢盘口',
+          noStrategy: '选择期没有任何策略达到选择门槛，测试期没有可检验的策略：无证据表明模型能赢盘口',
         },
         live: {
           evidence: '前向账本 {bets} 注、ROI {roi, pct1}（95% 区间 [{lo, pct1}, {hi, pct1}]）：有证据表明模型能赢盘口',

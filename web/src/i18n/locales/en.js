@@ -50,6 +50,7 @@ export default {
     labDataMissing: 'Backtest data missing: run the backtest data build first.',
     profileCode: 'Save code not recognized. Check that you copied all of it.',
     profileVersion: 'This save code version is not supported',
+    badFilter: 'Invalid filter ({field})',
   },
   srv: {
     reason: {
@@ -115,11 +116,21 @@ export default {
       insufficient: 'Not enough roster data to estimate this team',
     },
     ml: {
+      warn: {
+        closingPrice: 'Simulated at closing prices. It does not show what could have been bet earlier in the day.',
+        previouslySeen: 'The 2025-26 test period was already examined in earlier analysis, so it is not a fully clean test.',
+        missingPrices: '{rate, pct1} of games had no usable US sportsbook price and are left out.',
+        currentAsClose: '{n} games had no closing price; the current price was used in its place.',
+        smallSample: 'Only {bets} bets, below the {need}-bet threshold for a conclusion.',
+        bestPrice: 'Best-price scenario: the best price across books is picked after the fact. Results are biased upward; sensitivity check only, not part of the main conclusion.',
+        inSample: 'The filter includes the 2022-23 training period, whose parameters were fit in-sample.',
+      },
       verdict: {
         test: {
           evidence: 'Test period: {bets} bets, ROI {roi, pct1} (95% CI [{lo, pct1}, {hi, pct1}]): evidence the model beats the market — still needs the live ledger to confirm',
           noEvidence: 'Test period: {bets} bets, ROI {roi, pct1} (95% CI [{lo, pct1}, {hi, pct1}]): No evidence the model beats the market',
           tooFew: 'Test period: only {bets} bets, below the {min}-bet threshold: No evidence the model beats the market',
+          noStrategy: 'No strategy met the selection bar in the selection period, so there is nothing to test: No evidence the model beats the market',
         },
         live: {
           evidence: 'Live ledger: {bets} bets, ROI {roi, pct1} (95% CI [{lo, pct1}, {hi, pct1}]): evidence the model beats the market',
