@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { DATA_DIR, writeJson } from '../server/nbaClient.mjs';
+import { DATA_DIR } from '../server/nbaClient.mjs';
 import { buildMoneylineReport } from '../server/moneylineReport.mjs';
 import { WF_SEASONS } from '../server/walkForward.mjs';
 
@@ -31,7 +31,11 @@ for (const season of WF_SEASONS) {
 }
 
 const report = buildMoneylineReport({ dataset: JSON.parse(bt.buf.toString('utf8')), books, inputsSha });
-const out = writeJson('moneyline-backtest.json', { ...report, builtAt: new Date().toISOString() });
+// 原子写：先写同目录临时文件再 rename，服务端按 mtime 重读时不会读到写了一半的文件
+const out = path.join(DATA_DIR, 'moneyline-backtest.json');
+fs.mkdirSync(DATA_DIR, { recursive: true });
+fs.writeFileSync(`${out}.tmp`, JSON.stringify({ ...report, builtAt: new Date().toISOString() }));
+fs.renameSync(`${out}.tmp`, out);
 
 // ---------------------------------------------------------------------------
 // 控制台摘要

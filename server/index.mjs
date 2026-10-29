@@ -10,7 +10,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readJson, DATA_DIR } from './nbaClient.mjs';
 import * as db from './db.mjs';
-import { moneylineView, validateFilters, forwardCandidates, readLedgerRows, FILTER_KEYS, SCENARIOS } from './moneylineView.mjs';
+import { moneylineView, validateFilters, forwardCandidates, FILTER_KEYS, SCENARIOS } from './moneylineView.mjs';
 import { reportLoader } from './moneylineStore.mjs';
 import { SPLITS } from './betSplits.mjs';
 import { STRATEGIES } from './betStrategies.mjs';
@@ -686,8 +686,9 @@ const runLab = async (type, payload) => {
     try {
       return await runInPool(type, payload, { timeoutMs: 60_000 });
     } catch (e) {
-      // 带 err.* 码的是确定性的业务错误（如数据缺失），主线程再算一遍结果一样，直接抛给调用方
-      if (typeof e?.code === 'string' && e.code.startsWith('err.')) throw e;
+      // 仅独赢盘：worker 每次任务前按 mtime 重读报告，带 err.* 码的就是确定性业务错误，主线程重算结果一样。
+      // 其余实验室任务的 worker 只在启动时读一次 backtest.json，数据在服务启动后才出现时要靠主线程兜底重读，不能直接抛
+      if (type === 'labMoneyline' && typeof e?.code === 'string' && e.code.startsWith('err.')) throw e;
       console.warn('实验室计算走线程池失败，退回主线程:', e.message);
     }
   }
@@ -781,8 +782,8 @@ app.post('/api/lab/counterfactual', rateLimit({ max: 60 }), wrap(async (req, res
 // 缓存（响应与语言无关，键里没有 lang / 时区）：
 //  - 历史情景：键 = 报告 mtime + 归一化后的筛选（默认值已补全，所以 {} 与 {scenario:'close'} 共用一条）。
 //    报告重建 → mtime 变 → 旧条目自然不再命中（LRU 淘汰）；数据重载（/api/refresh）走 clearCaches 清空。
-//  - 前向情景：键 = 账本指纹（paper_bets 行数 + 已结算数 + 最近结算时间）+ 筛选。早规则捕获会让行数变、
-//    结算会让已结算数与最近结算时间变，所以账本一变下一次请求就重算；不设 TTL（避免「刚结算还显示旧数」）。
+//  - 前向情景：键 = 账本指纹（paper_bets 行数 + 已结算数 + 最近结算时间 + 已回填收盘价行数）+ 筛选。早规则捕获会让行数变、
+//    结算会让已结算数与最近结算时间变，收盘价 / CLV 晚回填会让回填数变，所以账本一变下一次请求就重算；不设 TTL（避免「刚结算还显示旧数」）。
 const mlReport = reportLoader();
 
 /** 前向账本只读现算的输入：账本指纹 + 候选。账本不可用时给出 reasonCode（不抛） */
@@ -790,9 +791,9 @@ let mlFwd = { key: null, fwd: null };
 function forwardInputs() {
   if (!ledgerDb) return { available: false, reasonCode: LEDGER_OFF ? 'srv.reason.ledgerOff' : 'srv.reason.ledgerUnavailable' };
   try {
-    const f = ledgerDb.prepare('SELECT COUNT(*) n, COUNT(settled_at) s, MAX(settled_at) m FROM paper_bets').get();
-    const key = JSON.stringify([f.n, f.s, f.m]);
-    if (mlFwd.key !== key) mlFwd = { key, fwd: forwardCandidates(readLedgerRows(db.DB_PATH)) };
+    const f = ledgerDb.prepare('SELECT COUNT(*) n, COUNT(settled_at) s, MAX(settled_at) m, COUNT(close_home_ml) c FROM paper_bets').get();
+    const key = JSON.stringify([f.n, f.s, f.m, f.c]);
+    if (mlFwd.key !== key) mlFwd = { key, fwd: forwardCandidates(ledgerRows(ledgerDb)) };
     return { available: true, key, fwd: mlFwd.fwd };
   } catch (e) {
     console.warn('前向账本读取失败:', e.message);
@@ -818,7 +819,7 @@ app.get('/api/lab/moneyline/meta', wrap((req, res) => {
       season: x.season, matched: x.matched, missing: x.missing, anomalies: (x.anomalies ?? []).length,
     })),
     forward: f.available
-      ? { available: true, captured: f.fwd.candidates.length + f.fwd.pending, pending: f.fwd.pending }
+      ? { available: true, captured: f.fwd.candidates.length + f.fwd.pending + f.fwd.unmatched, pending: f.fwd.pending, unmatched: f.fwd.unmatched }
       : { available: false, captured: 0, pending: 0, reasonCode: f.reasonCode },
   });
 }));

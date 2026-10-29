@@ -114,7 +114,7 @@ test('接口：前向账本开启时现算；账本变化（结算）后缓存�
   const s = await startServer(t, { DB_PATH: dbPath, ML_REPORT: reportPath });
 
   let meta = await (await s.get('/api/lab/moneyline/meta')).json();
-  assert.deepEqual(meta.forward, { available: true, captured: 3, pending: 3 });
+  assert.deepEqual(meta.forward, { available: true, captured: 3, pending: 3, unmatched: 0 });
 
   let v = await (await s.post('/api/lab/moneyline', { scenario: 'forward', split: 'all' })).json();
   assert.equal(v.labels.modelVersion, 'production-logged');
@@ -128,7 +128,7 @@ test('接口：前向账本开启时现算；账本变化（结算）后缓存�
   assert.equal(v.coverage.total, 2);
   assert.equal(v.coverage.pending, 1);
   meta = await (await s.get('/api/lab/moneyline/meta')).json();
-  assert.deepEqual(meta.forward, { available: true, captured: 3, pending: 1 });
+  assert.deepEqual(meta.forward, { available: true, captured: 3, pending: 1, unmatched: 0 });
   // 历史情景在账本开启的部署上照常
   const h = await s.post('/api/lab/moneyline', { scenario: 'open' });
   assert.equal(h.status, 200);
@@ -164,4 +164,36 @@ test('接口：报告文件重建后（mtime 变）主线程与 worker 都读新
   v = await (await s.post('/api/lab/moneyline', {})).json();
   assert.equal(v.strategy, other);
   assert.equal(v.selected, other);
+});
+
+test('接口：已结算行晚回填收盘价 / CLV 也让前向缓存失效；captured 含只有 edge3 的孤立场次', async (t) => {
+  const dbPath = path.join(tmp, 'late.db');
+  const w = openLedger(dbPath);
+  insertBets(w, captureRows(slate, { now: NOW }));
+  // 孤立：只有 edge3 行、没有同次 edge0 行
+  const orphan = captureRows([{ ...slate[0], gameId: 'F9' }], { now: NOW }).filter((r) => r.rule === 'edge3');
+  assert.equal(insertBets(w, orphan), 1);
+  settleBets(w, { F1: { homeScore: 110, awayScore: 100, close: null } }, '2026-11-02T08:00:00Z');
+  const s = await startServer(t, { DB_PATH: dbPath, ML_REPORT: reportPath });
+  const q = { scenario: 'forward', split: 'all' };
+  let v = await (await s.post('/api/lab/moneyline', q)).json();
+  assert.equal(v.bets.length, 1);
+  assert.equal(v.bets[0].clv, null);
+  const meta = await (await s.get('/api/lab/moneyline/meta')).json();
+  assert.deepEqual(meta.forward, { available: true, captured: 4, pending: 2, unmatched: 1 });
+
+  // 同一场、已结算，仅回填收盘价：行数 / 已结算数 / 最近结算时间都不变
+  settleBets(w, { F1: { homeScore: 110, awayScore: 100, close: [-120, 100] } }, '2026-11-02T08:00:00Z');
+  w.close();
+  v = await (await s.post('/api/lab/moneyline', q)).json();
+  assert.equal(typeof v.bets[0].clv, 'number');
+});
+
+test('实验室：既有接口照常；线程池错误只对独赢盘直接抛出，其余仍退回主线程兜底', async (t) => {
+  const s = await startServer(t, { DB_PATH: path.join(tmp, 'lab.db'), ENABLE_LEDGER: '0', ML_REPORT: reportPath });
+  const r = await s.post('/api/lab/backtest', { seasons: ['2025-26'] });
+  assert.equal(r.status, 200);
+  assert.ok((await r.json()).summary);
+  const src = fs.readFileSync('server/index.mjs', 'utf8');
+  assert.match(src, /type === 'labMoneyline' && typeof e\?\.code === 'string'/);
 });
