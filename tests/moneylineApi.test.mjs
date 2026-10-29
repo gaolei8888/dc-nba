@@ -30,13 +30,29 @@ const slate = [
   { gameId: 'F3', date: `${Y}-11-01`, tipoff: `${Y}-11-02T00:30:00Z`, homeId: 5, awayId: 6, pHome: 0.55, odds: { provider: 'DraftKings', homeMl: -200, awayMl: 170 } },
 ];
 
+/** 起一个真实服务进程：PORT=0 让系统分配空闲端口，从启动日志读出实际端口（并行跑测试文件也不会撞端口） */
 async function startServer(t, env) {
-  const port = 20000 + Math.floor(Math.random() * 20000);
   const child = spawn(process.execPath, ['server/index.mjs'], {
-    env: { ...process.env, PORT: String(port), ENABLE_LEADERBOARD: '0', NODE_ENV: 'test', ...env },
-    stdio: 'ignore',   // 不读也不留管道，避免缓冲写满卡住子进程
+    env: { ...process.env, PORT: '0', ENABLE_LEADERBOARD: '0', NODE_ENV: 'test', ...env },
+    stdio: ['ignore', 'pipe', 'ignore'],
   });
   t.after(() => child.kill());
+  const port = await new Promise((resolve, reject) => {
+    let buf = '';
+    const timer = setTimeout(() => reject(new Error('服务没起来（20 秒内没打印端口）')), 20000);
+    const onData = (d) => {
+      buf += d;
+      const m = /API: http:\/\/localhost:(\d+)/.exec(buf);
+      if (!m) return;
+      clearTimeout(timer);
+      child.stdout.off('data', onData);
+      child.stdout.resume();   // 之后的输出照常排空，避免管道写满卡住子进程
+      resolve(Number(m[1]));
+    };
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', onData);
+    child.once('exit', (code) => { clearTimeout(timer); reject(new Error(`服务提前退出 code=${code}`)); });
+  });
   let ready = false;
   for (let i = 0; i < 100 && !ready; i++) {
     try { ready = (await fetch(`http://127.0.0.1:${port}/api/health`)).ok; } catch { await new Promise((r) => setTimeout(r, 200)); }

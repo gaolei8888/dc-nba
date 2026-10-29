@@ -35,7 +35,8 @@ import {
 } from './predict.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const PORT = Number(process.env.PORT) || 5174;
+// PORT=0 → 由系统分配空闲端口（测试用），实际端口打印在启动日志里
+const PORT = /^\d+$/.test(process.env.PORT ?? '') ? Number(process.env.PORT) : 5174;
 
 // ---------------------------------------------------------------- 数据加载
 
@@ -969,7 +970,7 @@ try {
   process.exit(1);
 }
 
-app.listen(PORT, () => {
-  console.log(`NBA 预测应用 API: http://localhost:${PORT}`);
+const httpServer = app.listen(PORT, () => {
+  console.log(`NBA 预测应用 API: http://localhost:${httpServer.address().port}`);
   console.log(`数据目录: ${DATA_DIR}`);
 });
