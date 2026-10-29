@@ -219,3 +219,36 @@ cp data-prev/*.json data/ && docker compose build && docker compose up -d
 GB10（`ssh lei@192.168.1.49`）：`systemctl --user list-timers dc-nba-player-values.timer`；日志 `~/dc-nba-logs/player-values.log`；手动跑 `systemctl --user start dc-nba-player-values.service`。单元文件在 `deploy/systemd/`，node 是用户级 `~/.local/opt/node`（v22）。关机错过的开机补跑，赶不上 22:00 就用前一天的值。Mac 上的 launchd 版已停用（macOS 不让 launchd 读 ~/Documents），plist 挪到 `~/Library/LaunchAgents/disabled/`。
 
 Docker 镜像多了 `poppler-utils`：服务器连 `dl-cdn.alpinelinux.org` 会挂住，Dockerfile 默认换成 `mirrors.aliyun.com`（`APK_MIRROR` 构建参数）。
+
+## 伤病感知 Elo 影子运行（inj-p1 / inj-a，`server/injuryEloShadow.mjs`）
+
+依据 `docs/injury-aware-elo-verdict.md`；前向评估规则预注册在 `docs/superpowers/specs/2026-10-29-injury-elo-shadow-prereg.md`。
+**只记录**：线上预测、页面、账本规则、所有参数都不变。挂在上面那套影子运行的同一次 `capture` / `settle` 里，出错只记日志，不影响 base / r22 / r0630 / rr。
+
+| 方案 | 何时记（北京） | 内容 |
+| --- | --- | --- |
+| `inj-p1-22` / `inj-p1-0630` | 22:00 / 06:30（06:30 前开打的场在 22:00 记 0630） | base 净胜分 − 0.5·(D_pre主 − D_pre客)。D_pre = 健康基线 × 收缩 IMP × P(出场 \| 报告状态) |
+| `inj-a-22` / `inj-a-0630` | 同上 | base + (伤病感知 Elo 差 − 线上 Elo 差)/28 − 0.75·ΔD_pre |
+
+- 主变体是 `*-0630`。base 用 22:00 记下的那行（`base_source = shadow-base`），没有就用此刻线上预测（`live`）。
+- **冻结参数** `server/injury-elo-params-v1.json`：`INJURY_ELO_FREEZE=1 npm run lab:injury-elo` 写出（只写这个文件就退出，不改实验输出）。
+  含 s / β、P(出场 | 状态)、2025-26 收缩 IMP、A 的开季 Elo（冻结时核对 D=0 时与 `teams.json` 的 `eloPreseasonExact` 逐位相同）。影子期内不改。
+- **D_post 的数据**：`data/player-values.json` 的 `played`（每队全季逐场球员分钟），由 GB10 的 `scripts/player-values.mjs` 用它本来就抓的 PBP 生成，**不多发一个请求**。
+  旧文件只有 `recent`（每队最近 12 场），代码照样能用，超过 12 场的比赛记为「缺」。
+  每行记两队已赛场数 / 有出场数据的场数 / 缺的 gameId（`games_*`、`covered_*`、`dpost_coverage`、`inputs.home.missing`），缺数据不会悄悄当 0。
+- **库**：新表 `shadow_inj_elo_predictions`（`openLedger` 启动时 `CREATE TABLE IF NOT EXISTS`，无迁移）。规则同另两张影子表：只追加、重复忽略、不能删、
+  预测字段不能改、比分只写一次、开赛后插不进；另加：报告标注时间 ≤ `captured_at` − 15 分钟且早于开赛、`results_through < game_date`、
+  player-values 生成时间与数据快照时间不晚于 `captured_at`、覆盖场数必填。没有开赛时间的场不记。
+- **读数**：`/api/shadow` 的 `injElo` 字段（页面不显示）；`docker exec dc-nba node scripts/shadow.mjs show` 最后几行。
+  共同结算场上 base / inj-p1-0630 / inj-a-0630 / rr0630 的 log loss 与 Brier，三组配对差按比赛日分块 bootstrap。
+- **上线步骤**（需要批准；本分支没做）：
+  1. 合并进 master、推到 origin（GB10 下一次跑会快进到它，开始写 `played`）。
+  2. 按「手动上线代码」那一节：先打回滚标签，再 `git archive HEAD …` 解到服务器（新增 `server/injuryEloShadow.mjs`、`server/injury-elo-params-v1.json`），
+     然后重建。家里宽带被 NBA 封着时不要用 `push-refresh.sh`，直接
+     `ssh dev@gpu.tzspace.cn 'cd /home/dev/work/works/dc-nba && docker compose build -q && docker compose up -d'`。新表在容器启动时自动建。
+  3. 下一次 22:00 刷新后看 `~/dc-nba/refresh.log` 里「伤病感知 Elo 影子」那一行：`出场数据 played`、`线上 Elo 核对差` ≤ 0.05。
+     如果写的是 `recent`，说明 GB10 还没跑到新代码，12 场以内照样全覆盖。
+- **回滚**：回退代码重建镜像即可。表留着不删（只追加，删不掉）；不再写入就是停了。
+
+演练（本地副本，不碰线上）：拷一份 `server/ scripts/ package.json data/*.json` 到临时目录，
+`DB_PATH=/tmp/x.db SHADOW_NO_FETCH=1 SHADOW_NOW=2026-10-29T14:05:00Z node scripts/shadow.mjs capture`，再 `--late`（`SHADOW_NOW=…T22:35:00Z`）与 `show`。
