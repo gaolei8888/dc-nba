@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import {
-  SPLITS, SELECTABLE, FORWARD_PRIMARY, FORWARD_SECONDARY,
+  SPLITS, SELECTABLE, FORWARD_PRIMARY, FORWARD_SECONDARY, splitsFor,
   splitOf, selectStrategy, selectionScenario, selectForScenario, multipleComparisons,
 } from '../server/betSplits.mjs';
 import { STRATEGIES } from '../server/betStrategies.mjs';
@@ -15,8 +15,9 @@ import { rng } from '../server/fusionLab.mjs';
 test('切分：收盘 / 开盘 / 前向', () => {
   assert.deepEqual(['2021-22', '2022-23', '2023-24', '2024-25', '2025-26'].map((s) => splitOf('close', s)), [null, 'train', 'validate', 'validate', 'test']);
   assert.deepEqual(['2022-23', '2023-24', '2024-25', '2025-26'].map((s) => splitOf('open', s)), [null, 'train', 'validate', 'test']);
-  assert.equal(splitOf('forward', '2026-27'), 'test'); assert.equal(splitOf('closeBest', '2023-24'), 'validate');
-  // 前向只有 2026-27；历史赛季不属于前向
+  assert.equal(splitOf('closeBest', '2023-24'), 'validate');
+  // 前向赛季不写死（随目标赛季由 splitsFor 填入）；历史赛季不属于前向
+  assert.equal(splitOf('forward', '2026-27'), null);
   assert.equal(splitOf('forward', '2025-26'), null);
   // closeBest 沿用 close 的切分
   assert.deepEqual(['2022-23', '2025-26'].map((s) => splitOf('closeBest', s)), ['train', 'test']);
@@ -26,7 +27,7 @@ test('切分：收盘 / 开盘 / 前向', () => {
 test('SPLITS：选择期、测试期「已被看过」标注、前向不选', () => {
   assert.deepEqual(SPLITS.close, { train: ['2022-23'], validate: ['2023-24', '2024-25'], test: ['2025-26'], selectOn: 'validate', previouslySeen: ['2025-26'] });
   assert.deepEqual(SPLITS.open, { train: ['2023-24'], validate: ['2024-25'], test: ['2025-26'], selectOn: 'train', previouslySeen: ['2025-26'] });
-  assert.deepEqual(SPLITS.forward, { train: [], validate: [], test: ['2026-27'], selectOn: null, previouslySeen: [] });
+  assert.deepEqual(SPLITS.forward, { train: [], validate: [], test: [], selectOn: null, previouslySeen: [] });
   assert.ok(Object.isFrozen(SPLITS) && Object.isFrozen(SPLITS.close) && Object.isFrozen(SPLITS.close.validate));
   // 每个情景的选择期都不与测试期重叠
   for (const k of ['close', 'open']) {
@@ -172,4 +173,14 @@ test('无策略达到 100 注（M6）：selected = null，结果照常列出', (
   assert.deepEqual(Object.keys(sel.results), SELECTABLE);
   // minBets 可下调，此时可以选出
   assert.ok(SELECTABLE.includes(selectForScenario(few, 'open', { minBets: 1 }).selected));
+});
+
+test('splitsFor：前向测试期 = 给定的目标赛季，历史切分不变；非法赛季 → 前向留空', () => {
+  const sp = splitsFor('2027-28');
+  assert.deepEqual(sp.forward.test, ['2027-28']);
+  assert.deepEqual(sp.close, SPLITS.close);
+  assert.deepEqual(sp.open, SPLITS.open);
+  assert.ok(Object.isFrozen(sp.forward.test));
+  assert.deepEqual(splitsFor(undefined).forward.test, []);
+  assert.deepEqual(SPLITS.forward.test, []);   // 不改共享常量
 });

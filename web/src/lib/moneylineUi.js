@@ -44,7 +44,7 @@ export function bookLabelKey(scenario, book) {
 /** 结果区该按哪个情景标注：已显示的视图自己的情景（新筛选还在加载时，旧视图仍按旧情景标注）；没有视图时用当前筛选 */
 export const shownScenario = (view, state) => view?.filters?.scenario ?? state?.scenario ?? 'close';
 
-/** 情景可选的切分：前向账本只有测试期（2026-27）与全部 */
+/** 情景可选的切分：前向账本只有测试期（本季，赛季由 meta.splits 给出）与全部 */
 export const splitOptions = (scenario) => (scenario === 'forward' ? ['test', 'all'] : ['train', 'validate', 'test', 'all']);
 
 /** 某情景某切分覆盖的赛季（splits 为 meta.splits；缺该情景 → 空） */

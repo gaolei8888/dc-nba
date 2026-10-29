@@ -12,7 +12,6 @@
 //     唯一例外是 close 没选出策略 → 仍给 noStrategy 结论（M6）。
 //   - 报告缺失或缺该情景的选择结果 → 抛 err.labDataMissing，不冒充「没有策略合格」。
 //   - 多重比较只列该情景选择期的可选策略（SELECTABLE），并附完整结果表与选定策略。
-import { DatabaseSync } from 'node:sqlite';
 import { buildCandidates, runBacktest, summarizeLedger, outcomeFor, DEFAULT_COSTS } from './betBacktest.mjs';
 import { STRATEGIES } from './betStrategies.mjs';
 import {
@@ -32,7 +31,6 @@ export const SLIPPAGE_OPTIONS = [0, 5, 10];
 const SPLIT_OPTIONS = ['train', 'validate', 'test', 'all'];
 export const FILTER_KEYS = ['scenario', 'split', 'season', 'from', 'to', 'book', 'strategy', 'slippagePts', 'feeOnWin'];
 const STRATEGY_BY_ID = new Map(STRATEGIES.map((s) => [s.id, s]));
-const FORWARD_SEASON = '2026-27';
 const FORWARD_BOOK = 'draftkings';
 /** walk-forward 的样本内参数季（无更早赛季可拟合） */
 const IN_SAMPLE_SEASONS = ['2022-23'];
@@ -113,14 +111,15 @@ export function validateFilters(body, data) {
 // ---------------------------------------------------------------------------
 // 前向账本
 
-/** 只读打开账本库读 paper_bets（不建表、不写）；库不存在或打不开 → 抛错，由调用方降级 */
-export function readLedgerRows(dbPath) {
-  const db = new DatabaseSync(dbPath, { readOnly: true });
-  try {
-    return db.prepare('SELECT * FROM paper_bets ORDER BY game_date, game_id, rule').all();
-  } finally {
-    db.close();
-  }
+/**
+ * 比赛日期（'YYYY-MM-DD'）→ NBA 赛季 'YYYY-YY'：7 月及以后归入当年开始的赛季，之前归入上一年开始的赛季。
+ * 非法日期 → null。
+ */
+export function seasonOfDate(date) {
+  const m = /^(\d{4})-(\d{2})-\d{2}$/.exec(String(date ?? ''));
+  if (!m) return null;
+  const start = Number(m[2]) >= 7 ? Number(m[1]) : Number(m[1]) - 1;
+  return `${start}-${String((start + 1) % 100).padStart(2, '0')}`;
 }
 
 const RUNS = {
@@ -134,13 +133,17 @@ const RUNS = {
  * paper_bets 行 → 候选（每场一行）。字段按 qualityOk 的前向门槛命名：capturedAt、tipoff、scenario 'forward'、
  * priceAt 按记录（'current'）。model_p_home 原样；settled_at 为空 → 计入 pending、不进候选。
  * 每个候选带 logged = 该场账本记下的决定（rule、bet、side、betMl、edge、profit），供主结果按原样评估。
+ * season = 前向赛季（应用当前的目标赛季 store.meta.targetSeason，必填）：只取 game_date 落在该赛季的行，
+ * 其他赛季的行不进本季前向账本（结论不跨季合并）。
  */
-export function forwardCandidates(rows, { run = 'early' } = {}) {
+export function forwardCandidates(rows, { run = 'early', season } = {}) {
   const spec = RUNS[run];
   if (!spec) throw new Error(`run 非法: ${String(run)}（early | late）`);
+  if (typeof season !== 'string' || !isSeason(season)) throw new Error(`前向赛季非法: ${String(season)}`);
   const byGame = new Map();
   for (const r of rows ?? []) {
     if (r.book !== FORWARD_BOOK) continue;
+    if (seasonOfDate(r.game_date) !== season) continue;
     if (r.rule !== spec.base && r.rule !== spec.logged) continue;
     const e = byGame.get(r.game_id) ?? {};
     if (r.rule === spec.base) e.base = r;
@@ -155,7 +158,7 @@ export function forwardCandidates(rows, { run = 'early' } = {}) {
     if (base.settled_at == null) { pending += 1; continue; }
     const scored = typeof base.home_score === 'number' && typeof base.away_score === 'number';
     candidates.push({
-      gameId: base.game_id, date: base.game_date, season: FORWARD_SEASON,
+      gameId: base.game_id, date: base.game_date, season,
       homeId: base.home_id, awayId: base.away_id,
       homeWin: scored ? base.home_score > base.away_score : null,
       actual: scored ? base.home_score - base.away_score : null,
@@ -179,7 +182,7 @@ export function forwardCandidates(rows, { run = 'early' } = {}) {
   }
   const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
   candidates.sort((a, b) => cmp(a.date, b.date) || cmp(a.gameId, b.gameId));
-  return { candidates, pending, unmatched, run };
+  return { candidates, pending, unmatched, run, season };
 }
 
 /**
@@ -236,10 +239,10 @@ function seasonsInView(filters) {
   return filters.season ? all.filter((s) => s === filters.season) : all;
 }
 
-/** 是否是「不缩范围」的默认口径：日期不缩、成本默认、赛季筛选不改变集合 */
-function untouched(filters) {
-  const sp = SPLITS[splitKey(filters.scenario)];
-  const seasonOk = filters.season == null || (sp.test.length === 1 && sp.test[0] === filters.season);
+/** 是否是「不缩范围」的默认口径：日期不缩、成本默认、赛季筛选不改变集合（前向的测试期赛季由调用方给出） */
+function untouched(filters, forwardSeason = null) {
+  const test = filters.scenario === 'forward' ? (forwardSeason ? [forwardSeason] : []) : SPLITS[splitKey(filters.scenario)].test;
+  const seasonOk = filters.season == null || (test.length === 1 && test[0] === filters.season);
   return filters.from == null && filters.to == null && seasonOk
     && filters.slippagePts === DEFAULT_COSTS.slippagePts && filters.feeOnWin === DEFAULT_COSTS.feeOnWin;
 }
@@ -348,7 +351,7 @@ export function moneylineView(data, filters, { forward } = {}) {
   if (isForward) {
     const run = forward?.run ?? 'early';
     const canonical = filters.strategy === FORWARD_PRIMARY && run === 'early'
-      && (filters.split === 'test' || filters.split === 'all') && untouched(filters);
+      && (filters.split === 'test' || filters.split === 'all') && untouched(filters, forward?.season ?? null);
     if (canonical) verdict = mlVerdict({ period: 'live', roi: summary.roi, bets: summary.bets, ci: ci.day?.roi ?? null });
   } else {
     const defaultBook = filters.scenario === 'closeBest' ? 'best' : 'chain';

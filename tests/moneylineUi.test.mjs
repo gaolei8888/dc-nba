@@ -5,9 +5,9 @@ import {
   defaultState, withScenario, bookLabelKey, shownScenario, withModel, withSplit, toFilters, clvNotApplicable, domainOf, linear, ciDomain,
 } from '../web/src/lib/moneylineUi.js';
 import * as view from '../server/moneylineView.mjs';
-import { SPLITS } from '../server/betSplits.mjs';
+import { splitsFor } from '../server/betSplits.mjs';
 
-const splits = JSON.parse(JSON.stringify(SPLITS));   // 同 meta.splits 的 JSON 形状
+const splits = JSON.parse(JSON.stringify(splitsFor('2026-27')));   // 同 meta.splits 的 JSON 形状（前向赛季 = 服务端目标赛季）
 
 test('前端常量与服务端一致', () => {
   assert.deepEqual(FILTER_KEYS, view.FILTER_KEYS);

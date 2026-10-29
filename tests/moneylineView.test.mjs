@@ -4,10 +4,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  SCENARIOS, SLIPPAGE_OPTIONS, validateFilters, forwardCandidates, readLedgerRows, moneylineView,
+  SCENARIOS, SLIPPAGE_OPTIONS, validateFilters, forwardCandidates, seasonOfDate, moneylineView,
 } from '../server/moneylineView.mjs';
 import { openLedger } from '../server/db.mjs';
-import { captureRows, insertBets, settleBets } from '../server/ledger.mjs';
+import { captureRows, insertBets, settleBets, ledgerRows } from '../server/ledger.mjs';
 import { qualityOk, STRATEGIES } from '../server/betStrategies.mjs';
 import { FORWARD_PRIMARY, FORWARD_SECONDARY, SELECTABLE } from '../server/betSplits.mjs';
 import { MODEL_VERSION_REPLAY } from '../server/walkForward.mjs';
@@ -232,6 +232,12 @@ const slate = [
   { gameId: 'F2', date: '2026-11-01', tipoff: '2026-11-01T23:30:00Z', homeId: 3, awayId: 4, pHome: 0.40, odds: { provider: 'DraftKings', homeMl: -150, awayMl: 130 } },
   { gameId: 'F3', date: '2026-11-01', tipoff: '2026-11-02T00:30:00Z', homeId: 5, awayId: 6, pHome: 0.55, odds: { provider: 'DraftKings', homeMl: -200, awayMl: 170 } },
 ];
+const SEASON = '2026-27';   // 前向赛季（线上取 store.meta.targetSeason）
+/** 读回临时账本的全部行（与线上 index.mjs 同一个 ledgerRows） */
+function readRows(dbPath) {
+  const db = openLedger(dbPath);
+  try { return ledgerRows(db); } finally { db.close(); }
+}
 function tmpLedger() {
   const dbPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ml-fwd-')), 'ledger.db');
   const db = openLedger(dbPath);
@@ -245,9 +251,9 @@ function tmpLedger() {
 
 test('前向账本：只取已结算的早规则行，未结算计 pending；概率原样、模型版本 production-logged', () => {
   const dbPath = tmpLedger();
-  const rows = readLedgerRows(dbPath);
+  const rows = readRows(dbPath);
   assert.equal(rows.length, 9);
-  const fwd = forwardCandidates(rows);
+  const fwd = forwardCandidates(rows, { season: SEASON });
   assert.equal(fwd.candidates.length, 2);
   assert.equal(fwd.pending, 1);
   const r1 = rows.find((r) => r.game_id === 'F1' && r.rule === 'edge0');
@@ -295,7 +301,7 @@ test('前向账本：只取已结算的早规则行，未结算计 pending；概
 });
 
 test('前向账本：真实适配结果经 qualityOk 合格，C-ev 能下注（字段名不对会静默变 0 注）', () => {
-  const fwd = forwardCandidates(readLedgerRows(tmpLedger()));
+  const fwd = forwardCandidates(readRows(tmpLedger()), { season: SEASON });
   assert.ok(fwd.candidates.length > 0);
   assert.ok(fwd.candidates.every(qualityOk));
   const v = moneylineView(tinyReport, validateFilters({ scenario: 'forward', strategy: 'C-ev' }, tinyReport), { forward: fwd });
@@ -305,7 +311,7 @@ test('前向账本：真实适配结果经 qualityOk 合格，C-ev 能下注（�
   assert.ok(late.every((c) => !qualityOk(c)));
 });
 
-test('前向账本：晚规则只取 edge3-late 行；读库为只读', () => {
+test('前向账本：晚规则只取 edge3-late 行', () => {
   const dbPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ml-fwd-')), 'ledger.db');
   const db = openLedger(dbPath);
   const lateNow = Date.parse('2026-11-01T22:30:00Z');
@@ -313,23 +319,20 @@ test('前向账本：晚规则只取 edge3-late 行；读库为只读', () => {
   insertBets(db, captureRows(slate.map((x) => ({ ...x, odds: { ...x.odds, homeMl: -115, awayMl: -105 } })), { now: lateNow, run: 'late', oddsFetchedAt: '2026-11-01T22:00:00Z' }));
   settleBets(db, { F1: { homeScore: 110, awayScore: 100, close: null } }, '2026-11-02T08:00:00Z');
   db.close();
-  const rows = readLedgerRows(dbPath);
-  const late = forwardCandidates(rows, { run: 'late' });
+  const rows = readRows(dbPath);
+  const late = forwardCandidates(rows, { run: 'late', season: SEASON });
   assert.equal(late.candidates.length, 1);
   assert.equal(late.pending, 2);
   assert.deepEqual([late.candidates[0].ml, late.candidates[0].logged.rule], [[-115, -105], 'edge3-late']);
-  assert.throws(() => forwardCandidates(rows, { run: 'noon' }), /run/);
+  assert.throws(() => forwardCandidates(rows, { run: 'noon', season: SEASON }), /run/);
   // 晚规则不是预注册主规则 → 探索性
   const v = moneylineView(tinyReport, validateFilters({ scenario: 'forward' }, tinyReport), { forward: late });
   assert.equal(v.verdict, null);
   assert.equal(v.exploratory, true);
-  // 只读读取不改库（行数不变）；库文件不存在时抛错（readOnly 不会新建库）
-  assert.equal(readLedgerRows(dbPath).length, rows.length);
-  assert.throws(() => readLedgerRows(path.join(os.tmpdir(), 'nope-ml-fwd', 'missing.db')));
 });
 
 test('前向：日期筛选与切分筛选作用在账本上；无账本数据时 0 注不抛错', () => {
-  const fwd = forwardCandidates(readLedgerRows(tmpLedger()));
+  const fwd = forwardCandidates(readRows(tmpLedger()), { season: SEASON });
   const none = moneylineView(tinyReport, validateFilters({ scenario: 'forward', split: 'validate' }, tinyReport), { forward: fwd });
   assert.equal(none.summary.bets, 0);
   const d = moneylineView(tinyReport, validateFilters({ scenario: 'forward', from: '2026-11-02' }, tinyReport), { forward: fwd });
@@ -370,9 +373,44 @@ test('前向：有 edge3 行却无 edge0 行的场次计数并警告，不静默
   const orphan = captureRows([{ ...slate[0], gameId: 'F9' }], { now: NOW }).filter((r) => r.rule === 'edge3');
   assert.equal(insertBets(db, orphan), 1);
   db.close();
-  const fwd = forwardCandidates(readLedgerRows(dbPath));
+  const fwd = forwardCandidates(readRows(dbPath), { season: SEASON });
   assert.deepEqual([fwd.candidates.length, fwd.pending, fwd.unmatched], [2, 1, 1]);
   const v = moneylineView(null, validateFilters({ scenario: 'forward' }, null), { forward: fwd });
   assert.equal(v.coverage.unmatched, 1);
   assert.deepEqual(v.warnings.find((w) => w.code === 'srv.ml.warn.forwardUnmatched').params, { n: 1 });
+});
+
+test('前向赛季：seasonOfDate 按 7 月切季', () => {
+  assert.deepEqual(['2026-10-21', '2027-04-12', '2027-06-20', '2027-07-01', '2099-12-31'].map(seasonOfDate),
+    ['2026-27', '2026-27', '2026-27', '2027-28', '2099-00']);
+  assert.equal(seasonOfDate('bad'), null);
+  assert.equal(seasonOfDate(null), null);
+});
+
+test('前向赛季：只取目标赛季的账本行，换季后旧季行不并入新季；赛季必填', () => {
+  const dbPath = tmpLedger();
+  const db = openLedger(dbPath);
+  const next = { ...slate[0], gameId: 'N1', date: '2027-11-01', tipoff: '2027-11-01T23:30:00Z' };
+  assert.equal(insertBets(db, captureRows([next], { now: Date.parse('2027-11-01T12:00:00Z') })), 3);
+  settleBets(db, { N1: { homeScore: 100, awayScore: 90, close: null } }, '2027-11-02T08:00:00Z');
+  db.close();
+  const rows = readRows(dbPath);
+  const cur = forwardCandidates(rows, { season: '2026-27' });
+  assert.deepEqual(cur.candidates.map((c) => [c.gameId, c.season]), [['F1', '2026-27'], ['F2', '2026-27']]);
+  assert.equal(cur.pending, 1);
+  assert.equal(cur.season, '2026-27');
+  const nxt = forwardCandidates(rows, { season: '2027-28' });
+  assert.deepEqual(nxt.candidates.map((c) => [c.gameId, c.season]), [['N1', '2027-28']]);
+  assert.equal(nxt.pending, 0);
+  // 新季的正式结论只看新季（1 注），赛季筛选等于前向赛季时仍是正式口径
+  const v = moneylineView(null, validateFilters({ scenario: 'forward', season: '2027-28' }, null), { forward: nxt });
+  assert.equal(v.summary.bets, 1);
+  assert.equal(v.verdict.code, 'srv.ml.verdict.live.tooFew');
+  assert.equal(v.exploratory, false);
+  // 赛季筛选与前向赛季不符 → 0 注、探索性
+  const off = moneylineView(null, validateFilters({ scenario: 'forward', season: '2026-27' }, null), { forward: nxt });
+  assert.equal(off.summary.bets, 0);
+  assert.equal(off.verdict, null);
+  assert.throws(() => forwardCandidates(rows), /前向赛季/);
+  assert.throws(() => forwardCandidates(rows, { season: '2027' }), /前向赛季/);
 });

@@ -5,7 +5,7 @@
 //   - 收盘情景：训练 2022-23（walk-forward 样本内）、验证 2023-24～2024-25（在此选策略）、
 //     测试 2025-26——已在此前分析中被看过（paper-backtest、49.1%、edge 规则），报告必须注明。
 //   - 开盘情景：只有 2023-24 起有 open；选参 2023-24（selectOn 'train'）、验证 2024-25、测试 2025-26。
-//   - 前向账本（2026-27）：真正干净的检验，不从历史里挑策略。
+//   - 前向账本（本季 = 应用的目标赛季 store.meta.targetSeason，运行时由 splitsFor 填入）：真正干净的检验，不从历史里挑策略。
 //   - closeBest（挑最优价敏感性）：沿用 close 的切分，不单独选择，显示时沿用 close 选出的策略（裁定 M6）。
 //
 // 选择只看选择期：selectForScenario 按赛季重新判定切分（不信任候选上的 split 字段），
@@ -21,8 +21,18 @@ const deepFreeze = (o) => {
 export const SPLITS = deepFreeze({
   close: { train: ['2022-23'], validate: ['2023-24', '2024-25'], test: ['2025-26'], selectOn: 'validate', previouslySeen: ['2025-26'] },
   open: { train: ['2023-24'], validate: ['2024-25'], test: ['2025-26'], selectOn: 'train', previouslySeen: ['2025-26'] },
-  forward: { train: [], validate: [], test: ['2026-27'], selectOn: null, previouslySeen: [] },
+  // 前向的测试期赛季不写死：随应用的目标赛季走（splitsFor），这里留空
+  forward: { train: [], validate: [], test: [], selectOn: null, previouslySeen: [] },
 });
+
+/** 填入前向赛季（应用当前的目标赛季）后的切分表；season 不合法时前向测试期留空 */
+export function splitsFor(forwardSeason) {
+  const ok = typeof forwardSeason === 'string' && /^\d{4}-\d{2}$/.test(forwardSeason);
+  return deepFreeze({
+    close: SPLITS.close, open: SPLITS.open,
+    forward: { ...SPLITS.forward, test: ok ? [forwardSeason] : [] },
+  });
+}
 
 /** 情景 → 用哪套切分（closeBest 沿用 close） */
 const splitKey = (scenario) => (scenario === 'closeBest' ? 'close' : scenario);

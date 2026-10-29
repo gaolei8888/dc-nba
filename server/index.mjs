@@ -12,7 +12,7 @@ import { readJson, DATA_DIR } from './nbaClient.mjs';
 import * as db from './db.mjs';
 import { moneylineView, validateFilters, forwardCandidates, FILTER_KEYS, SCENARIOS } from './moneylineView.mjs';
 import { reportLoader } from './moneylineStore.mjs';
-import { SPLITS } from './betSplits.mjs';
+import { splitsFor } from './betSplits.mjs';
 import { STRATEGIES } from './betStrategies.mjs';
 import { US_BOOKS } from './books.mjs';
 import { sendError, publicCode, msg, codedError } from './messages.mjs';
@@ -782,7 +782,7 @@ app.post('/api/lab/counterfactual', rateLimit({ max: 60 }), wrap(async (req, res
 // 缓存（响应与语言无关，键里没有 lang / 时区）：
 //  - 历史情景：键 = 报告 mtime + 归一化后的筛选（默认值已补全，所以 {} 与 {scenario:'close'} 共用一条）。
 //    报告重建 → mtime 变 → 旧条目自然不再命中（LRU 淘汰）；数据重载（/api/refresh）走 clearCaches 清空。
-//  - 前向情景：键 = 账本指纹（paper_bets 行数 + 已结算数 + 最近结算时间 + 已回填收盘价行数）+ 筛选。早规则捕获会让行数变、
+//  - 前向情景：键 = 前向赛季 + 账本指纹（paper_bets 行数 + 已结算数 + 最近结算时间 + 已回填收盘价行数）+ 筛选。早规则捕获会让行数变、
 //    结算会让已结算数与最近结算时间变，收盘价 / CLV 晚回填会让回填数变，所以账本一变下一次请求就重算；不设 TTL（避免「刚结算还显示旧数」）。
 const mlReport = reportLoader();
 
@@ -791,9 +791,11 @@ let mlFwd = { key: null, fwd: null };
 function forwardInputs() {
   if (!ledgerDb) return { available: false, reasonCode: LEDGER_OFF ? 'srv.reason.ledgerOff' : 'srv.reason.ledgerUnavailable' };
   try {
+    // 前向赛季 = 应用的目标赛季（与本季实战等处同源）；换季后旧赛季的行不进本季账本。赛季也进指纹
+    const season = store.meta.targetSeason;
     const f = ledgerDb.prepare('SELECT COUNT(*) n, COUNT(settled_at) s, MAX(settled_at) m, COUNT(close_home_ml) c FROM paper_bets').get();
-    const key = JSON.stringify([f.n, f.s, f.m, f.c]);
-    if (mlFwd.key !== key) mlFwd = { key, fwd: forwardCandidates(ledgerRows(ledgerDb)) };
+    const key = JSON.stringify([season, f.n, f.s, f.m, f.c]);
+    if (mlFwd.key !== key) mlFwd = { key, fwd: forwardCandidates(ledgerRows(ledgerDb), { season }) };
     return { available: true, key, fwd: mlFwd.fwd };
   } catch (e) {
     console.warn('前向账本读取失败:', e.message);
@@ -809,7 +811,7 @@ app.get('/api/lab/moneyline/meta', wrap((req, res) => {
     available: true,
     builtAt: data.builtAt ?? null,
     scenarios: SCENARIOS,
-    splits: SPLITS,
+    splits: splitsFor(store.meta.targetSeason),
     strategies: STRATEGIES.map((s) => ({ id: s.id, family: s.family })),
     books: US_BOOKS,
     seasons: data.inputs?.seasons ?? [],
