@@ -939,7 +939,7 @@ export default {
     why: {
       title: 'Why there are no accounts or passwords',
       p1a: 'This app is deployed under ',
-      p1b: ', and the gateway middleware strips cookies in both directions. Traditional sessions cannot work, so a token would have to live in localStorage, which is less secure than an httpOnly cookie.',
+      p1b: ', and the gateway middleware is observed to strip cookies (not yet verified). Traditional sessions may not work, so the token lives in localStorage, which is less secure than an httpOnly cookie.',
       p2: 'The server is stateless: the data snapshot is read-only and the container has no volume. Adding accounts means adding a storage volume, and with it backups, migration and permissions. Storing passwords also carries real security responsibility.',
       p3a: 'So identity is deliberately just "a local profile in this browser". ',
       p3Bold: 'Visitors on their own devices already play separately, so no login is needed.',

@@ -275,7 +275,8 @@ Docker 镜像多了 `poppler-utils`：服务器连 `dl-cdn.alpinelinux.org` 会�
 | `SMS_DAILY_CAP`、`SMS_IP_HOURLY`、`SMS_IP_DAILY` | 限额：全站每日（默认 500）、单 IP 每小时（默认 5）、单 IP 每天（默认 20）；「每天」按北京时间自然日 |
 | `ENABLE_OVERSEAS_SMS` | `"1"` 且下面三个 Twilio 变量齐全才开海外号；默认关，区号只有 +86 |
 | `TWILIO_ACCOUNT_SID`、`TWILIO_AUTH_TOKEN`、`TWILIO_VERIFY_SERVICE_SID` | **机密**（AUTH_TOKEN）；开通 Twilio Verify 后再加 |
-| `TRUST_PROXY` | 见下「真实 IP」 |
+| `TRUST_PROXY` | 默认不设；收窄的风险与写法见下「真实 IP」 |
+| `ENABLE_LEADERBOARD` | 与账号的关系：为 `0` 时账号用自己独立的库结构，登录不绑定玩家档案；非 `0` 时与排行榜共用库，登录绑定 / 新建排行榜玩家档案 |
 
 服务器那份 `docker-compose.yml` 的 `environment` 里手工加：
 
@@ -293,7 +294,7 @@ Docker 镜像多了 `poppler-utils`：服务器连 `dl-cdn.alpinelinux.org` 会�
       SMS_IP_HOURLY: "5"
       SMS_IP_DAILY: "20"
       ENABLE_OVERSEAS_SMS: "0"
-      TRUST_PROXY: <works-gateway 容器 IP 或所在子网>   # 见下
+      # TRUST_PROXY: "10.139.170.151, 172.18.0.0/16"   # 仅示例值，上线前必须按实际网络替换；不确定就不设（保持默认），见下「真实 IP」
       # 开通 Twilio 后再加：TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_VERIFY_SERVICE_SID: ${...}
 ```
 
@@ -303,19 +304,27 @@ Docker 镜像多了 `poppler-utils`：服务器连 `dl-cdn.alpinelinux.org` 会�
 
 ### 2. 真实 IP（TRUST_PROXY）
 
-按 IP 限频依赖 `req.ip`，所以要让 Express 只信任真正的网关。默认值是 `loopback, linklocal, uniquelocal`，
-会信任 `works-net` 上所有同网容器，别的作品容器就能伪造 `X-Forwarded-For` 绕过限频。**生产里把 `TRUST_PROXY` 设为
-works-gateway 容器的 IP 或所在子网**（`docker inspect works-gateway` 里 `works-net` 的 IPAddress / 子网）。
-只接受 IP / 子网列表；`1`、`true` 这类值会让服务启动即崩溃。
+按 IP 限频依赖 `req.ip`。默认值 `loopback, linklocal, uniquelocal` 会信任 `works-net` 上所有同网容器，
+理论上别的作品容器能伪造 `X-Forwarded-For` 绕过限频；但**收窄有风险**：访问链路是 Traefik → works-gateway(nginx) → 本容器，
+如果只信任 works-gateway，而 nginx 又是把 Traefik 那一跳的地址追加进 XFF，`req.ip` 就会变成 Traefik 那一跳，
+**所有访客共用一个限频桶**。所以：
+
+- **除非验证过，否则保持默认值，不设 `TRUST_PROXY`。**
+- 要收窄时，受信列表必须包含访客与本容器之间的**每一个**代理跳：Traefik / 宿主机那一跳（例如 `10.139.170.151` 或其所在子网）
+  加上 works-gateway 所在的 `works-net` 子网。优先写**子网**而不是单个容器 IP（容器重建后 IP 会变）。
+- works-gateway 的 nginx 配置**不在本仓库**，是否透传 / 追加 `X-Forwarded-For` 要先到服务器上看过配置再定。
+- 只接受 IP / 子网列表；`1`、`true` 这类值会让服务启动即崩溃。
+- 验收就是下面的 `proxy.ip` 检查：它不是你的公网 IP，就调整列表（或回到默认值）。
 
 上线后核验（同时确认网关确实透传了 `X-Forwarded-For`）：
 
 ```bash
 curl -s https://ai.tzspace.cn/works/dc-nba/api/health -H 'Cookie: probe=1' | grep -o '"proxy":{[^}]*}'
-curl -s ifconfig.me          # 在你自己的网络上跑：proxy.ip 必须等于你的公网 IP；否则按 IP 限频无效，回头查 TRUST_PROXY 与网关 nginx
+curl -s ifconfig.me          # 在你自己的网络上跑：proxy.ip 必须等于你的公网 IP；否则按 IP 限频无效或全站共用一个桶，调整 TRUST_PROXY（或回到默认）并检查网关 nginx 的 XFF 配置
 ```
 
-`proxy.cookieSeen` 顺带核实「网关双向剥离 Cookie」：为 `false` 即属实（本方案用 Bearer，不影响实现，只影响文档措辞）。
+`proxy.cookieSeen` 只检验**请求方向**（网关是否把 Cookie 头传给应用），不检验响应里的 `Set-Cookie` 是否被剥掉；
+`false` 只说明请求方向的 Cookie 被去掉了，不能据此断言「双向剥离」（本方案用 Bearer，不影响实现，只影响文档措辞）。
 
 ### 3. 上线前检查清单（用户自己确认）
 
@@ -323,7 +332,10 @@ curl -s ifconfig.me          # 在你自己的网络上跑：proxy.ip 必须等�
 - [ ] 控制台里模板 `1417875` 的**第二个参数**含义已核对，并据此设好 `TENCENT_SMS_PARAM2`（`"5"` 即「5 分钟」；若模板只有一个参数则设为 `""`）。签名与模板仍为「已通过」；短信套餐有余量；在腾讯云控制台另设发送频率限制与余额告警，作为第二道防线。
 - [ ] **用真密钥做一次真实 SendSms 冒烟**，发到团队成员的手机：这是 TC3 签名唯一的外部验证（单测只能验到自己算的签名）。
 - [ ] 审阅并补全《用户协议》《隐私政策》草稿（`web/src/legal/zh.js`、`en.js`）里的占位：中文的 `【待用户填写】` / `【待用户确认】`，英文的 `[TO BE FILLED BY OWNER …]` / `[TO BE CONFIRMED BY OWNER …]` 标记（以文件内实际标记为准，grep `TO BE`）。并**决定数据保留期**：`sms_sends` 由触发器保证只追加，任何清理都需要另行设计、单独审批的变更（放开删除条件），上线时隐私政策里写的保留期必须与实际做法一致。
-- [ ] 决定预告的暴露面：未登录的 `summary[0]` 含总体准确率与置信区间，确认可以公开。
+- [ ] 决定预告的暴露面：未登录时 `/api/predictions/summary` 只回 `summary[0]` / `summaryMsg[0]` 与 `teaser: {completed, remaining}`
+（`server/entitlements.mjs` 的 `teaserBoard`）。`summary[0]` 在本季已有完赛时就是「本季常规赛已结束 N 场，我们的模型赛前猜对 X 场、猜错 Y 场，
+准确率 …（95% 置信区间 …），Brier …、对数损失 …」，即**总体准确率、置信区间、Brier 与对数损失都是公开的**（赛季刚开打时则是「还没有已结束的比赛」）；
+`completed` = 已完赛场数，`remaining` = 剩余场数。确认这些可以公开。
 - [ ] 知道现有缺口：没有任何东西主动推送 `/api/health` 的 `alarms`（如 `sms.dailyCapReached`）和日志里的 `!! [sms]`；需要通知的话另起任务（例如 `deploy/refresh.sh` 收尾时读 `/api/health` 写进 `refresh.log`，或接企业微信 / 邮件）。
 
 ### 4. 上线步骤（需用户逐步确认后才执行）
@@ -335,15 +347,21 @@ curl -s ifconfig.me          # 在你自己的网络上跑：proxy.ip 必须等�
 ```bash
 # 1) 回滚点 + 库备份（备份用 VACUUM INTO，不要 cp 正在写的 SQLite）
 ssh dev@gpu.tzspace.cn 'docker tag dc-nba-dc-nba:latest dc-nba-dc-nba:pre-accounts'
-ssh dev@gpu.tzspace.cn 'docker exec dc-nba node scripts/backup-db.mjs /app/data-db/keep'   # 指定目录 keep/，不会被默认 backups/ 的轮转（保留最近 7 份）清掉
-# 2) 发代码（HEAD，不含 docker-compose.yml 与 data-db/）
+ssh dev@gpu.tzspace.cn 'docker exec -e KEEP=100000 dc-nba node scripts/backup-db.mjs /app/data-db/keep'   # 容器内跑（DB_PATH 来自 compose）；KEEP=100000 使 keep/ 实际不轮转（默认只留最近 7 份）
+# 2) 先把 user-system 合并进 master，再发代码（HEAD，不含 docker-compose.yml 与 data-db/）
 git archive HEAD server scripts deploy web docs package.json package-lock.json Dockerfile .dockerignore README.md | ssh dev@gpu.tzspace.cn 'tar -x -m -C /home/dev/work/works/dc-nba'
 ssh dev@gpu.tzspace.cn 'cd /home/dev/work/works/dc-nba && docker compose build && docker compose up -d'
 ```
 
 3) **关闭态验证**：`/api/predictions/summary`、`/api/paper`、`/api/shadow` 返回与上线前一致（仍是全量公开）；`/api/meta` 的
-`features.accounts.enabled` 为 `false`；`app.db` 里原有各表行数与备份时一致（新增表为空）。
-4) 到服务器上编辑 `.env`（写密钥，`chmod 600`）和 `docker-compose.yml`（加上面那段，`ENABLE_ACCOUNTS` 改 `"1"`，设好 `TRUST_PROXY`），`docker compose up -d`。
+`features.accounts.enabled` 为 `false`；原有各表行数与上线前一致（容器内没有 sqlite3 命令行，用 node）：
+
+```bash
+ssh dev@gpu.tzspace.cn "docker exec dc-nba node -e \"const {DatabaseSync}=require('node:sqlite');const d=new DatabaseSync(process.env.DB_PATH,{readOnly:true});for(const t of ['paper_bets','shadow_predictions','shadow_rr_predictions','shadow_inj_elo_predictions','players','live_picks'])console.log(t,d.prepare('SELECT COUNT(*) n FROM '+t).get().n)\""
+```
+
+（上线前先跑一遍留底，上线后再跑对比；新增的账号表应为空。）
+4) 到服务器上编辑 `.env`（写密钥，`chmod 600`）和 `docker-compose.yml`（加上面那段，`ENABLE_ACCOUNTS` 改 `"1"`，如需收窄再设 `TRUST_PROXY`），`docker compose up -d`。
 5) **开启态验证**：
 
 ```bash
