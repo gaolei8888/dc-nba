@@ -16,6 +16,7 @@ import { settleBet, outcomeOf } from './betSettlement.mjs';
 export const DEFAULT_COSTS = { feeOnWin: 0, slippagePts: 0, maxStake: null };
 
 const EPS = 1e-12;   // 与 paperBetting.decide 一致
+const BANKROLL_EPS = 1e-9;   // 资金低于此值视为耗尽（避免浮点残余继续下微注）
 
 const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 const byDateGame = (x, y) => cmp(String(x.date), String(y.date)) || cmp(String(x.gameId), String(y.gameId));
@@ -141,7 +142,7 @@ export function runBacktest(candidates, strategy, { costs = DEFAULT_COSTS, bankr
     for (const c of day.items) {
       const pick = pickBet(c, strategy);
       if (!pick) continue;
-      if (!(start > 0)) { notes.skippedNoBankroll += 1; continue; }
+      if (!(start > BANKROLL_EPS)) { notes.skippedNoBankroll += 1; continue; }
       const quoted = sideMl(c, pick.side);
       const pModel = sideP(c, pick.side);
       let stake = isValidAmerican(quoted) ? stakeFor(strategy, { p: pModel, american: quoted, bankroll: start }) : 1;
@@ -196,6 +197,8 @@ const dayNum = (d) => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 1
  * 汇总指标。bets = 已结算（胜/负）注数，作废不计；voids = 普通作废，invalidPriceVoids 单列；
  * roi = profit / staked（staked 只含胜负注）；avgDecimal = 胜负注实际（滑点后）十进制赔率的简单平均；
  * curve 每个下注日一点：当日 profit 与日终 bankroll；最大回撤在 bankroll 曲线上算（含初始资金作为起点峰值）。
+ * maxDrawdown.pctOfPeak 取自 units 最大的那一次回撤（不是各次回撤百分比的最大值）；
+ * profitableMonthShare 只统计有胜负注的月份（只有作废注的月份不计入分母）。
  */
 export function summarizeLedger(ledger, { bankroll0 = 100 } = {}) {
   let wins = 0; let losses = 0; let voids = 0; let invalidPriceVoids = 0;
@@ -255,6 +258,7 @@ export function summarizeLedger(ledger, { bankroll0 = 100 } = {}) {
 
 /**
  * 最大回撤：units = 峰值 − 谷值（取最大的一次，并列取最早）；pctOfPeak = units / 峰值；
+ * 回到与峰值相等（v ≥ peak）即视为新峰值，之后再跌从这一点重新计回撤；收复从谷值之后开始找；
  * days = 峰值日到收复日（首个 bankroll ≥ 峰值的日子；未收复则到最后一日）的日历天数；
  * bets = 峰值日之后到收复（或最后）日期间的胜负注数。峰值为初始资金时，以首个下注日为峰值日且计入该日注数。
  */
@@ -262,16 +266,16 @@ function drawdownOf(curve, ledger, bankroll0) {
   const none = { units: 0, pctOfPeak: 0, days: 0, bets: 0, recovered: true };
   if (!curve.length) return none;
   let peak = bankroll0; let peakIdx = -1;
-  let best = null;   // { units, peak, peakIdx }
+  let best = null;   // { units, peak, peakIdx, troughIdx }
   for (let i = 0; i < curve.length; i += 1) {
     const v = curve[i].bankroll;
-    if (v > peak) { peak = v; peakIdx = i; continue; }
+    if (v >= peak) { peak = v; peakIdx = i; continue; }
     const units = peak - v;
-    if (units > 0 && (!best || units > best.units)) best = { units, peak, peakIdx };
+    if (!best || units > best.units) best = { units, peak, peakIdx, troughIdx: i };
   }
   if (!best) return none;
   let endIdx = curve.length - 1; let recovered = false;
-  for (let i = Math.max(best.peakIdx, 0) + 1; i < curve.length; i += 1) {
+  for (let i = best.troughIdx + 1; i < curve.length; i += 1) {
     if (curve[i].bankroll >= best.peak) { endIdx = i; recovered = true; break; }
   }
   const startDate = curve[Math.max(best.peakIdx, 0)].date;

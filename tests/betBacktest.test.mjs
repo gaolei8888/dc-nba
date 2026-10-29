@@ -205,6 +205,16 @@ test('summarizeLedger：首日即亏，回撤从初始资金算起', () => {
   assert.deepEqual(s.curve.map((d) => d.bankroll), [8, 11]);
 });
 
+test('summarizeLedger 回归：回到峰值后再跌得更深 → 最大回撤从新峰值算、未收复、持续到最后一日', () => {
+  // bankroll 101, 98, 101, 95, 96（d1..d5）：最大回撤 6（d3 的 101 → d4 的 95），之后未收复
+  const s = summarizeLedger([
+    row('2024-01-01', 'win', 1), row('2024-01-02', 'loss', -3, 3), row('2024-01-03', 'win', 3),
+    row('2024-01-04', 'loss', -6, 6), row('2024-01-05', 'win', 1),
+  ]);
+  assert.deepEqual(s.curve.map((d) => d.bankroll), [101, 98, 101, 95, 96]);
+  assert.deepEqual(s.maxDrawdown, { units: 6, pctOfPeak: 6 / 101, days: 2, bets: 2, recovered: false });
+});
+
 test('空流水：不抛错，bets 0、roi null、curve []', () => {
   const s = summarizeLedger([]);
   assert.equal(s.bets, 0);
