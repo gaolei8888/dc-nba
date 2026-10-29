@@ -215,14 +215,34 @@ export function ImpactValidation({ impact }) {
   const avg = v.average ?? {};
   const best = (row) => Math.max(...names.map((n) => row[n] ?? -9));
   const wins = v.perPair.filter((row) => (row.IMP ?? -9) >= best(row)).length;
-  // 候选指标名来自数据文件（含中文括注），显示时按代号翻成当前语言；纯 ASCII 的（IMP、PIE）原样
+  // 候选指标名来自数据文件（含中文括注），显示时按代号翻成当前语言；纯 ASCII 的（IMP、PIE）原样。
+  // 先判长前缀：「IMP v1…」「IMP+长记忆APM…」也以 IMP 开头
   const candLabel = (n) => {
     if (/^[\x00-\x7f]+$/.test(n)) return n;
+    if (n.startsWith('IMP v1')) return t('players.impact.cand.v1');
+    if (n.startsWith('IMP+')) return t('players.impact.cand.longApm');
     if (n.startsWith('IMP')) return t('players.impact.cand.impPre');
     if (n.startsWith('SPM')) return t('players.impact.cand.spm');
     if (n.startsWith('APM')) return t('players.impact.cand.apm');
     return t('players.impact.cand.netRtg');
   };
+  // 两把尺子（次季 APM、次季裸 on/off）共用同一套列
+  const columns = [
+    { key: 'pair', label: t('players.impact.pair'), align: 'left', width: 132 },
+    { key: 'n', label: t('players.impact.n'), width: 58 },
+    ...names.map((n) => ({
+      key: n,
+      label: n === 'IMP' ? <Th abbr="IMP" label={t('players.impact.blend')} /> : candLabel(n),
+      title: n === 'IMP' ? 'IMP' : candLabel(n),
+      width: n === 'IMP' ? 76 : 112,
+      render: (r) => {
+        const val = r[n];
+        if (val === null || val === undefined) return <span className="dim">—</span>;
+        const isBest = val >= best(r);
+        return isBest ? <b className="pos">{val.toFixed(3)}</b> : val.toFixed(3);
+      },
+    })),
+  ];
 
   return (
     <div className="card">
@@ -250,23 +270,21 @@ export function ImpactValidation({ impact }) {
         rows={v.perPair}
         rowKey={(r) => r.pair}
         initialSort={{ key: 'pair', dir: 'asc' }}
-        columns={[
-          { key: 'pair', label: t('players.impact.pair'), align: 'left', width: 132 },
-          { key: 'n', label: t('players.impact.n'), width: 58 },
-          ...names.map((n) => ({
-            key: n,
-            label: n === 'IMP' ? <Th abbr="IMP" label={t('players.impact.blend')} /> : candLabel(n),
-            title: n === 'IMP' ? 'IMP' : candLabel(n),
-            width: n === 'IMP' ? 76 : 112,
-            render: (r) => {
-              const val = r[n];
-              if (val === null || val === undefined) return <span className="dim">—</span>;
-              const isBest = val >= best(r);
-              return isBest ? <b className="pos">{val.toFixed(3)}</b> : val.toFixed(3);
-            },
-          })),
-        ]}
+        columns={columns}
       />
+      {v.perPairOnoff?.length > 0 && (
+        <>
+          <p className="note" style={{ marginTop: 10 }}>
+            {t('players.impact.onoff', { avg: (v.averageOnoff?.IMP ?? 0).toFixed(3) })}
+          </p>
+          <DataTable
+            rows={v.perPairOnoff}
+            rowKey={(r) => r.pair}
+            initialSort={{ key: 'pair', dir: 'asc' }}
+            columns={columns}
+          />
+        </>
+      )}
 
       <p className="note" style={{ marginTop: 10 }}>
         {t('players.impact.n1.pre')}<b>{t('players.impact.n1.b1')}</b>{t('players.impact.n1.mid')}<b>{t('players.impact.n1.b2')}</b>
@@ -278,6 +296,12 @@ export function ImpactValidation({ impact }) {
       {v.shrink && (
         <p className="note">
           {t('players.impact.n2.pre')}<b>{t('players.impact.n2.b')}</b>{t('players.impact.n2.tail', { k: v.shrink.k, pivot: v.shrink.pivot })}
+        </p>
+      )}
+      {v.aging && (
+        <p className="note">
+          <b>{t('players.impact.n5.b1')}</b>{t('players.impact.n5.mid')}<b>{t('players.impact.n5.b2')}</b>
+          {t('players.impact.n5.tail', { span: v.aging.decaySpan, halfLife: v.aging.decayHalfLife })}
         </p>
       )}
       <p className="note">

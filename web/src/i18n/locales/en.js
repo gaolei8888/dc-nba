@@ -443,6 +443,8 @@ export default {
         spm: 'SPM (box score only)',
         apm: 'APM (on-court results only)',
         netRtg: 'Net Rating',
+        v1: 'IMP v1 (3-season decay, no age adjustment)',
+        longApm: 'IMP + long-memory APM (8c, not adopted)',
       },
       n1: {
         pre: 'IMP is a blend of a ',
@@ -469,6 +471,13 @@ export default {
         mid: '). But swapping it in ',
         b2: 'shows no measurable improvement',
         tail: ' in prediction (paired t = 1.45, not significant), so we did not add a pipeline that re-scrapes for 3 hours on every refresh. This does not mean RAPM is worse: with about 240,000 possessions per season we cannot resolve the difference, whereas EPM has 5.5 million possessions.',
+      },
+      onoff: 'Second yardstick: predicting raw on/off in season N+1 from season N data (average IMP {avg}). Its flaws come from a different source than APM, so it does not share the bias of the APM inside IMP.',
+      n5: {
+        b1: 'Age',
+        mid: ': the box-score half first shifts last season\'s rates forward one year along ',
+        b2: 'per-stat age curves',
+        tail: ' (young players gain in scoring and playmaking; veterans lose scoring, usage and defensive rebounding). The curves are fit only on the other season pairs and were adopted under the pre-registered rule. The APM half still uses the last {span} seasons with a half-life of {halfLife} season(s). "IMP v1" is the previous version (no age adjustment). "Long-memory APM (8c)" also passed the rule, but bringing in past seasons\' APM without age adjustment inflates veterans, so it was not adopted and is listed for comparison only.',
       },
     },
   },
