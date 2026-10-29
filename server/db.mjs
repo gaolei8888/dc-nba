@@ -259,6 +259,80 @@ BEGIN SELECT RAISE(ABORT, 'shadow_rr_predictions 只追加：已记录的字段�
 `;
 
 /**
+ * 伤病感知 Elo 影子运行（见 server/injuryEloShadow.mjs，docs/superpowers/specs/2026-10-29-injury-elo-shadow-prereg.md）。
+ * 单独一张表（理由同 shadow_rr_predictions：老表的 variant CHECK 改不了）。规则与另两张影子表相同：
+ * 只追加、(game_id, variant) 重复忽略、不能删、预测与输入字段不能改、比分只写一次、开赛后插不进；另加赛前性兜底：
+ *   - 用到的报告标注时间 ≤ captured_at − 15 分钟，且早于开赛；
+ *   - results_through（用到的最后一个赛果日期，美东）早于 game_date；
+ *   - player-values 生成时间、数据快照时间都不晚于 captured_at；
+ *   - 覆盖场数必填（缺出场数据的比赛必须看得见，不能悄悄记 0）。
+ */
+const INJ_ELO_FROZEN = ['game_id', 'variant', 'params_version', 'captured_at', 'game_date', 'tipoff_utc', 'home_id', 'away_id',
+  'base_margin', 'base_source', 'elo_adj', 'scale', 'dpre_home', 'dpre_away', 'margin', 'p_home',
+  'home_report', 'home_report_as_of', 'away_report', 'away_report_as_of', 'results_through',
+  'games_home', 'games_away', 'covered_home', 'covered_away', 'dpost_coverage', 'values_built_at', 'data_at', 'inputs'];
+export const INJ_ELO_SHADOW_SCHEMA = `
+CREATE TABLE IF NOT EXISTS shadow_inj_elo_predictions (
+  game_id            TEXT NOT NULL,
+  variant            TEXT NOT NULL CHECK (variant IN ('inj-p1-22', 'inj-p1-0630', 'inj-a-22', 'inj-a-0630')),
+  params_version     INTEGER NOT NULL,
+  captured_at        TEXT NOT NULL,
+  game_date          TEXT NOT NULL,
+  tipoff_utc         TEXT NOT NULL,
+  home_id            INTEGER NOT NULL,
+  away_id            INTEGER NOT NULL,
+  base_margin        REAL NOT NULL,
+  base_source        TEXT NOT NULL CHECK (base_source IN ('shadow-base', 'live')),
+  elo_adj            REAL,
+  scale              REAL NOT NULL,
+  dpre_home          REAL NOT NULL,
+  dpre_away          REAL NOT NULL,
+  margin             REAL NOT NULL,
+  p_home             REAL NOT NULL CHECK (p_home > 0 AND p_home < 1),
+  home_report        TEXT,
+  home_report_as_of  TEXT,
+  away_report        TEXT,
+  away_report_as_of  TEXT,
+  results_through    TEXT,
+  games_home         INTEGER NOT NULL,
+  games_away         INTEGER NOT NULL,
+  covered_home       INTEGER NOT NULL CHECK (covered_home <= games_home),
+  covered_away       INTEGER NOT NULL CHECK (covered_away <= games_away),
+  dpost_coverage     REAL,
+  values_built_at    TEXT,
+  data_at            TEXT,
+  inputs             TEXT,
+  home_score         INTEGER,
+  away_score         INTEGER,
+  home_win           INTEGER,
+  settled_at         TEXT,
+  PRIMARY KEY (game_id, variant),
+  CHECK ((variant LIKE 'inj-a-%') = (elo_adj IS NOT NULL))
+);
+CREATE TRIGGER IF NOT EXISTS inj_elo_dup BEFORE INSERT ON shadow_inj_elo_predictions
+WHEN EXISTS (SELECT 1 FROM shadow_inj_elo_predictions WHERE game_id = NEW.game_id AND variant = NEW.variant)
+BEGIN SELECT RAISE(IGNORE); END;
+CREATE TRIGGER IF NOT EXISTS inj_elo_after_tipoff BEFORE INSERT ON shadow_inj_elo_predictions
+WHEN NEW.tipoff_utc <= ${NOW_SQL} OR NEW.captured_at >= NEW.tipoff_utc
+BEGIN SELECT RAISE(ABORT, 'shadow_inj_elo_predictions：开赛后不能记'); END;
+CREATE TRIGGER IF NOT EXISTS inj_elo_lookahead BEFORE INSERT ON shadow_inj_elo_predictions
+WHEN NEW.home_report_as_of > strftime('%Y-%m-%dT%H:%M:%fZ', NEW.captured_at, '-15 minutes')
+  OR NEW.away_report_as_of > strftime('%Y-%m-%dT%H:%M:%fZ', NEW.captured_at, '-15 minutes')
+  OR NEW.home_report_as_of >= NEW.tipoff_utc OR NEW.away_report_as_of >= NEW.tipoff_utc
+BEGIN SELECT RAISE(ABORT, 'shadow_inj_elo_predictions：用了记录时刻之后 / 开赛之后的报告'); END;
+CREATE TRIGGER IF NOT EXISTS inj_elo_pregame BEFORE INSERT ON shadow_inj_elo_predictions
+WHEN NEW.results_through >= NEW.game_date OR NEW.values_built_at > NEW.captured_at OR NEW.data_at > NEW.captured_at
+BEGIN SELECT RAISE(ABORT, 'shadow_inj_elo_predictions：用了比赛日当天或之后的赛果 / 未来的数据'); END;
+CREATE TRIGGER IF NOT EXISTS inj_elo_no_delete BEFORE DELETE ON shadow_inj_elo_predictions
+BEGIN SELECT RAISE(ABORT, 'shadow_inj_elo_predictions 只追加：不能删除'); END;
+CREATE TRIGGER IF NOT EXISTS inj_elo_frozen BEFORE UPDATE ON shadow_inj_elo_predictions
+WHEN ${changed(INJ_ELO_FROZEN)}
+  OR (OLD.settled_at IS NOT NULL AND (${changed(SHADOW_SCORE)}))
+  OR (NEW.settled_at IS NULL AND (${changed(SHADOW_SCORE)}))
+BEGIN SELECT RAISE(ABORT, 'shadow_inj_elo_predictions 只追加：已记录的字段不能改'); END;
+`;
+
+/**
  * 人机对赌「本季实战」（见 server/livePlay.mjs）。和回放的 picks 表分开：回放可立即结算、
  * 题目答案早已公开，实战是开赛前下判断、赛后才知道结果，两边战绩不能混。
  *   - 一人一场一行；开赛前可改（选择与模型快照一起改），开赛后改不了——触发器按真实时钟兜底，
@@ -320,7 +394,7 @@ export function openWith(schema, label, dbPath = DB_PATH) {
   }
 }
 // 影子运行与账本同一个句柄：同是「开赛前记下、赛后结算」的前向记录，同一个开关（ENABLE_LEDGER）
-export const openLedger = (dbPath = DB_PATH) => openWith(LEDGER_SCHEMA + SHADOW_SCHEMA + RR_SHADOW_SCHEMA, '模拟投注账本', dbPath);
+export const openLedger = (dbPath = DB_PATH) => openWith(LEDGER_SCHEMA + SHADOW_SCHEMA + RR_SHADOW_SCHEMA + INJ_ELO_SHADOW_SCHEMA, '模拟投注账本', dbPath);
 
 /**
  * 打开数据库。任何失败都不抛，只记原因并让 isEnabled() 返回 false。

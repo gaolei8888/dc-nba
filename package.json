@@ -11,6 +11,7 @@
     "roster:results": "node scripts/roster-results-backtest.mjs",
     "backtest:minutes": "node scripts/minutes-backtest.mjs",
     "test": "node --test tests/*.test.mjs",
+    "lab:injury-elo": "node scripts/injury-elo-lab.mjs",
     "backup": "node scripts/backup-db.mjs",
     "check": "node scripts/check-jsx.mjs",
     "check:i18n": "node scripts/check-i18n.mjs",

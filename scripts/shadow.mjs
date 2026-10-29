@@ -2,6 +2,7 @@
  * 伤病报告影子运行：抓当时最新的官方报告、记三套赛前预测、赛后结算（只追加，见 server/injuryShadow.mjs）。
  * 同一次运行另记阵容+战绩榜的 rr22 / rr0630（server/rosterResultsShadow.mjs，表 shadow_rr_predictions）：
  * 与前三套完全隔离——rr 出任何错只跳过 rr 行、只记日志，base / r22 / r0630 照常。
+ * 再另记伤病感知 Elo 的 inj-p1-* / inj-a-*（server/injuryEloShadow.mjs，表 shadow_inj_elo_predictions），同样隔离。
  *
  *   node scripts/shadow.mjs capture          # 北京 22:00 那次：base + r22（06:30 前开打的场另记 r0630）
  *   node scripts/shadow.mjs capture --late   # 北京 06:30 那次：r0630。身份由参数给出，不按钟点猜
@@ -20,13 +21,14 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { readJson } from '../server/nbaClient.mjs';
 import { openLedger } from '../server/db.mjs';
-import { buildModel, predictSchedule, powerRankings } from '../server/predict.mjs';
+import { DEFAULT_PARAMS, buildModel, predictSchedule, powerRankings } from '../server/predict.mjs';
 import { REPORT_BASE, candidates, isS3Missing, parseReportText } from '../server/injuryReport.mjs';
 import { asPdf, injuryClient, pdfText } from '../server/injuryFetch.mjs';
 import {
   captureDate, etToUtc, insertShadow, settleShadow, shadowAll, shadowRows, shadowSummary, storeReport, storedReports,
 } from '../server/injuryShadow.mjs';
 import { RR_COLS, rrAll, rrBoard, rrRows } from '../server/rosterResultsShadow.mjs';
+import { INJ_ELO_COLS, injEloAll, injEloRows, injEloSummary } from '../server/injuryEloShadow.mjs';
 
 const PARAMS = JSON.parse(fs.readFileSync(new URL('../server/injury-params-v1.json', import.meta.url), 'utf8'));
 const RR_PARAMS_FILE = new URL('../server/roster-results-params-v1.json', import.meta.url);
@@ -36,6 +38,13 @@ const RR_CODE_FILES = ['liveRosterRankings.mjs', 'rosterProjection.mjs', 'rotati
 const boardCode = () => {
   const h = crypto.createHash('sha256');
   for (const f of RR_CODE_FILES) h.update(fs.readFileSync(new URL(`../server/${f}`, import.meta.url)));
+  return h.digest('hex').slice(0, 12);
+};
+const INJ_ELO_PARAMS_FILE = new URL('../server/injury-elo-params-v1.json', import.meta.url);
+const INJ_ELO_CODE_FILES = ['injuryEloShadow.mjs', 'injuryEloLab.mjs', 'injury-elo-params-v1.json', 'injuryLab.mjs', 'injuryShadow.mjs'];
+const fingerprint = (files) => {
+  const h = crypto.createHash('sha256');
+  for (const f of files) h.update(fs.readFileSync(new URL(`../server/${f}`, import.meta.url)));
   return h.digest('hex').slice(0, 12);
 };
 const db = openLedger();
@@ -114,6 +123,34 @@ async function capture() {
   } catch (e) {
     console.warn(`· 阵容+战绩影子：失败（不影响 base / r22 / r0630）：${String(e.message).slice(0, 200)}`);
   }
+  // 伤病感知 Elo（inj-p1 / inj-a）：同样放在前面几套落库之后，出错只记日志
+  try {
+    captureInjElo({ D, store, slate, now: clock() });
+  } catch (e) {
+    console.warn(`· 伤病感知 Elo 影子：失败（不影响其他影子）：${String(e.message).slice(0, 200)}`);
+  }
+}
+
+function captureInjElo({ D, store, slate, now }) {
+  const params = JSON.parse(fs.readFileSync(INJ_ELO_PARAMS_FILE, 'utf8'));
+  const values = readJson('player-values.json');
+  // 22:00 记下的 base（06:30 那次沿用它；22:00 那次就是刚插入的那行）
+  const baseMargins = new Map(shadowAll(db).filter((r) => r.variant === 'base' && r.game_date === D).map((r) => [r.game_id, r.base_margin]));
+  const { rows, skipped, info } = injEloRows({
+    slate, slot, now, params, store, values, baseMargins,
+    reports: storedReports(db, iso(now - 240 * 86400e3)),
+    eloWeight: DEFAULT_PARAMS.wElo / ((DEFAULT_PARAMS.wElo + DEFAULT_PARAMS.wNet) || 1),
+    code: fingerprint(INJ_ELO_CODE_FILES),
+  });
+  const { n, rejected } = insertShadow(db, rows, { table: 'shadow_inj_elo_predictions', cols: INJ_ELO_COLS });
+  const by = rows.reduce((o, r) => ({ ...o, [r.variant]: (o[r.variant] ?? 0) + 1 }), {});
+  const why = [...new Set(skipped.map((x) => x.why))];
+  const partial = rows.filter((r) => r.variant.startsWith('inj-a') && (r.covered_home < r.games_home || r.covered_away < r.games_away));
+  console.log(`· 伤病感知 Elo 影子（${slot === '22' ? '22:00' : '06:30'}，美东 ${D}）：${JSON.stringify(by)}，新插入 ${n} 行；`
+    + `${info ? `出场数据 ${info.src}、赛果截至 ${info.resultsThrough ?? '—'}（${info.resultsN} 场）、线上 Elo 核对差 ${info.eloCheck.toFixed(2)}` : ''}`
+    + `${partial.length ? `；D_post 不全的 inj-a 行 ${partial.length}` : ''}`
+    + `${skipped.length ? `；跳过 ${skipped.length} 行（${why.join('；')}）` : ''}`
+    + `${rejected.length ? `；库拒绝 ${rejected.map((r) => `${r.game_id}/${r.variant}：${r.why}`).join(',')}` : ''}`);
 }
 
 function captureRr({ D, store, slate, now }) {
@@ -140,6 +177,11 @@ function settle() {
   } catch (e) {
     console.warn(`· 阵容+战绩影子结算失败：${String(e.message).slice(0, 200)}`);
   }
+  try {
+    console.log(`· 伤病感知 Elo 影子结算：${settleShadow(db, scores, undefined, 'shadow_inj_elo_predictions')} 行`);
+  } catch (e) {
+    console.warn(`· 伤病感知 Elo 影子结算失败：${String(e.message).slice(0, 200)}`);
+  }
 }
 
 function show() {
@@ -149,6 +191,12 @@ function show() {
     const d = v.dLogLoss ? `  Δ ${v.dLogLoss.mean.toFixed(4)} [${v.dLogLoss.lo.toFixed(4)}, ${v.dLogLoss.hi.toFixed(4)}]（配对 ${v.paired} 场）` : '';
     console.log(`  ${v.variant.padEnd(6)} n=${v.n} LL ${v.logLoss?.toFixed(4) ?? '—'} Brier ${v.brier?.toFixed(4) ?? '—'}${d}`);
   }
+  const j = injEloSummary([...shadowAll(db), ...rrAll(db), ...injEloAll(db)]);
+  const ci = (c) => (c ? `${c.mean.toFixed(4)} [${c.lo.toFixed(4)}, ${c.hi.toFixed(4)}]（${c.days} 天）` : '—');
+  console.log(`伤病感知 Elo 影子：共同结算 ${j.n}/${j.target} 场（自 ${j.firstDate ?? '—'}），待结算 ${j.pending} 场；inj-a 的 D_post 覆盖（队·场）${j.dpostCoverage == null ? '—' : `${(100 * j.dpostCoverage).toFixed(1)}%`}`);
+  for (const a of j.arms) console.log(`  ${a.variant.padEnd(11)} n=${a.n} LL ${a.logLoss?.toFixed(4) ?? '—'} Brier ${a.brier?.toFixed(4) ?? '—'}`);
+  for (const d of j.deltas) console.log(`  ${d.a} − ${d.b}：ΔLL ${ci(d.dLogLoss)}  ΔBrier ${ci(d.dBrier)}`);
+  console.log(`  两队 D_post 全覆盖的 ${j.fullCoverage.n} 场：inj-a − inj-p1 ΔLL ${ci(j.fullCoverage.dLogLoss)}`);
 }
 
 const CMDS = { capture, settle, show };
