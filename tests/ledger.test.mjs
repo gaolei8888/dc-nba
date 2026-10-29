@@ -97,7 +97,7 @@ test('ledgerReport：按规则汇总已结算注单，今晚列表只含未结�
   const db = fresh();
   insertBets(db, captureRows([slateGame('g1', 0.66, 10), slateGame('g2', 0.30, 10)], { now: NOW }));
   settleBets(db, { g1: { homeScore: 110, awayScore: 100, close: null } }, 'x');
-  const rep = ledgerReport(ledgerRows(db), { B: 100 });
+  const rep = ledgerReport(ledgerRows(db), { B: 100, now: NOW });
   const e3 = rep.rules.find((r) => r.rule === 'edge3');
   assert.equal(e3.bets, 1);
   assert.equal(e3.pending, 1);
@@ -164,7 +164,7 @@ test('同一场早晚两条规则并存；各自只追加、不可改', () => {
   assert.throws(() => db.exec("DELETE FROM paper_bets WHERE rule = 'edge3-late'"), /只追加/);
 
   settleBets(db, { g1: { homeScore: 110, awayScore: 100, close: [-180, 150] } }, 'x');
-  const rep = ledgerReport(ledgerRows(db), { B: 50 });
+  const rep = ledgerReport(ledgerRows(db), { B: 50, now: NOW });
   const e3 = rep.rules.find((r) => r.rule === 'edge3');
   const e3l = rep.rules.find((r) => r.rule === 'edge3-late');
   assert.equal(e3l.late, true);
