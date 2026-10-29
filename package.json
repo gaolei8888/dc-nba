@@ -21,6 +21,7 @@
     "odds:history": "node scripts/odds-history.mjs",
     "books:fetch": "node scripts/books-history.mjs",
     "paper:backtest": "node scripts/paper-backtest.mjs",
+    "ml:backtest": "node scripts/moneyline-backtest.mjs",
     "ledger": "node scripts/ledger.mjs",
     "dataset": "node scripts/build-dataset.mjs",
     "impact:fetch": "node scripts/impact-history.mjs",

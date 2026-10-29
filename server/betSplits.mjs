@@ -54,13 +54,16 @@ export function selectionScenario(scenario) {
   return key;
 }
 
+/** 选择期策略合格的最少注数（selectStrategy / selectForScenario 的默认值；视图、报告脚本共用，勿另写字面量） */
+export const MIN_SELECT_BETS = 100;
+
 const validRoi = (r) => typeof r?.roi === 'number' && Number.isFinite(r.roi);
 
 /**
  * ROI 最高且注数 ≥ minBets 的 SELECTABLE 策略；并列取 SELECTABLE 中靠前者；无合格者 → null。
  * 不在 SELECTABLE 里的键（A / D）忽略。
  */
-export function selectStrategy(results, { minBets = 100 } = {}) {
+export function selectStrategy(results, { minBets = MIN_SELECT_BETS } = {}) {
   let best = null;
   for (const id of SELECTABLE) {
     const r = results?.[id];
@@ -78,7 +81,7 @@ const STRATEGY_BY_ID = new Map(STRATEGIES.map((s) => [s.id, s]));
  * 返回 { scenario, selectOn, seasons, selected, results: { id: { bets, roi } }, tried }。
  * forward：不从历史中挑，直接返回预注册主规则；closeBest：抛错（应沿用 close 的选择）。
  */
-export function selectForScenario(candidates, scenario, { minBets = 100, costs = DEFAULT_COSTS } = {}) {
+export function selectForScenario(candidates, scenario, { minBets = MIN_SELECT_BETS, costs = DEFAULT_COSTS } = {}) {
   if (scenario === 'forward') {
     return { scenario, selectOn: null, seasons: [], selected: FORWARD_PRIMARY, source: 'pre-registered', results: {}, tried: 0 };
   }
