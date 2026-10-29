@@ -6,8 +6,9 @@ import {
   DataTable, TeamCell, StatTile, Loading, ErrorBox, Segmented,
 } from '../components/common.jsx';
 import { num, pct, signed, signClass } from '../lib/format.js';
+import { MoneylineTab } from './LabMoneyline.jsx';
 
-const tabs = (t) => ['build', 'errors', 'measure', 'whatif', 'market']
+const tabs = (t) => ['build', 'errors', 'measure', 'whatif', 'market', 'beat']
   .map((value) => ({ value, label: t(`lab.tab.${value}`) }));
 
 /** 让分分歧档位的显示顺序（与服务端 EDGE_BUCKETS 一致；点表头排序按这个顺序） */
@@ -67,6 +68,7 @@ export default function Lab() {
       {tab === 'measure' && <MeasureTab meta={meta} />}
       {tab === 'whatif' && <WhatIfTab meta={meta} teams={teams} teamById={teamById} />}
       {tab === 'market' && <MarketTab meta={meta} />}
+      {tab === 'beat' && <MoneylineTab meta={meta} />}
     </>
   );
 }
