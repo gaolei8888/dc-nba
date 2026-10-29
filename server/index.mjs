@@ -22,6 +22,7 @@ import { buildBoard } from './predictionBoard.mjs';
 import { paperHeadlineMsg, paperSummaryLines } from './paperBetting.mjs';
 import { ledgerRows, ledgerReport } from './ledger.mjs';
 import { shadowAll, shadowSummary } from './injuryShadow.mjs';
+import { injEloAll, injEloSummary } from './injuryEloShadow.mjs';
 import { rrAll } from './rosterResultsShadow.mjs';
 import {
   scorePick, slateDays, submitLivePicks, livePickRows, settleLive, liveBoard, isLiveGame, isLocked,
@@ -439,10 +440,20 @@ app.get('/api/shadow', wrap((req, res) => {
   if (!ledgerDb) return res.json({ available: false });
   // bootstrap 有点重：行数与最近结算时间不变就用缓存（一天只变两三次）
   // 阵容+战绩榜的 rr22 / rr0630 在另一张表（server/rosterResultsShadow.mjs），拼在一起汇总
+  // 伤病感知 Elo 的 inj-p1 / inj-a（server/injuryEloShadow.mjs）只放在 injElo 字段里：页面只读 variants，不显示它
   const k = JSON.stringify([ledgerDb.prepare('SELECT COUNT(*) n, MAX(settled_at) s FROM shadow_predictions').get(),
-    ledgerDb.prepare('SELECT COUNT(*) n, MAX(settled_at) s FROM shadow_rr_predictions').get()]);
+    ledgerDb.prepare('SELECT COUNT(*) n, MAX(settled_at) s FROM shadow_rr_predictions').get(),
+    ledgerDb.prepare('SELECT COUNT(*) n, MAX(settled_at) s FROM shadow_inj_elo_predictions').get()]);
   if (shadowCache.key !== k) {
-    shadowCache = { key: k, data: { available: true, ...shadowSummary([...shadowAll(ledgerDb), ...rrAll(ledgerDb)]) } };
+    const base = shadowAll(ledgerDb); const rr = rrAll(ledgerDb);
+    let injElo;
+    try {
+      injElo = injEloSummary([...base, ...rr, ...injEloAll(ledgerDb)]);
+    } catch (e) {
+      console.warn(`伤病感知 Elo 影子汇总失败: ${e.message}`);
+      injElo = { available: false };
+    }
+    shadowCache = { key: k, data: { available: true, ...shadowSummary([...base, ...rr]), injElo } };
   }
   res.json(shadowCache.data);
 }));

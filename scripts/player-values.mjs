@@ -8,6 +8,7 @@
  * 只能在能访问 stats.nba.com 的机器上跑（服务器 IP 被封）。口径与实验完全一致（server/injury-params-v1.json）：
  *   RAPM = computeRapm(λ=2000, minPoss 0.25)，本季到昨天（权重 1）+ 上季 0.5 + 上上季 0.25；
  *   常规轮换 = 每队最近 10 场的场均分钟（服务器按比赛日之前取，这里给最近 12 场）。
+ *   另写 played：每队全季逐场的球员分钟（同一份 stints，不多发请求），伤病感知 Elo 影子用它算每场的 D_post。
  * 请求（全走 nbaClient → politeFetch）：leaguegamelog 1 个 + commonallplayers 1 个 + 每场新比赛 2 个。
  * 一周约 50 场 ≈ 100 个，每天跑就是每天约 15–30 个；单次最多 SHADOW_MAX_GAMES 场（默认 80 场 = 160 个，
  * 低于 nbaClient 默认每次 200 / 每天 500 的上限），剩下的下次续。被拦/到上限就停手，已抓的照样落盘。
@@ -90,16 +91,17 @@ if (process.env.FORCE_REFIT || !rapm || dayNum(today) - dayNum(toEt(Date.parse(f
 } else log(`RAPM 沿用 ${fittedAt} 的拟合（每 ${PARAMS.refitDays} 天一次）`);
 
 // ---------------------------------------------------------------- 4. 轮换分钟、本季名单、姓名表
-const recent = {}; const firstSeen = {};
+// played = 全季逐场（伤病感知 Elo 影子要每场「谁上了场」算 D_post，server/injuryEloShadow.mjs）；recent 是它最近 KEEP 场，口径不变
+const played = {}; const recent = {}; const firstSeen = {};
 for (const g of cur) {
   const m = stintMinutes(g.st);
   for (const [t, mins] of [[g.home, m.home], [g.away, m.away]]) {
-    (recent[t] ??= []).push({ date: g.date, gameId: g.gid, mins: Object.fromEntries([...mins].map(([id, v]) => [id, Math.round(v * 100) / 100])) });
+    (played[t] ??= []).push({ date: g.date, gameId: g.gid, mins: Object.fromEntries([...mins].map(([id, v]) => [id, Math.round(v * 100) / 100])) });
     firstSeen[t] ??= {};
     for (const id of mins.keys()) firstSeen[t][id] ??= g.date;
   }
 }
-for (const t of Object.keys(recent)) recent[t] = recent[t].slice(-KEEP);
+for (const t of Object.keys(played)) recent[t] = played[t].slice(-KEEP);
 const people = toRows(await nbaGet(statsUrl('commonallplayers', { LeagueID: '00', Season: SEASON, IsOnlyCurrentSeason: 0 }), { cache: true }))
   .filter((p) => Number(p.TO_YEAR) >= 2020)   // 与实验同：去掉同名的父辈
   .map((p) => [p.PERSON_ID, p.DISPLAY_FIRST_LAST]);
@@ -107,7 +109,7 @@ const people = toRows(await nbaGet(statsUrl('commonallplayers', { LeagueID: '00'
 const out = {
   version: 1, paramsVersion: PARAMS.version, season: SEASON, builtAt: new Date(now).toISOString(),
   fittedAt, fitThrough, gamesThrough: cur.at(-1)?.date ?? null, games: cur.length,
-  rapm, recent, firstSeen, people,
+  rapm, recent, played, failed: Object.keys(data.failed).sort(), firstSeen, people,
 };
 fs.writeFileSync(`${OUT}.tmp`, JSON.stringify(out));
 fs.renameSync(`${OUT}.tmp`, OUT);

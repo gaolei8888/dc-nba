@@ -25,6 +25,8 @@ import { decisionInstant } from '../server/injuryReport.mjs';
 import {
   replayElo, predictProb, reportUsable, etToMs, healthyRotation, preDeduction, postDeduction, strataOf,
 } from '../server/injuryEloLab.mjs';
+import { carryOver } from '../server/ratings.mjs';
+import { seasonEloSequential } from '../server/injuryEloLab.mjs';
 
 const HISTORY = path.join(DATA_DIR, 'history');
 const INJ = process.env.INJURY_DIR ?? path.join(HISTORY, 'injury-reports');
@@ -279,6 +281,40 @@ for (const hold of EVAL) {
 }
 // 四季合起来选（影子要冻结的参数，只报告）
 const pAll = pTable(ALL);
+
+const frozenKey = (arm) => select(candidates(preD(pAll, 'H'), preD(pAll, 'usual'))[arm], recs.map((_, i) => i)).c.key;
+// ---------------------------------------------------------------- 影子冻结参数（INJURY_ELO_FREEZE=1 时只写参数文件就退出，不碰实验输出）
+// 影子预注册：docs/superpowers/specs/2026-10-29-injury-elo-shadow-prereg.md。s、β 是本实验四季合并选出的值（frozen）。
+if (process.env.INJURY_ELO_FREEZE) {
+  const LAST = ALL.at(-1);
+  const S = 0.75; const BETA = 0.5;
+  if (frozenKey('A') !== `s=${S}` || frozenKey('P1') !== `β=${BETA}`) throw new Error(`四季合并选出的参数变了：A ${frozenKey('A')}，P1 ${frozenKey('P1')}`);
+  const lastGames = lab.expand(dataset.seasons[LAST]);
+  const r6 = (v) => Math.round(v * 1e6) / 1e6;
+  const startP = carryOver(seasonEloSequential(lastGames));
+  const startA = carryOver(seasonEloSequential(lastGames, { update, mode: { s: S } }));
+  const exact = new Map(teams.map((t) => [String(t.teamId), t.eloPreseasonExact]));
+  const pDiff = Math.max(...Object.entries(startP).map(([id, v]) => Math.abs(v - (exact.get(id) ?? NaN))));
+  if (!(pDiff < 1e-6)) throw new Error(`D=0 时的开季 Elo 与 teams.json 的 eloPreseasonExact 不一致：最大差 ${pDiff}`);
+  const vals = valuesUpto(LAST);
+  const out = {
+    version: 1,
+    note: '伤病感知 Elo 影子运行的冻结参数（scripts/injury-elo-lab.mjs 在 INJURY_ELO_FREEZE=1 时生成）。影子期内不改。',
+    season: `${Number(LAST.slice(0, 4)) + 1}-${String(Number(LAST.slice(0, 4)) + 2).slice(2)}`,
+    s: S, beta: BETA, spreadSd: 12, lagMin: LAG_MIN, window: 10, minGames: 3, eloPerPoint: 28, k: 20,
+    valueOpts: { unknownV: -0.5, repl: -0.5 },
+    valuesThrough: LAST,
+    pPlay: Object.fromEntries(Object.entries(pAll).map(([k, v]) => [k, r6(v)])),
+    eloStartA: Object.fromEntries(Object.entries(startA).map(([id, v]) => [id, r6(v)])),
+    eloStartP: Object.fromEntries(Object.entries(startP).map(([id, v]) => [id, r6(v)])),
+    values: Object.fromEntries([...vals].sort((x, y) => x[0] - y[0]).map(([id, v]) => [id, r6(v)])),
+  };
+  const file = path.join(DATA_DIR, '..', 'server', 'injury-elo-params-v1.json');
+  fs.writeFileSync(file, `${JSON.stringify(out, null, 1)}\n`);
+  const dA = Object.keys(startA).map((id) => startA[id] - startP[id]);
+  console.log(`写出 ${file}：价值 ${vals.size} 人；A − P 开季 Elo 差 ${Math.min(...dA).toFixed(1)}..${Math.max(...dA).toFixed(1)}；D=0 开季 Elo 与线上最大差 ${pDiff}`);
+  process.exit(0);
+}
 const candAll = candidates(preD(pAll, 'H'), preD(pAll, 'usual'));
 const allIdx = recs.map((_, i) => i);
 const frozen = Object.fromEntries(ARMS.map((a) => [a, select(candAll[a], allIdx).c.key]));
