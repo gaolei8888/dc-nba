@@ -376,6 +376,65 @@ BEGIN SELECT RAISE(ABORT, 'live_picks：开赛后不能改'); END;
 `;
 
 /**
+ * 账号体系（手机号登录）。加法迁移，与排行榜同库；不动已有表。
+ *   - users：phone_e164 唯一；player_id 唯一（一个账号对应一个玩家档案）；tier 会员等级（今天全是 free）；
+ *     lang / tz 是界面语言与时区偏好（与前端 prefs 的 { lang, tz } 一致）。
+ *   - sessions：只存令牌的 SHA-256 哈希。
+ *   - login_codes：每个号码最多一条在途验证码，只存哈希（ownsCode 的发送器如 Twilio Verify 则 code_hash 为空）。
+ *   - sms_sends：短信发送流水，**只追加**——限频全按它计数（重启不丢），也是对账依据。
+ */
+export const ACCOUNT_SCHEMA = `
+CREATE TABLE IF NOT EXISTS users (
+  id              TEXT PRIMARY KEY,
+  phone_e164      TEXT NOT NULL UNIQUE,
+  player_id       TEXT UNIQUE,
+  tier            TEXT NOT NULL DEFAULT 'free',
+  tier_expires_at TEXT,
+  lang            TEXT,
+  tz              TEXT,
+  consent_version TEXT NOT NULL,
+  consent_at      TEXT NOT NULL,
+  created_at      TEXT NOT NULL,
+  last_login_at   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  revoked_at TEXT,
+  last_seen  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+CREATE TABLE IF NOT EXISTS login_codes (
+  e164       TEXT PRIMARY KEY,
+  provider   TEXT NOT NULL,
+  code_hash  TEXT,
+  salt       TEXT,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  attempts   INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS sms_sends (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  e164        TEXT NOT NULL,
+  ip          TEXT,
+  at          TEXT NOT NULL,
+  provider    TEXT NOT NULL,
+  ok          INTEGER NOT NULL,
+  provider_id TEXT,
+  error       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sms_sends_at   ON sms_sends(at);
+CREATE INDEX IF NOT EXISTS idx_sms_sends_e164 ON sms_sends(e164, at);
+CREATE INDEX IF NOT EXISTS idx_sms_sends_ip   ON sms_sends(ip, at);
+CREATE TRIGGER IF NOT EXISTS sms_sends_no_delete BEFORE DELETE ON sms_sends
+BEGIN SELECT RAISE(ABORT, 'sms_sends 只追加：不能删除'); END;
+CREATE TRIGGER IF NOT EXISTS sms_sends_no_update BEFORE UPDATE ON sms_sends
+BEGIN SELECT RAISE(ABORT, 'sms_sends 只追加：不能改'); END;
+`;
+
+/**
  * 只为某个模块打开同一个库文件、只建它自己的表（不建排行榜的表）。和排行榜开关无关：
  * 账本在本地 ENABLE_LEADERBOARD=0 时也能用，默认 data/app.db；线上是 data-db/ 卷里那份。
  * 失败返回 null 并打印原因，调用方据此降级。
@@ -408,6 +467,8 @@ export function initDb() {
     db.exec(SCHEMA);
     // 本季实战的表与排行榜同库（加法迁移，不动已有表）
     db.exec(LIVE_SCHEMA);
+    // 账号体系的表（同样是加法迁移）
+    db.exec(ACCOUNT_SCHEMA);
     // 真正写一次，确认不是只读挂载——只开成功不代表写得进去
     db.exec('CREATE TABLE IF NOT EXISTS _writecheck (x INTEGER)');
     db.exec('DROP TABLE _writecheck');
@@ -456,6 +517,12 @@ export function createPlayer(name) {
   ).run(id, clean, hash(token), nowIso(), nowIso());
   // token 只在创建时返回一次，服务端不留明文
   return { id, name: clean, token };
+}
+
+/** 按 id 取玩家档案（账号登录时绑定用）；不存在返回 null */
+export function playerById(id) {
+  if (!id) return null;
+  return db.prepare('SELECT id, name FROM players WHERE id = ?').get(String(id)) ?? null;
 }
 
 /** 用令牌换玩家，顺便刷新 last_seen */

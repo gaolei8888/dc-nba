@@ -1,4 +1,7 @@
 node_modules
+# 机密不进镜像（构建阶段 COPY . . 会把它带进 builder 层）
+.env
+.env.*
 web/dist
 .git
 *.log

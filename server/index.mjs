@@ -16,6 +16,13 @@ import { splitsFor } from './betSplits.mjs';
 import { STRATEGIES } from './betStrategies.mjs';
 import { US_BOOKS } from './books.mjs';
 import { sendError, publicCode, msg, codedError } from './messages.mjs';
+import { createAuthRouter, userFromRequest } from './authRoutes.mjs';
+import { sessionUser, CONSENT_VERSION } from './accounts.mjs';
+import { gate, teaserBoard, teaserPaper, teaserShadow } from './entitlements.mjs';
+import { createSenders } from './sms.mjs';
+import { createCaptchaStore } from './captcha.mjs';
+import { limitsFromEnv, smsStats } from './loginCodes.mjs';
+import { countriesFor } from './phone.mjs';
 import * as lab from './lab.mjs';
 import { liveRosterRankings } from './liveRosterRankings.mjs';
 import { buildBoard } from './predictionBoard.mjs';
@@ -147,6 +154,15 @@ setInterval(() => {
 
 const app = express();
 
+// 真实访客 IP：链路是 访客 → Traefik → works-gateway(nginx, 私网) → 容器，只信任回环 / 链路本地 / 私网这几跳，
+// req.ip 取 X-Forwarded-For 从右往左第一个不受信任（公网）的地址；伪造的 X-Forwarded-For 左端无效。
+// 副作用（也是目的）：现有 rateLimit 的按 IP 计数也因此从「所有访客共用一个桶（网关 IP）」变成真正按人。
+// 只在用户系统开着（ENABLE_ACCOUNTS=1）或显式设了 TRUST_PROXY（非空）时才设；两者都没有时保持 Express 默认
+// （不信任任何代理，req.ip 是套接字地址），关着开关时与上线前完全一样。
+if (process.env.ENABLE_ACCOUNTS === '1' || process.env.TRUST_PROXY) {
+  app.set('trust proxy', process.env.TRUST_PROXY || 'loopback, linklocal, uniquelocal');   // 空串按未设置
+}
+
 // JSON 压缩率极高（赛程 528KB → 约 60KB）。1000 在线用户下带宽是比 CPU
 // 更早触顶的资源，这一行比任何计算优化都值钱。
 app.use(compression({
@@ -156,6 +172,11 @@ app.use(compression({
 }));
 
 app.use(express.json({ limit: '256kb' }));
+// 请求体不是合法 JSON：body-parser 抛 entity.parse.failed，默认会回一页 HTML；这里改成统一的 { code, params }
+app.use((err, req, res, next) => {
+  if (err?.type === 'entity.parse.failed') return sendError(res, 400, 'err.badJson', '请求体不是合法的 JSON');
+  next(err);
+});
 
 // ---------------------------------------------------------------- 限流
 //
@@ -183,6 +204,19 @@ const storageUnavailable = (res) => sendError(
   res, 503, 'err.storageUnavailable', '服务端存储不可用', {}, { reason: db.getDisabledReason(), reasonCode: db.getDisabledCode() },
 );
 
+/**
+ * 令牌 → 玩家。排行榜匿名令牌优先；否则把它当账号会话令牌，取账号绑定的玩家档案（会话令牌兼作玩家身份）。
+ * 调用方须已确认排行榜库可用（db.isEnabled()）。
+ */
+function resolvePlayer(token) {
+  if (!token) return null;
+  const anon = db.authenticate(token);
+  if (anon) return anon;
+  if (!accountsDb) return null;
+  const user = sessionUser(accountsDb, token, clock());
+  return user?.player_id ? db.playerById(user.player_id) : null;
+}
+
 /** 需要令牌的接口 */
 function requireAuth(req, res, next) {
   if (!db.isEnabled()) {
@@ -190,7 +224,7 @@ function requireAuth(req, res, next) {
   }
   const auth = req.get('authorization') ?? '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-  const player = token && db.authenticate(token);
+  const player = resolvePlayer(token);
   if (!player) return sendError(res, 401, 'err.tokenInvalid', '令牌无效，请重新创建玩家');
   req.player = player;
   next();
@@ -228,6 +262,13 @@ app.get('/api/meta', wrap((req, res) => {
         : 'srv.reason.leaderboardOff',
       lottery: process.env.ENABLE_LOTTERY === '1',
       livePlay: !!liveDb,
+      // 用户系统：开关开着但库打不开时 enabled=false，前端显示「登录暂不可用」
+      accounts: {
+        enabled: ACCOUNTS_ON && !!accountsDb,
+        overseas: OVERSEAS_ON,
+        countries: countriesFor(OVERSEAS_ON),
+        consentVersion: CONSENT_VERSION,
+      },
     },
     injuries: {
       fetchedAt: store.injuries?.fetchedAt ?? null,
@@ -395,49 +436,65 @@ app.get('/api/schedule', wrap(async (req, res) => {
  * 预测总表：本季常规赛全部赛前预测 + 真实结果的成绩单。
  * 走和赛程页完全相同的 predictSchedule + marketOf，同一场比赛两页的胜率必然一致。
  */
+/**
+ * 预测总表全量负载。
+ * 用户系统开着时走对象缓存（同参数只算一次；loadStore 时随 clearCaches 清掉）：放行时走 sendCached 的预压缩路径，
+ * 锁定时拿同一个对象裁剪预告。关着时不建对象缓存，与上线前一样只有 sendCached 那一层。
+ */
+function boardFull(params, out) {
+  if (!ACCOUNTS_ON) return computeBoard(params, out);
+  // 整块对象常驻内存：只留少量参数组合（默认参数占绝大多数），预压缩那层另有自己的 LRU
+  return cached('predBoard', JSON.stringify([params, out]), () => computeBoard(params, out), { max: 8 });
+}
+function computeBoard(params, out) {
+  const games = store.schedule.games.filter((g) => g.type === 'regular');
+  const cn = new Map(store.teams.map((t) => [t.teamId, t.cn]));
+  const board = buildBoard(predictSchedule(getModel(params), games, out).map((g) => {
+    const market = marketOf(g.gameId, g.prediction);
+    return market ? { ...g, market } : g;
+  }), { teamName: (id) => cn.get(id) ?? String(id) });
+  return {
+    seasonYear: store.schedule.seasonYear,
+    oddsFetchedAt: store.odds?.fetchedAt ?? null,
+    ...board,
+    // 总结里也要直说投注回测的结论，不能只藏在「模拟投注」那一栏。
+    // summary 是中文原句（脚本 / 日志），summaryMsg 是同内容的消息码，前端按语言渲染
+    // 两条同条件（要有消息码）才追加，保证中文句与消息码永远成对，不会一边有一边无
+    ...paperSummaryLines(store.paper, board),
+  };
+}
+
 app.get('/api/predictions/summary', wrap(async (req, res) => {
   const params = pickParams(req.query);
   const out = outFromQuery(req);
-  const games = store.schedule.games.filter((g) => g.type === 'regular');
-  const cn = new Map(store.teams.map((t) => [t.teamId, t.cn]));
-  await sendCached(res, req, `predBoard|${JSON.stringify([params, out])}`, async () => {
-    const board = buildBoard(predictSchedule(getModel(params), games, out).map((g) => {
-      const market = marketOf(g.gameId, g.prediction);
-      return market ? { ...g, market } : g;
-    }), { teamName: (id) => cn.get(id) ?? String(id) });
-    return {
-      seasonYear: store.schedule.seasonYear,
-      oddsFetchedAt: store.odds?.fetchedAt ?? null,
-      ...board,
-      // 总结里也要直说投注回测的结论，不能只藏在「模拟投注」那一栏。
-      // summary 是中文原句（脚本 / 日志），summaryMsg 是同内容的消息码，前端按语言渲染
-      // 两条同条件（要有消息码）才追加，保证中文句与消息码永远成对，不会一边有一边无
-      ...paperSummaryLines(store.paper, board),
-    };
-  });
+  const g = gateFor('board.stats', req, res);
+  if (!g.allowed) return res.json({ ...teaserBoard(await boardFull(params, out)), reason: g.reason });
+  await sendCached(res, req, `predBoard|${JSON.stringify([params, out])}`, () => boardFull(params, out));
 }));
 
 /**
  * 模拟投注：历史回测（静态文件）+ 前向账本（SQLite，只读）。
  * 账本由 scripts/ledger.mjs 写；服务端只读，不缓存——每天就变两次，查询很轻。
  */
+const paperFull = () => ({
+  backtest: store.paper ?? null,
+  ledger: ledgerDb
+    ? { available: true, ...ledgerReport(ledgerRows(ledgerDb), { B: 1000 }) }
+    : {
+      available: false,
+      reason: LEDGER_OFF ? 'ENABLE_LEDGER=0' : '账本数据库打不开，见服务端日志',
+      reasonCode: LEDGER_OFF ? 'srv.reason.ledgerOff' : 'srv.reason.ledgerUnavailable',
+    },
+});
 app.get('/api/paper', wrap((req, res) => {
-  res.json({
-    backtest: store.paper ?? null,
-    ledger: ledgerDb
-      ? { available: true, ...ledgerReport(ledgerRows(ledgerDb), { B: 1000 }) }
-      : {
-        available: false,
-        reason: LEDGER_OFF ? 'ENABLE_LEDGER=0' : '账本数据库打不开，见服务端日志',
-        reasonCode: LEDGER_OFF ? 'srv.reason.ledgerOff' : 'srv.reason.ledgerUnavailable',
-      },
-  });
+  const g = gateFor('board.paper', req, res);
+  res.json(g.allowed ? paperFull() : { ...teaserPaper(paperFull()), reason: g.reason });
 }));
 
 /** 影子运行：伤病报告三套 + 阵容+战绩榜两套预测的前向成绩（scripts/shadow.mjs 写，同账本一个库，只读）。不影响页面显示的预测 */
 let shadowCache = { key: '', data: null };
-app.get('/api/shadow', wrap((req, res) => {
-  if (!ledgerDb) return res.json({ available: false });
+function shadowFull() {
+  if (!ledgerDb) return { available: false };
   // bootstrap 有点重：行数与最近结算时间不变就用缓存（一天只变两三次）
   // 阵容+战绩榜的 rr22 / rr0630 在另一张表（server/rosterResultsShadow.mjs），拼在一起汇总
   // 伤病感知 Elo 的 inj-p1 / inj-a（server/injuryEloShadow.mjs）只放在 injElo 字段里：页面只读 variants，不显示它
@@ -455,7 +512,11 @@ app.get('/api/shadow', wrap((req, res) => {
     }
     shadowCache = { key: k, data: { available: true, ...shadowSummary([...base, ...rr]), injElo } };
   }
-  res.json(shadowCache.data);
+  return shadowCache.data;
+}
+app.get('/api/shadow', wrap((req, res) => {
+  const g = gateFor('board.stats', req, res);
+  res.json(g.allowed ? shadowFull() : { ...teaserShadow(shadowFull()), reason: g.reason });
 }));
 
 // ---------------------------------------------------------------- 排行榜
@@ -544,7 +605,7 @@ const livePlayerId = (req) => {
   if (!liveDb) return null;
   if (LEADERBOARD_ON) {
     const auth = req.get('authorization') ?? '';
-    return (auth.startsWith('Bearer ') && db.authenticate(auth.slice(7)))?.id ?? null;
+    return (auth.startsWith('Bearer ') && resolvePlayer(auth.slice(7)))?.id ?? null;
   }
   const local = req.get('x-local-profile') ?? '';
   return /^[\w-]{1,48}$/.test(local) ? `local:${local}` : null;
@@ -865,6 +926,21 @@ app.post('/api/lab/moneyline', rateLimit({ max: 30 }), wrap(async (req, res) => 
 
 /** 运行状态，方便压测和线上排查 */
 app.get('/api/health', wrap((req, res) => {
+  // 短信用量与报警只是报告：不改 HTTP 状态、不改 ok——容器健康检查走 /api/meta，
+  // deploy/refresh.sh 的回滚看容器健康，不能被短信报警触发回滚
+  const alarms = [];
+  let sms = null;
+  // 开关开着但账号库打不开：登录整体不可用（/api/auth 全 503、被锁接口一律预告），要报出来
+  if (ACCOUNTS_ON && !accountsDb) alarms.push('accounts.dbUnavailable');
+  if (accountsDb) {
+    try {
+      sms = { ...smsStats(accountsDb, { now: clock(), limits: SMS_LIMITS }), mainland: SMS_MAINLAND, overseas: OVERSEAS_ON ? 'twilio' : 'off' };
+      if (sms.capReached) alarms.push('sms.dailyCapReached');
+    } catch (e) {
+      console.warn(`!! [health] 短信统计失败: ${e.message}`);
+      alarms.push('sms.statsUnavailable');
+    }
+  }
   res.json({
     ok: true,
     pool: { available: poolAvailable(), pending: pendingCount() },
@@ -881,6 +957,10 @@ app.get('/api/health', wrap((req, res) => {
     memoryMB: Math.round(process.memoryUsage().rss / 1048576),
     memoryPeakMB: peakRssMB,
     uptimeSec: Math.round(process.uptime()),
+    sms,
+    alarms,
+    // 排查 trust proxy 用：看到的访客 IP、请求有没有带 cookie（凭证走 Bearer，正常应为 false）
+    proxy: { ip: req.ip, cookieSeen: !!req.headers.cookie },
   });
 }));
 
@@ -972,6 +1052,52 @@ const LIVE_REASON_CODE = LEADERBOARD_ON ? (db.getDisabledCode() ?? 'srv.reason.d
  */
 const NOW_OFFSET = !PROD && process.env.PLAY_NOW ? Date.parse(process.env.PLAY_NOW) - Date.now() : 0;
 const clock = () => Date.now() + (Number.isFinite(NOW_OFFSET) ? NOW_OFFSET : 0);
+
+// ---------------------------------------------------------------- 用户系统
+//
+// ENABLE_ACCOUNTS=1 才开。开着时预测总表 / 影子 / 模拟投注三个接口按 can() 返回全量或预告；
+// 关着时三个接口与原来完全一样、全部公开。排行榜开着就与它共用一个库句柄，否则单开同一个库文件只建账号表。
+const ACCOUNTS_ON = process.env.ENABLE_ACCOUNTS === '1';
+const accountsDb = ACCOUNTS_ON
+  ? (LEADERBOARD_ON && db.isEnabled() ? db.handle() : db.openWith(db.ACCOUNT_SCHEMA, '用户系统'))
+  : null;
+const senders = ACCOUNTS_ON ? createSenders(process.env) : null;
+const OVERSEAS_ON = !!(accountsDb && senders?.overseasOn);
+const SMS_MAINLAND = senders?.mainland?.id ?? 'disabled';
+const SMS_LIMITS = limitsFromEnv(process.env);
+// 排行榜可用时，登录绑定 / 新建玩家档案走排行榜的 players 表；否则账号不带玩家档案
+const players = LEADERBOARD_ON && db.isEnabled()
+  ? { authenticate: db.authenticate, create: (n) => db.createPlayer(n), byId: db.playerById }
+  : null;
+
+/**
+ * 被锁接口的判定。只认账号会话：排行榜匿名令牌不是会话，按未登录（none）处理而不是「会话失效」。
+ * 开关开着但库打不开 → userFromRequest 给 none → 锁住（宁可锁住也不漏）。
+ * 放行与锁定都按令牌区分响应，必须带 Vary: Authorization 且不进任何共享缓存。
+ */
+function gateFor(feature, req, res) {
+  if (!ACCOUNTS_ON) return { allowed: true, reason: null };
+  res.set('Cache-Control', 'private, no-store');
+  res.vary('Authorization');
+  const now = clock();
+  let who = userFromRequest(accountsDb, req, now);
+  if (who.state === 'invalid' && LEADERBOARD_ON && db.isEnabled()) {
+    const m = /^Bearer\s+(\S+)\s*$/i.exec(req.get('authorization') ?? '');
+    if (m && db.authenticate(m[1])) who = { user: null, state: 'none' };
+  }
+  return gate(feature, { accountsOn: true, ...who, now });
+}
+
+if (ACCOUNTS_ON && accountsDb) {
+  app.use('/api/auth', createAuthRouter({
+    h: accountsDb, senders, captcha: createCaptchaStore(), limits: SMS_LIMITS, clock, rateLimit, players,
+  }));
+} else {
+  app.use('/api/auth', (req, res) => sendError(res, 503, 'auth.unavailable', '账号服务暂不可用'));
+}
+console.log(`用户系统：${ACCOUNTS_ON ? (accountsDb ? '开启' : '开启（库不可用，按未登录处理）') : '关闭'}；`
+  + `国内短信 ${ACCOUNTS_ON ? SMS_MAINLAND : '—'}；海外 ${OVERSEAS_ON ? 'twilio' : 'off'}`);
+
 initPool();
 
 try {

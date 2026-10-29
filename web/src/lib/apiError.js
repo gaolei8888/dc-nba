@@ -1,14 +1,17 @@
 // 接口错误：保留状态码与机器可读的 code，界面按 code 翻译。
 // 服务端 body.error 的中文原文只放在 message 里供日志排查，永远不显示给用户。
 // 单独成文件（不依赖 import.meta.env），便于 node 直接测试。
+// `body` 可能含图形验证载荷（captcha.id / image）——绝不整体打印到日志或原样显示，只按需取字段。
 
 export class ApiError extends Error {
-  constructor({ status, code = null, params = {}, message = '' }) {
+  constructor({ status, code = null, params = {}, message = '', body = null }) {
     super(message || `HTTP ${status}`);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
     this.params = params ?? {};
+    // 完整响应体：登录流程要从 428/400 里取图形验证（body.captcha）
+    this.body = body;
   }
 }
 
@@ -20,6 +23,7 @@ export async function toApiError(res) {
     code: typeof body?.code === 'string' ? body.code : null,
     params: body?.params && typeof body.params === 'object' ? body.params : {},
     message: typeof body?.error === 'string' ? body.error : '',
+    body: body && typeof body === 'object' && Object.keys(body).length ? body : null,
   });
 }
 

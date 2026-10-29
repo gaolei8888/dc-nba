@@ -1,0 +1,141 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createCaptchaStore, needsCaptcha, CAPTCHA_ALPHABET, FONT } from '../server/captcha.mjs';
+
+const svgOf = (a) => Buffer.from(a.image.split(',')[1], 'base64').toString();
+
+test('verify：一次性、不分大小写、2 分钟过期', () => {
+  const s = createCaptchaStore();
+  const a = s.issue(0, { text: 'K7PQ' });
+  assert.match(a.image, /^data:image\/svg\+xml;base64,/);
+  assert.equal(svgOf(a).includes('K7PQ'), false);
+  assert.equal('answer' in a, false);
+  assert.equal(s.verify(a.id, 'k7pq', 1000), true);
+  assert.equal(s.verify(a.id, 'K7PQ', 1000), false);
+  const b = s.issue(0, { text: 'ABCD' });
+  assert.equal(s.verify(b.id, 'ABCD', 120_001), false);
+  const c = s.issue(0, { text: 'ABCD' });
+  assert.equal(s.verify(c.id, 'ABCE', 1), false);
+  assert.equal(s.verify(c.id, 'ABCD', 2), false); // 答错一次即作废
+});
+
+test('verify：未知 id / 非字符串入参 / 恰在过期边界', () => {
+  const s = createCaptchaStore();
+  assert.equal(s.verify('nope', 'ABCD', 0), false);
+  const a = s.issue(0, { text: 'ABCD' });
+  assert.equal(s.verify(a.id, undefined, 1), false);
+  const b = s.issue(0, { text: 'ABCD' });
+  assert.equal(s.verify(b.id, 'ABCD', 120_000), true);
+});
+
+test('默认生成：SVG 无 <text>、4 条字符 path、4–6 条干扰线，id 不重复；字母表正确', () => {
+  const s = createCaptchaStore();
+  const ids = new Set();
+  for (let i = 0; i < 50; i++) {
+    const a = s.issue(0);
+    ids.add(a.id);
+    const svg = svgOf(a);
+    assert.equal(svg.includes('<text'), false);
+    assert.equal(/>[^<\s]+</.test(svg), false); // 无任何字符数据节点
+    assert.equal((svg.match(/<path [^>]*class="g"/g) ?? []).length, 4);
+    const lines = (svg.match(/<path [^>]*class="n"/g) ?? []).length;
+    assert.ok(lines >= 4 && lines <= 6, `干扰线 ${lines}`);
+  }
+  assert.equal(ids.size, 50);
+  assert.equal(CAPTCHA_ALPHABET, 'ABCDEFGHJKMNPQRSTUVWXYZ23456789');
+});
+
+test('字母表每个字符都有非空笔画，且渲染出非空 path', () => {
+  assert.deepEqual(Object.keys(FONT).sort(), [...CAPTCHA_ALPHABET].sort());
+  const s = createCaptchaStore();
+  for (const ch of CAPTCHA_ALPHABET) {
+    assert.ok(FONT[ch].length > 0 && FONT[ch].every((l) => l.length >= 2));
+    const svg = svgOf(s.issue(0, { text: ch.repeat(4) }));
+    const d = [...svg.matchAll(/<path [^>]*class="g" d="([^"]+)"/g)].map((m) => m[1]);
+    assert.equal(d.length, 4);
+    assert.ok(d.every((x) => x.length > 10 && x.startsWith('M')));
+  }
+});
+
+test('容量上限：超过 max 先丢最旧的', () => {
+  const s = createCaptchaStore({ max: 3 });
+  const ids = [0, 1, 2, 3].map((t) => s.issue(t, { text: 'ABCD' }).id);
+  assert.equal(s.size(), 3);
+  assert.equal(s.verify(ids[0], 'ABCD', 10), false);
+  assert.equal(s.verify(ids[3], 'ABCD', 10), true);
+});
+
+test('过期条目在 issue 时清理，库不会无限增长', () => {
+  const s = createCaptchaStore();
+  for (let i = 0; i < 10; i++) s.issue(0);
+  assert.equal(s.size(), 10);
+  s.issue(200_000);
+  assert.equal(s.size(), 1);
+});
+
+test('needsCaptcha：第 3 次起、触发过限频、全站过半时需要', () => {
+  const base = { ipSendsLastHour: 0, ipLimitedAt: null, siteToday: 0, cap: 500, now: 10_000_000 };
+  assert.equal(needsCaptcha(base), false);
+  assert.equal(needsCaptcha({ ...base, ipSendsLastHour: 1 }), false);
+  assert.equal(needsCaptcha({ ...base, ipSendsLastHour: 2 }), true);
+  assert.equal(needsCaptcha({ ...base, ipLimitedAt: base.now - 3_599_000 }), true);
+  assert.equal(needsCaptcha({ ...base, ipLimitedAt: base.now - 3_601_000 }), false);
+  assert.equal(needsCaptcha({ ...base, siteToday: 249 }), false);
+  assert.equal(needsCaptcha({ ...base, siteToday: 250 }), true);
+  assert.equal(needsCaptcha({ ...base, siteToday: 100, cap: 200 }), true); // 随上限配置按比例
+});
+
+test('noteLimited：一小时内 needsCaptcha 为 true，之后为 false；有界', () => {
+  const s = createCaptchaStore({ max: 2 });
+  const base = { ipSendsLastHour: 0, ipLimitedAt: null, siteToday: 0, cap: 500, ip: '1.1.1.1', store: s };
+  const now = 10_000_000;
+  assert.equal(needsCaptcha({ ...base, now }), false);
+  s.noteLimited('1.1.1.1', now);
+  assert.equal(needsCaptcha({ ...base, now: now + 3_599_000 }), true);
+  assert.equal(needsCaptcha({ ...base, now: now + 3_601_000 }), false);
+  assert.equal(needsCaptcha({ ...base, ip: '2.2.2.2', now }), false);
+  s.noteLimited('2.2.2.2', now); s.noteLimited('3.3.3.3', now);
+  assert.equal(s.limitedSize(), 2);
+  assert.equal(s.limitedAt('1.1.1.1', now), null); // 最旧的被挤掉
+  s.noteLimited(null, now);
+  assert.equal(s.limitedSize(), 2);
+});
+
+test('排版：300 张里相邻字符包围盒重叠 ≤10%，且都在 viewBox 内；干扰线浅色细线画在字前', () => {
+  const s = createCaptchaStore();
+  for (let n = 0; n < 300; n++) {
+    const svg = svgOf(s.issue(0));
+    const [vw, vh] = svg.match(/viewBox="0 0 (\d+) (\d+)"/).slice(1).map(Number);
+    const boxes = [...svg.matchAll(/<path [^>]*class="g" d="([^"]+)"/g)].map((m) => {
+      const pts = [...m[1].matchAll(/[ML]([-\d.]+) ([-\d.]+)/g)].map((p) => [Number(p[1]), Number(p[2])]);
+      const xs = pts.map((p) => p[0]); const ys = pts.map((p) => p[1]);
+      return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
+    }).sort((a, b) => a.x0 - b.x0);
+    assert.equal(boxes.length, 4);
+    for (const b of boxes) assert.ok(b.x0 >= 0 && b.x1 <= vw && b.y0 >= 0 && b.y1 <= vh, '出界');
+    for (let i = 0; i < 3; i++) {
+      const [a, b] = [boxes[i], boxes[i + 1]];
+      const ov = Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0));
+      const small = Math.min(a.x1 - a.x0, b.x1 - b.x0);
+      assert.ok(ov <= 0.1 * small, `重叠 ${ov} / ${small}`);
+    }
+    // 干扰线都在第一个字符 path 之前
+    assert.ok(svg.lastIndexOf('class="n"') < svg.indexOf('class="g"'));
+    for (const m of svg.matchAll(/class="n" [^>]*stroke="rgb\((\d+),(\d+),(\d+)\)" stroke-width="(\d+)"/g)) {
+      assert.ok([m[1], m[2], m[3]].every((v) => v >= 150) && m[4] === '1');
+    }
+  }
+});
+
+test('noteLimited / limitedAt 按 ipKey 分组：同一 IPv6 /64 共用，不同 /64 与 IPv4 各自独立', () => {
+  const s = createCaptchaStore();
+  const now = 10_000_000;
+  s.noteLimited('2001:db8:1:2::1', now);
+  assert.equal(s.limitedAt('2001:db8:1:2:ffff::9', now), now);
+  assert.equal(needsCaptcha({ ipSendsLastHour: 0, siteToday: 0, cap: 500, now, store: s, ip: '2001:db8:1:2::abcd' }), true);
+  assert.equal(s.limitedAt('2001:db8:1:3::1', now), null);
+  s.noteLimited('::ffff:1.1.1.1', now);
+  assert.equal(s.limitedAt('1.1.1.1', now), now);
+  assert.equal(s.limitedAt('1.1.1.2', now), null);
+  assert.equal(s.limitedSize(), 2);
+});

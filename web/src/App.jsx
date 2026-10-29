@@ -1,12 +1,13 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { api } from './lib/api.js';
-import { Loading, ErrorBox } from './components/common.jsx';
+import { Loading, ErrorBox, LockIcon } from './components/common.jsx';
 import { teamPalette } from './lib/color.js';
 import {
   loadProfiles, ensureProfile, createProfile as createP, renameProfile as renameP,
   switchProfile as switchP, deleteProfile as deleteP, importProfile as importP,
-  linkCloud as linkC, unlinkCloud as unlinkC,
+  linkCloud as linkC, unlinkCloud as unlinkC, attachAccount, detachAccount,
 } from './lib/profiles.js';
+import { loadSession, saveSession, clearSession, SESSION_KEY, accountsDisabled } from './lib/session.js';
 import { createCloudPlayer, renameCloud } from './lib/cloud.js';
 import Dashboard from './pages/Dashboard.jsx';
 import Teams from './pages/Teams.jsx';
@@ -17,10 +18,15 @@ import Predict from './pages/Predict.jsx';
 import Simulate from './pages/Simulate.jsx';
 import Play from './pages/Play.jsx';
 import Profiles from './pages/Profiles.jsx';
-import Lab from './pages/Lab.jsx';
 import Today from './pages/Today.jsx';
 import Board from './pages/Board.jsx';
 import { useI18n } from './i18n/react.jsx';
+
+// 登录页、协议 / 隐私政策（长文）与实验室（含独赢投注实验）按需加载：大多数访客用不到，不进主包，
+// 主包回到 Vite 的 500 kB 提示线以下
+const Login = lazy(() => import('./pages/Login.jsx'));
+const Lab = lazy(() => import('./pages/Lab.jsx'));
+const Legal = lazy(() => import('./pages/Legal.jsx'));
 
 // ------------------------------------------------------------ 全局数据
 
@@ -33,7 +39,7 @@ const NAV = [
   { path: 'players', key: 'nav.players', ico: '⚇' },
   { path: 'today', key: 'nav.today', ico: '◷' },
   { path: 'schedule', key: 'nav.schedule', ico: '▤' },
-  { path: 'board', key: 'nav.board', ico: '✓' },
+  { path: 'board', key: 'nav.board', ico: '✓', locked: true },
   { path: 'predict', key: 'nav.predict', ico: '◎' },
   { path: 'simulate', key: 'nav.simulate', ico: '∿' },
   { path: 'play', key: 'nav.play', ico: '⚔' },
@@ -80,6 +86,26 @@ export default function App() {
   const [accent, setAccent] = useState(null);
   // 玩家档案：身份只是"这台浏览器上的一个本地档案"，没有服务端账号
   const [prof, setProf] = useState(() => ensureProfile(loadProfiles(), t('profiles.defaultName', { n: 1 })));
+  // 账号会话：只是 localStorage 里会话的镜像，真相以 loadSession() 为准
+  const [session, setSession] = useState(() => loadSession());
+
+  // 本地会话没了（过期、被锁接口判定失效、别的标签页退出）：界面回到未登录，去掉账号档案的 cloud
+  const dropAccount = useCallback(() => {
+    setSession(null);
+    setProf((s2) => (s2.profiles.some((p) => p.cloud?.account === true) ? detachAccount(s2) : s2));
+  }, []);
+  /** 重新读一次本地会话，React 状态与之对齐；被锁接口每次返回后、启动时、别的标签页改动时调用 */
+  const syncSession = useCallback(() => {
+    const s2 = loadSession();
+    if (!s2) dropAccount();
+    else setSession((cur) => (cur?.token === s2.token ? cur : s2));
+  }, [dropAccount]);
+  useEffect(() => {
+    syncSession();
+    const on = (e) => { if (e.key === null || e.key === SESSION_KEY) syncSession(); };
+    window.addEventListener('storage', on);
+    return () => window.removeEventListener('storage', on);
+  }, [syncSession]);
 
   useEffect(() => {
     Promise.all([api.meta(), api.teams(), api.injuries().catch(() => ({ players: [] }))])
@@ -87,8 +113,17 @@ export default function App() {
       .catch((error) => setState({ loading: false, error }));
   }, []);
 
+  // 服务端说用户系统关着（含回滚关掉开关）：本地会话没用了，账号档案的 cloud.token 是会话令牌，
+  // 留着调排行榜只会 401——清掉会话并去掉账号档案的 cloud；重新开启后再登录即可
+  useEffect(() => {
+    if (accountsDisabled(state.meta) && (loadSession() || prof.profiles.some((p) => p.cloud?.account === true))) {
+      clearSession();
+      dropAccount();
+    }
+  }, [state.meta, prof, dropAccount]);
+
   // 球队表交给 i18n（服务端消息里的队名占位符要用）；setTeams 稳定、teams 只在加载完成时变一次
-  const { setTeams } = i18n;
+  const { setTeams, setLang, setTz } = i18n;
   useEffect(() => { if (state.teams) setTeams(state.teams); }, [state.teams, setTeams]);
 
   // 主题写到 <html> 上，CSS 变量随之切换
@@ -179,12 +214,34 @@ export default function App() {
         return created;
       },
       disconnectCloud: () => setProf((s2) => unlinkC(s2, prof.activeId)),
+      // ---- 账号（手机号登录）。accounts 来自 /api/meta；enabled 为假时界面不出现任何登录元素
+      accounts: state.meta?.features?.accounts ?? { enabled: false },
+      session,
+      /** 登录成功：只存服务端的 publicUser；账号的玩家档案对应到本地档案；账号有语言 / 时区偏好就套用 */
+      login: (r) => {
+        const s2 = saveSession({ token: r.token, expiresAt: r.expiresAt, user: r.user ?? null });
+        setSession(s2);
+        setProf((p2) => attachAccount(p2, { player: r.player ?? null, token: r.token }));
+        if (r.user?.lang) setLang(r.user.lang);
+        if (r.user?.tz) setTz(r.user.tz);
+      },
+      /** 退出：接口失败也照样清本地 */
+      logout: async () => {
+        const token = loadSession()?.token;
+        if (token) await api.authLogout(token).catch(() => {});
+        clearSession();
+        dropAccount();
+      },
+      /** 服务端说会话失效：只清本地，不调接口 */
+      onSessionInvalid: () => { clearSession(); dropAccount(); },
+      syncSession,
+
       syncCloudName: async (name) => {
         const c = prof.profiles.find((p) => p.id === prof.activeId)?.cloud;
         if (c?.token) await renameCloud(c.token, name);
       },
     };
-  }, [state, out, params, theme, prof, t]);
+  }, [state, out, params, theme, prof, t, session, dropAccount, syncSession, setLang, setTz]);
 
   if (state.loading) {
     return <div className="loading" style={{ paddingTop: 120 }}>{t('app.loading')}</div>;
@@ -216,10 +273,46 @@ export default function App() {
   else if (head === 'simulate') page = <Simulate />;
   else if (head === 'play') page = <Play />;
   else if (head === 'profiles') page = <Profiles />;
-  else if (head === 'lab') page = <Lab />;
+  else if (head === 'lab') page = <Suspense fallback={<Loading />}><Lab /></Suspense>;
+  else if (head === 'login') page = <Suspense fallback={<Loading />}><Login returnTo={rest.join('/')} /></Suspense>;
+  else if (head === 'terms' || head === 'privacy') page = <Suspense fallback={<Loading />}><Legal doc={head} /></Suspense>;
   else page = <Dashboard />;
 
   const activeKey = head === 'team' ? 'teams' : head;
+  const showLock = !!ctx.accounts.enabled && !session;
+  const loginTarget = `login/${head === 'login' ? rest.join('/') : [head, ...rest].filter(Boolean).join('/')}`;
+  /**
+   * 账号区：侧栏里一份；≤780px 侧栏隐藏时，主区顶部的窄条再放一份（只有登录 / 退出，不是导航菜单）。
+   * accounts.enabled 为假时两处都不出现。
+   */
+  const accountUi = (where) => {
+    if (!ctx.accounts.enabled) return null;
+    if (session) {
+      const who = t('auth.loggedInAs', { phone: session.user?.phone ?? '' });
+      return (
+        <div className={where === 'side' ? 'side-account' : 'mobile-account'}>
+          <span title={who}>{who}</span>
+          <button className={where === 'side' ? 'nav-item' : 'btn'} onClick={ctx.logout}>{t('auth.logout')}</button>
+        </div>
+      );
+    }
+    if (where === 'side') {
+      return (
+        <button
+          className="btn primary"
+          style={{ width: '100%', marginTop: 6, padding: '5px 8px', fontSize: 11.5 }}
+          onClick={() => go(loginTarget)}
+        >
+          {t('auth.loginOrRegister')}
+        </button>
+      );
+    }
+    return (
+      <div className="mobile-account">
+        <button className="btn primary" onClick={() => go(loginTarget)}>{t('auth.loginOrRegister')}</button>
+      </div>
+    );
+  };
 
   return (
     <AppCtx.Provider value={ctx}>
@@ -239,6 +332,7 @@ export default function App() {
             >
               <span className="ico">{n.ico}</span>
               {t(n.key)}
+              {n.locked && showLock && <span className="nav-lock"><LockIcon /></span>}
             </button>
           ))}
 
@@ -275,6 +369,7 @@ export default function App() {
             >
               {t('app.manageProfiles')}
             </button>
+            {accountUi('side')}
           </div>
 
           {(ctx.injuries.players?.length ?? 0) > 0 && (
@@ -338,7 +433,7 @@ export default function App() {
           </div>
         </nav>
 
-        <main className="main">{page}</main>
+        <main className="main">{accountUi('mobile')}{page}</main>
       </div>
     </AppCtx.Provider>
   );

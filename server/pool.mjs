@@ -168,7 +168,7 @@ export async function sendCached(res, req, key, produce) {
   }
   res.set('Content-Type', 'application/json; charset=utf-8');
   if (enc !== 'identity') res.set('Content-Encoding', enc);
-  res.set('Vary', 'Accept-Encoding');
+  res.vary('Accept-Encoding');
   res.end(buf);
 }
 
