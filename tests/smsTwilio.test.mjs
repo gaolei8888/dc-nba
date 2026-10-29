@@ -24,7 +24,7 @@ test('send 失败（HTTP 错误 / 网络错误）如实失败且不带凭据', a
   assert.equal(r.ok, false); assert.match(r.error, /429/); assert.ok(!r.error.includes('tok'));
   const s2 = createTwilioVerifySender({ accountSid: 'ACxx', authToken: 'tok', serviceSid: 'VAxxx', fetchImpl: async () => { throw Object.assign(new Error('tok'), { name: 'TimeoutError' }); } });
   const r2 = await s2.send(E, null);
-  assert.equal(r2.ok, false); assert.match(r2.error, /timeout/); 
+  assert.equal(r2.ok, false); assert.match(r2.error, /timeout/); assert.ok(!r2.error.includes('tok'));
 });
 
 test('check：approved 才算通过', async () => {
@@ -80,4 +80,20 @@ test('consoleSender 脱敏手机号并打印验证码；disabledSender 恒失败
   assert.equal(r.ok, true);
   assert.equal(lines[0], '[sms:console] 138****8000 验证码 123456');
   assert.deepEqual(await disabledSender('关').send('+8613800138000', '1'), { ok: false, error: '关' });
+});
+
+test('createSenders：生产环境失败即关闭，只有未设置或显式 tencent 才真发', () => {
+  const keys = { TENCENT_SMS_SECRET_ID: 'a', TENCENT_SMS_SECRET_KEY: 'b' };
+  const warns = [];
+  const log = { log() {}, warn: (m) => warns.push(m) };
+  const c = createSenders({ ...keys, SMS_PROVIDER: 'console', NODE_ENV: 'production' }, { log });
+  assert.equal(c.mainland.id, 'disabled');
+  assert.equal(c.describe.mainland, 'disabled（production 禁用 console）');
+  assert.equal(warns.length, 1);
+  const typo = createSenders({ ...keys, SMS_PROVIDER: 'tencnet', NODE_ENV: 'production' }, { log });
+  assert.equal(typo.mainland.id, 'disabled');
+  assert.equal(warns.length, 2);
+  assert.equal(createSenders({ ...keys, NODE_ENV: 'production' }, { log }).mainland.id, 'tencent');
+  assert.equal(createSenders({ ...keys, SMS_PROVIDER: 'tencent', NODE_ENV: 'production' }, { log }).mainland.id, 'tencent');
+  assert.equal(createSenders({ SMS_PROVIDER: 'tencent', NODE_ENV: 'production' }, { log }).mainland.id, 'disabled');
 });

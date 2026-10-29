@@ -36,28 +36,36 @@ export function createSenders(env = process.env, { fetchImpl = fetch, log = cons
 
   let mainland;
   let mainlandDesc;
-  if (provider === 'disabled') {
-    mainland = disabledSender('短信已关闭（SMS_PROVIDER=disabled）');
-    mainlandDesc = 'disabled';
-  } else if (provider === 'console' && !prod) {
-    mainland = consoleSender(log);
-    mainlandDesc = 'console';
-  } else if (hasTencent) {
-    mainland = createTencentSender({
-      secretId: env.TENCENT_SMS_SECRET_ID,
-      secretKey: env.TENCENT_SMS_SECRET_KEY,
-      sdkAppId: opt(env.TENCENT_SMS_SDK_APP_ID),
-      signName: opt(env.TENCENT_SMS_SIGN_NAME),
-      templateId: opt(env.TENCENT_SMS_TEMPLATE_ID),
-      region: opt(env.TENCENT_SMS_REGION),
-      // 空字符串是合法值（模板只有一个参数），所以只在未设置时用默认
-      param2: env.TENCENT_SMS_PARAM2,
-      fetchImpl,
-    });
-    mainlandDesc = 'tencent';
+  const closed = (reason, desc, warn) => {
+    mainland = disabledSender(reason);
+    mainlandDesc = desc;
+    if (warn) log.warn?.(`!! [sms] ${warn}，短信通道已关闭`);
+  };
+  // 失败即关闭：生产环境只有 SMS_PROVIDER 未设置或显式 tencent 才会真发短信
+  if (provider === undefined || provider === '' || provider === 'tencent') {
+    if (hasTencent) {
+      mainland = createTencentSender({
+        secretId: env.TENCENT_SMS_SECRET_ID,
+        secretKey: env.TENCENT_SMS_SECRET_KEY,
+        sdkAppId: opt(env.TENCENT_SMS_SDK_APP_ID),
+        signName: opt(env.TENCENT_SMS_SIGN_NAME),
+        templateId: opt(env.TENCENT_SMS_TEMPLATE_ID),
+        region: opt(env.TENCENT_SMS_REGION),
+        // 空字符串是合法值（模板只有一个参数），所以只在未设置时用默认
+        param2: env.TENCENT_SMS_PARAM2,
+        fetchImpl,
+      });
+      mainlandDesc = 'tencent';
+    } else {
+      closed('未配置短信通道（缺 TENCENT_SMS_SECRET_ID / TENCENT_SMS_SECRET_KEY）', 'disabled（未配置腾讯云密钥）');
+    }
+  } else if (provider === 'console') {
+    if (prod) closed('production 禁用 console 短信通道', 'disabled（production 禁用 console）', 'SMS_PROVIDER=console 在 production 下被拒绝');
+    else { mainland = consoleSender(log); mainlandDesc = 'console'; }
+  } else if (provider === 'disabled') {
+    closed('短信已关闭（SMS_PROVIDER=disabled）', 'disabled');
   } else {
-    mainland = disabledSender('未配置短信通道（缺 TENCENT_SMS_SECRET_ID / TENCENT_SMS_SECRET_KEY）');
-    mainlandDesc = 'disabled（未配置腾讯云密钥）';
+    closed('SMS_PROVIDER 取值无法识别', 'disabled（SMS_PROVIDER 取值无法识别）', 'SMS_PROVIDER 取值无法识别（应为 tencent / console / disabled）');
   }
 
   const twilioOk = !!(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_VERIFY_SERVICE_SID);

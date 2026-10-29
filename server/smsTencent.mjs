@@ -3,6 +3,7 @@
  * 密钥只由调用方从环境变量传入；任何错误文本都不带密钥。
  */
 import crypto from 'node:crypto';
+import { maskPhone } from './phone.mjs';
 
 const sha256Hex = (s) => crypto.createHash('sha256').update(s, 'utf8').digest('hex');
 const hmac = (key, msg) => crypto.createHmac('sha256', key).update(msg, 'utf8').digest();
@@ -39,14 +40,17 @@ export function createTencentSender({
   secretId, secretKey, sdkAppId = '1400683809', signName = '上海磊宁科技有限公司', templateId = '1417875',
   region = 'ap-guangzhou', param2 = '5', fetchImpl = fetch, nowSec = () => Math.floor(Date.now() / 1000), timeoutMs = 8000,
 }) {
-  const clean = (t) => {
+  const cleanWith = (e164) => (t) => {
     let s = String(t);
     for (const secret of [secretKey, secretId]) if (secret) s = s.split(secret).join('***');
+    // 纵深防御：外部错误文本可能回显完整号码
+    for (const n of [e164, String(e164).replace(/^\+/, '')]) if (n) s = s.split(n).join(maskPhone(e164));
     return s.slice(0, 200);
   };
   return {
     id: 'tencent',
     async send(e164, code) {
+      const clean = cleanWith(e164);
       const payload = JSON.stringify({
         PhoneNumberSet: [e164], SmsSdkAppId: sdkAppId, SignName: signName, TemplateId: templateId,
         TemplateParamSet: param2 === '' ? [code] : [code, param2],
@@ -56,8 +60,10 @@ export function createTencentSender({
         region, timestamp: nowSec(), payload,
       });
       let data;
+      let httpStatus = '?';
       try {
         const res = await fetchImpl(`https://${HOST}/`, { method: 'POST', headers, body: payload, signal: AbortSignal.timeout(timeoutMs) });
+        httpStatus = res.status;
         data = await res.json();
       } catch (e) {
         const timedOut = e?.name === 'TimeoutError' || e?.name === 'AbortError';
@@ -66,7 +72,7 @@ export function createTencentSender({
       const r = data?.Response;
       if (r?.Error) return { ok: false, error: clean(`${r.Error.Code ?? 'Error'}: ${r.Error.Message ?? ''}`) };
       const st = r?.SendStatusSet?.[0];
-      if (!st) return { ok: false, error: 'tencent: 响应缺少 SendStatusSet' };
+      if (!st) return { ok: false, error: `tencent: HTTP ${httpStatus} 响应缺少 SendStatusSet` };
       if (st.Code !== 'Ok') return { ok: false, error: clean(`${st.Code}: ${st.Message ?? ''}`) };
       return { ok: true, providerId: st.SerialNo ?? r.RequestId };
     },

@@ -27,8 +27,8 @@ test('tc3Sign：与按官方步骤手算的期望值一致（时间戳跨 UTC �
   assert.equal(headers['Content-Type'], 'application/json; charset=utf-8');
   assert.equal(headers.Host, 'sms.tencentcloudapi.com');
   assert.equal(headers['X-TC-Timestamp'], '1551139199');
-  // 防回归：签名值本身固定，实现被改动会立刻发现
-  assert.match(sig, /^[0-9a-f]{64}$/);
+  // 防回归：钉死签名字面量（与上面手算一致），实现被改动会立刻发现
+  assert.equal(sig, 'c0160a81ae3ca32837560e999d7c4b089c54d44479874c9c5b7517768df5e45d');
   assert.notEqual(tc3Sign({ ...input, timestamp: 1551139200 }).Authorization, headers.Authorization);
 });
 
@@ -89,4 +89,12 @@ test('错误信息里不带密钥', async () => {
   const r2 = await createTencentSender({ secretId: 'AKIDabc', secretKey: SECRET,
     fetchImpl: async () => okResp({ Response: { Error: { Code: 'X', Message: `echo ${SECRET}` } } }) }).send('+8613800138000', '1');
   for (const r of [r1, r2]) { assert.equal(r.ok, false); assert.ok(!r.error.includes(SECRET)); assert.ok(!r.error.includes('AKIDabc')); }
+});
+
+test('错误信息里手机号被脱敏；缺 SendStatusSet 带 HTTP 状态', async () => {
+  const r = await sender(okResp({ Response: { Error: { Code: 'X', Message: 'bad +8613800138000 / 8613800138000' } } })).send('+8613800138000', '1');
+  assert.ok(!r.error.includes('13800138000'));
+  assert.ok(r.error.includes('138****8000'));
+  const r2 = await sender(okResp({ Response: { RequestId: 'r' } })).send('+8613800138000', '1');
+  assert.match(r2.error, /HTTP 200/);
 });
