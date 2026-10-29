@@ -9,7 +9,8 @@ import {
 import { openLedger } from '../server/db.mjs';
 import { captureRows, insertBets, settleBets, ledgerRows } from '../server/ledger.mjs';
 import { qualityOk, STRATEGIES } from '../server/betStrategies.mjs';
-import { FORWARD_PRIMARY, FORWARD_SECONDARY, SELECTABLE } from '../server/betSplits.mjs';
+import { FORWARD_PRIMARY, FORWARD_SECONDARY, SELECTABLE, splitOf, selectionRecord } from '../server/betSplits.mjs';
+import { buildCandidates } from '../server/betBacktest.mjs';
 import { MODEL_VERSION_REPLAY } from '../server/walkForward.mjs';
 
 // ---------------------------------------------------------------------------
@@ -20,10 +21,15 @@ const g = (gameId, season, date, pHome, homeWin, books) => ({
   gameId, date, season, homeId: 1, awayId: 2, homeWin, actual: homeWin ? 5 : -5, void: false,
   b2bHome: false, b2bAway: false, teamGp: 20, pHome, paramsVersion: `wf-${season}`, modelVersion: 'replay-elo-wf', books,
 });
-const tinyReport = {
-  version: 1,
-  selected: { close: 'B-edge3', open: null },
-  games: [
+/** 报告夹具：selection 按报告生成器同一函数算出选择期各策略结果；选定策略由夹具手写（与 selected 一致） */
+function makeReport(games, selected) {
+  const selection = Object.fromEntries(Object.keys(selected).map((sc) => {
+    const { candidates } = buildCandidates(games, { scenario: sc, splitOf: (x) => splitOf(sc, x) });
+    return [sc, { ...selectionRecord(candidates, sc), selected: selected[sc] }];
+  }));
+  return { version: 1, selected, selection, games };
+}
+const tinyReport = makeReport([
     g('V1', '2023-24', '2023-11-01', 0.62, true, dk([-110, -110])),
     g('V2', '2023-24', '2023-11-02', 0.30, true, dk([-150, 130])),
     g('R1', '2022-23', '2022-11-01', 0.62, true, dk([-110, -110])),
@@ -32,8 +38,7 @@ const tinyReport = {
     g('T2', '2025-26', '2025-11-02', 0.30, false, dk([-150, 130])),
     g('T3', '2025-26', '2025-11-03', 0.55, true, {}),
     g('T4', '2025-26', '2025-11-03', 0.50, true, dk([-105, -115])),
-  ],
-};
+], { close: 'B-edge3', open: null });
 const codes = (v) => v.warnings.map((w) => w.code);
 
 test('常量：情景与滑点选项', () => {
@@ -131,7 +136,7 @@ test('开盘情景：不带收盘价警告；选定为 null 时结论为「无�
 });
 
 test('closeBest：收盘未选出策略 → noStrategy（M6）', () => {
-  const rep = { ...tinyReport, selected: { close: null, open: null } };
+  const rep = makeReport(tinyReport.games, { close: null, open: null });
   const v = moneylineView(rep, validateFilters({ scenario: 'closeBest' }, rep));
   assert.equal(v.strategy, null);
   assert.equal(v.verdict.code, 'srv.ml.verdict.test.noStrategy');
@@ -353,6 +358,8 @@ test('报告缺失或缺该情景的选择结果：抛 err.labDataMissing，不�
   missing({ games: tinyReport.games, selected: { open: 'B-edge3' } });    // 缺 close 键
   missing({ games: tinyReport.games, selected: { close: 'B-edge3' } }, { scenario: 'open' });
   missing({ selected: { close: 'B-edge3' } });                            // 没有 games
+  missing({ games: tinyReport.games, selected: tinyReport.selected });    // 没有存档的选择记录
+  missing({ ...tinyReport, selected: { close: 'B-edge5', open: null } }); // 选择记录与 selected 不一致 → 报告损坏
   // 键存在且为 null = 真的没有策略合格 → noStrategy
   const v = moneylineView({ ...tinyReport, selected: { close: 'B-edge3', open: null } }, validateFilters({ scenario: 'open' }, tinyReport));
   assert.equal(v.verdict.code, 'srv.ml.verdict.test.noStrategy');
@@ -413,4 +420,13 @@ test('前向赛季：只取目标赛季的账本行，换季后旧季行不并�
   assert.equal(off.verdict, null);
   assert.throws(() => forwardCandidates(rows), /前向赛季/);
   assert.throws(() => forwardCandidates(rows, { season: '2027' }), /前向赛季/);
+});
+
+test('多重比较取自报告存档的选择记录，不在请求里重算（m2）', () => {
+  const stored = tinyReport.selection.close;
+  const tampered = { ...tinyReport, selection: { ...tinyReport.selection, close: { ...stored, rows: stored.rows.map((r) => ({ ...r, bets: 999, roi: 0.5 })) } } };
+  const mc = moneylineView(tampered, validateFilters({}, tampered)).multipleComparisons;
+  assert.ok(mc.rows.every((r) => r.bets === 999 && r.roi === 0.5));
+  assert.deepEqual(mc.results['B-edge3'], { bets: 999, roi: 0.5 });
+  assert.equal(mc.selected, 'B-edge3');
 });

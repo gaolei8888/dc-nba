@@ -10,7 +10,7 @@ import { compactBooks } from './priceSelect.mjs';
 import { buildCandidates, runBacktest, DEFAULT_COSTS } from './betBacktest.mjs';
 import { STRATEGIES } from './betStrategies.mjs';
 import {
-  SPLITS, SELECTABLE, MIN_SELECT_BETS, splitOf, selectForScenario, multipleComparisons,
+  SPLITS, MIN_SELECT_BETS, splitOf, selectionRecord,
 } from './betSplits.mjs';
 import { blockBootstrap } from './betStats.mjs';
 import { moneylineView, validateFilters, SLIPPAGE_OPTIONS } from './moneylineView.mjs';
@@ -56,18 +56,12 @@ export function buildMoneylineReport({ dataset, books, inputsSha }) {
   const selected = {}; const selection = {}; const cand = {};
   for (const scenario of REPORT_SCENARIOS) {
     cand[scenario] = buildCandidates(games, { scenario, splitOf: (s) => splitOf(scenario, s) });
-    const sel = selectForScenario(cand[scenario].candidates, scenario, { minBets: MIN_SELECT_BETS });
-    selected[scenario] = sel.selected;
-    const rows = SELECTABLE.map((id) => ({ id, split: sel.selectOn, bets: sel.results[id].bets, roi: sel.results[id].roi }));
-    const mc = multipleComparisons(rows, { selectSplit: sel.selectOn });
-    selection[scenario] = {
-      selectOn: sel.selectOn, seasons: sel.seasons, minBets: MIN_SELECT_BETS, selected: sel.selected,
-      tried: mc.tried, bonferroniAlpha: mc.bonferroniAlpha, rows: mc.rows,
-    };
+    selection[scenario] = selectionRecord(cand[scenario].candidates, scenario, { minBets: MIN_SELECT_BETS });
+    selected[scenario] = selection[scenario].selected;
   }
 
   // 视图消费的就是这份报告：headline 直接取视图的默认口径（测试期、选定策略、默认成本、chain 价）
-  const core = { games, selected };
+  const core = { games, selected, selection };
   const headline = {};
   for (const scenario of REPORT_SCENARIOS) {
     const v = moneylineView(core, validateFilters({ scenario }, core));

@@ -111,6 +111,20 @@ export function selectForScenario(candidates, scenario, { minBets = MIN_SELECT_B
 }
 
 /**
+ * 报告里存档的选择记录（data.selection[scenario]）：选择期各 SELECTABLE 策略的注数与 ROI、选定策略、
+ * 比较数与 Bonferroni α。报告生成时算一次，视图只读这份记录，不在请求里重算（最终审阅 m2）。
+ */
+export function selectionRecord(candidates, scenario, { minBets = MIN_SELECT_BETS, costs = DEFAULT_COSTS } = {}) {
+  const sel = selectForScenario(candidates, scenario, { minBets, costs });
+  const rows = SELECTABLE.map((id) => ({ id, split: sel.selectOn, bets: sel.results[id].bets, roi: sel.results[id].roi }));
+  const mc = multipleComparisons(rows, { selectSplit: sel.selectOn });
+  return {
+    selectOn: sel.selectOn, seasons: sel.seasons, minBets, selected: sel.selected,
+    tried: mc.tried, bonferroniAlpha: mc.bonferroniAlpha, rows: mc.rows,
+  };
+}
+
+/**
  * 多重比较清单（裁定 M9）：tried = 选择期内比较过的不同策略配置数（按 id 去重），
  * 不是策略 × 切分的行数；测试期 / 其他切分的行照样列在 rows 里（inSelection 标注），但不计数。
  * selectSplit 缺省时，除 'test' 以外的行都视为选择阶段。tried 为 0（未做选择）时 α 不校正。

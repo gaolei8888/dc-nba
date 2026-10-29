@@ -13,7 +13,7 @@ server/walkForward.mjs  walkForward()   每个测试季只用此前赛季拟合 
         │
         ▼                         data/history/books_<季>.json（多家公司的 open / close / current 钱线）
 server/moneylineReport.mjs  gameOf()  ◄── compactBooks()（server/priceSelect.mjs：只留美国公司、统一主客方向）
-        │  buildCandidates()（selectPrice 选价）→ selectForScenario()（只在选择期选策略）
+        │  buildCandidates()（selectPrice 选价）→ selectionRecord()（只在选择期选策略，结果存进报告的 selection）
         ▼
 scripts/moneyline-backtest.mjs  →  data/moneyline-backtest.json（原子写：先写 .tmp 再 rename）
         │                           npm run ml:backtest；纯离线，fetch 被封死
@@ -121,6 +121,7 @@ paper_bets（本季前向账本，只读）→ forwardCandidates()（主线程�
 - 选择只看选择期，测试期候选在跑回测前就被丢弃。参选的只有固定金额策略 `SELECTABLE = B-edge2/3/5/7/10、C-ev`（A 是对照，D 只比资金管理）。
 - 规则：选择期 ROI 最高且投注数 ≥ `MIN_SELECT_BETS = 100`；并列取靠前者；没有策略达标则 `selected = null`，结论为「无证据」（原因：没有策略合格，裁定 M6、M18）。ROI 最高的规则容易偏向样本稀少的高阈值规则，所以报告同时列出全部候选策略的结果表。
 - closeBest 不单独选择，沿用 close 的选择（M6）。
+- 选择只在生成报告时算一次，存进 `selection[情景]`（各策略注数 / ROI、选定策略、比较数、Bonferroni α）。页面的多重比较表直接读它，不在请求里重算；它与 `selected` 不一致时视为报告损坏，返回 `err.labDataMissing`。
 - 前向账本：`FORWARD_PRIMARY = 'ledger-edge3'`——账本自己预注册的 edge3 规则，按记录原样（是否下注、方向、价格），是主结果（M3）；`FORWARD_SECONDARY = 'B-edge3'`——按盈亏平衡重算，只作次要结果、单独标注。预注册规则不能事后重新定义。早规则取 edge0 行的价格与概率；晚规则（`edge3-late`）未作为筛选项暴露。
 
 ## 9. 结论规则（预先写定）

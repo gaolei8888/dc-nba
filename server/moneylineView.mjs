@@ -12,10 +12,12 @@
 //     唯一例外是 close 没选出策略 → 仍给 noStrategy 结论（M6）。
 //   - 报告缺失或缺该情景的选择结果 → 抛 err.labDataMissing，不冒充「没有策略合格」。
 //   - 多重比较只列该情景选择期的可选策略（SELECTABLE），并附完整结果表与选定策略。
+//     直接读报告存档的 data.selection（报告生成时算一次），不在请求里重算；它与 data.selected 不一致 → 视为报告损坏，
+//     同样抛 err.labDataMissing（最终审阅 m2：只留一个数据来源）。
 import { buildCandidates, runBacktest, summarizeLedger, outcomeFor, DEFAULT_COSTS } from './betBacktest.mjs';
 import { STRATEGIES } from './betStrategies.mjs';
 import {
-  SPLITS, SELECTABLE, FORWARD_PRIMARY, splitOf, selectionScenario, selectForScenario, multipleComparisons,
+  SPLITS, SELECTABLE, FORWARD_PRIMARY, splitOf, selectionScenario, multipleComparisons,
 } from './betSplits.mjs';
 import { blockBootstrap, bucketRoi, calibrationVsMarket, powerAnalysis, betsNeeded, mlVerdict, MIN_BETS } from './betStats.mjs';
 import { isValidAmerican, americanToDecimal, worsenAmerican, devigPair, edgeOf, evPerUnit } from './oddsMath.mjs';
@@ -255,13 +257,11 @@ function powerOf(ledger) {
   return { sd: pa.sd, deff: pa.deff, needed: pa.betsNeeded, neededAt: { '0.01': at(0.01), '0.02': at(0.02), '0.03': at(0.03) } };
 }
 
-/** 历史情景：选择期的多重比较（只用 SELECTABLE、按 chain 价、默认成本、不受当前筛选影响） */
-function selectionComparisons(data, scenario, selected) {
-  const selScen = selectionScenario(scenario);
-  const { candidates } = buildCandidates(data?.games ?? [], { scenario: selScen, splitOf: (s) => splitOf(selScen, s) });
-  const sel = selectForScenario(candidates, selScen);
-  const rows = SELECTABLE.map((id) => ({ id, split: sel.selectOn, bets: sel.results[id].bets, roi: sel.results[id].roi }));
-  return { ...multipleComparisons(rows, { selectSplit: sel.selectOn }), selectOn: sel.selectOn, seasons: sel.seasons, results: sel.results, selected };
+/** 历史情景：选择期的多重比较，取自报告存档的选择记录（只用 SELECTABLE、chain 价、默认成本、不受当前筛选影响） */
+function selectionComparisons(record, selected) {
+  const rows = record.rows.map(({ id, split, bets, roi }) => ({ id, split, bets, roi }));
+  const results = Object.fromEntries(rows.map(({ id, bets, roi }) => [id, { bets, roi }]));
+  return { ...multipleComparisons(rows, { selectSplit: record.selectOn }), selectOn: record.selectOn, seasons: record.seasons, results, selected };
 }
 
 /**
@@ -275,6 +275,10 @@ export function moneylineView(data, filters, { forward } = {}) {
     const selScen = selectionScenario(filters.scenario);
     if (!data || !Array.isArray(data.games) || !data.selected || !Object.hasOwn(data.selected, selScen)) {
       throw codedError('err.labDataMissing', `独赢盘回测数据缺失或缺少 ${selScen} 的选择结果`, { scenario: filters.scenario });
+    }
+    const record = data.selection?.[selScen];
+    if (!record || !Array.isArray(record.rows) || record.selected !== data.selected[selScen]) {
+      throw codedError('err.labDataMissing', `独赢盘回测报告缺少 ${selScen} 的选择记录，或与 selected 不一致`, { scenario: filters.scenario });
     }
   }
   const costs = { ...DEFAULT_COSTS, feeOnWin: filters.feeOnWin, slippagePts: filters.slippagePts };
@@ -321,7 +325,7 @@ export function moneylineView(data, filters, { forward } = {}) {
   const selected = isForward ? FORWARD_PRIMARY : data.selected[selectionScenario(filters.scenario)];
   const mc = isForward
     ? { ...multipleComparisons([], { selectSplit: null }), selectOn: null, seasons: [], results: {}, selected }
-    : selectionComparisons(data, filters.scenario, selected);
+    : selectionComparisons(data.selection[selectionScenario(filters.scenario)], selected);
 
   // 5. 标签与警告
   const seasons = seasonsInView(filters);

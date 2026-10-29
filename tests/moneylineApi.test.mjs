@@ -163,7 +163,10 @@ test('接口：报告文件重建后（mtime 变）主线程与 worker 都读新
   let v = await (await s.post('/api/lab/moneyline', {})).json();
   assert.equal(v.strategy, report.selected.close);
 
-  fs.writeFileSync(p, JSON.stringify({ ...report, builtAt: 'v2', selected: { ...report.selected, close: other } }));
+  fs.writeFileSync(p, JSON.stringify({
+    ...report, builtAt: 'v2', selected: { ...report.selected, close: other },
+    selection: { ...report.selection, close: { ...report.selection.close, selected: other } },
+  }));
   fs.utimesSync(p, new Date(2_000_000), new Date(2_000_000));
   meta = await (await s.get('/api/lab/moneyline/meta')).json();
   assert.equal(meta.builtAt, 'v2');

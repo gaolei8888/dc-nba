@@ -23,7 +23,7 @@
 | C5 | `node scripts/replay-snapshot.mjs`；`node scripts/ats-audit.mjs` | 重放快照；49.1% 复核（与 `docs/ats-491-audit-output.txt` 逐行比对，无差异） |
 | C6 | 只读统计 `data/history/odds_<季>.json` 的字段与 provider | 大小分数据现状 |
 
-引擎改为「固定金额策略恒定 1 单位」（见「全部策略结果表」末尾）后重跑 C1：与改动前相比，只有 `selection` 里选择期各策略的注数与 ROI 变了（另有时间戳 `builtAt`）；`selected`、`headline`、`slippage`、`perBook`、`fits`、`integrity`、`games` 逐字节一致。C2–C4、C6 是本次写的只读临时脚本，没有提交；
+引擎改为「固定金额策略恒定 1 单位」（见「全部策略结果表」末尾）后重跑 C1：与改动前相比，只有 `selection` 里选择期各策略的注数与 ROI 变了（另有时间戳 `builtAt`）；`selected`、`headline`、`slippage`、`perBook`、`fits`、`integrity`、`games` 逐字节一致。`inputs.splits.forward` 不再写死赛季（为空；前向赛季在运行时取应用的目标赛季）。C2–C4、C6 是本次写的只读临时脚本，没有提交；
 C2 的数字都可以从页面或接口以同样的筛选取到。
 
 ## 六个问题
