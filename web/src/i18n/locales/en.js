@@ -114,6 +114,13 @@ export default {
       target: { rookie: 'the minutes-weighted SPM mean of last season\'s rookies', population: 'the mean of players with an IMP last season', fringe: 'the SPM mean of last season\'s 10–15 minute players' },
       insufficient: 'Not enough roster data to estimate this team',
     },
+    ml: {
+      verdict: {
+        evidence: 'Test period: {bets} bets, ROI {roi, pct1} (95% CI [{lo, pct1}, {hi, pct1}]): evidence the model beats the market — still needs the live ledger to confirm',
+        noEvidence: 'Test period: {bets} bets, ROI {roi, pct1} (95% CI [{lo, pct1}, {hi, pct1}]): No evidence the model beats the market',
+        tooFew: 'Only {bets} bets, below the {min}-bet threshold: No evidence the model beats the market',
+      },
+    },
   },
   teams: {
     title: 'Teams',
