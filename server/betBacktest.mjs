@@ -3,9 +3,11 @@
 //
 // 规则（spec 二、三；plan Task 8；裁定 M10）：
 //   - 候选按 date、gameId 排序后逐日处理；每场至多一注，故流水顺序即 (date, gameId, side)。
-//   - 按日初资金定注：同一比赛日各注都用当日开始时的 bankroll。
-//   - 单注先过 maxStake；再做同日敞口：当日下注总额 ≤ 日初资金，超过则按比例缩减（标 exposureScaled）。
-//   - 资金 ≤ 0 后不再下注（不允许杠杆），跳过数记入 notes.skippedNoBankroll。
+//   - 固定金额策略（A/B/C）每注恒为 1 单位（仍受 maxStake 约束），不受资金约束：资金曲线可以为负，
+//     它只是累计盈亏的记账，便于和 Kelly 并排看。spec 比较的是固定金额下的 ROI，资金截断会扭曲这一比较（最终审阅 I1）。
+//   - Kelly（D）按日初资金定注：同一比赛日各注都用当日开始时的 bankroll。
+//   - 单注先过 maxStake；Kelly 再做同日敞口（M10）：当日下注总额 ≤ 日初资金，超过则按比例缩减（标 exposureScaled）。
+//   - Kelly 资金 ≤ 0 后不再下注（不允许杠杆），跳过数记入 notes.skippedNoBankroll。
 //   - 决策（选边、edge、EV、Kelly）用报价 quoted；结算用滑点后的 american；收益一律按实际价，去水只用于 CLV。
 //   - 作废注（含非法报价）不计入 staked 与 ROI 分母；非法报价作废（invalid_price）在汇总里单列。
 //   - 比分相等是数据错误（NBA 无平局）→ 作废，reason 'tie_score'；比分方向与 homeWin 矛盾 → 作废，reason 'score_mismatch'。
@@ -93,6 +95,8 @@ export function runBacktest(candidates, strategy, { costs = DEFAULT_COSTS, bankr
   const ledger = [];
   const notes = { scaledDays: 0, skippedNoBankroll: 0 };
   let bankroll = bankroll0;
+  // 只有 Kelly 受资金约束（耗尽即停、同日敞口缩减）；固定金额策略恒定 1 单位
+  const bankrollBound = strategy.family === 'D';
 
   for (const day of days) {
     const start = bankroll;   // 日初资金
@@ -101,7 +105,7 @@ export function runBacktest(candidates, strategy, { costs = DEFAULT_COSTS, bankr
     for (const c of day.items) {
       const pick = pickBet(c, strategy);
       if (!pick) continue;
-      if (!(start > BANKROLL_EPS)) { notes.skippedNoBankroll += 1; continue; }
+      if (bankrollBound && !(start > BANKROLL_EPS)) { notes.skippedNoBankroll += 1; continue; }
       const quoted = sideMl(c, pick.side);
       const pModel = sideP(c, pick.side);
       let stake = isValidAmerican(quoted) ? stakeFor(strategy, { p: pModel, american: quoted, bankroll: start }) : 1;
@@ -110,7 +114,7 @@ export function runBacktest(candidates, strategy, { costs = DEFAULT_COSTS, bankr
       planned.push({ c, pick, quoted, pModel, stake });
     }
     const total = planned.reduce((s, x) => s + x.stake, 0);
-    const scale = total > start ? start / total : 1;
+    const scale = bankrollBound && total > start ? start / total : 1;
     if (scale < 1) notes.scaledDays += 1;
 
     for (const { c, pick, quoted, pModel, stake: raw } of planned) {

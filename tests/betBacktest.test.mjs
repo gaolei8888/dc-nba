@@ -134,27 +134,45 @@ test('maxStake 截住单注', () => {
   assert.equal(ledger[0].profit, 4.5);
 });
 
-test('同日敞口（M10）：当日下注总额超过日初资金时按比例缩减', () => {
-  const day = (gameId, homeWin) => cand({ pHome: 0.45, ml: [150, -170], homeWin, date: '2024-01-10', gameId });
-  const { ledger, summary, notes } = runBacktest([day('A', true), day('B', false), day('C', false)], flat3, { bankroll0: 2 });
-  // 三注各 1，合计 3 > 日初 2 → 各缩为 2/3
-  for (const b of ledger) { near(b.stake, 2 / 3); assert.ok(b.flags.includes('exposureScaled')); }
-  near(ledger.reduce((s, b) => s + b.stake, 0), 2);
-  near(summary.staked, 2);
-  near(summary.profit, (2 / 3) * 1.5 - 4 / 3);
+test('同日敞口（M10）只约束 Kelly：当日下注总额超过日初资金时按比例缩减', () => {
+  // 21 场同日，每场 Kelly 截在 5% × 100 = 5，合计 105 > 日初 100 → 各缩为 100/21
+  const games = Array.from({ length: 21 }, (_, i) => cand({ pHome: 0.5, ml: [150, -170], homeWin: i % 2 === 0, date: '2024-01-10', gameId: `K${String(i).padStart(2, '0')}` }));
+  const { ledger, summary, notes } = runBacktest(games, kellyFull);
+  assert.equal(ledger.length, 21);
+  for (const b of ledger) { near(b.stake, 100 / 21); assert.ok(b.flags.includes('exposureScaled')); }
+  near(summary.staked, 100);
   assert.equal(notes.scaledDays, 1);
   // 不超过时不缩
-  const ok = runBacktest([day('A', true), day('B', false)], flat3, { bankroll0: 2 });
-  assert.deepEqual(ok.ledger.map((b) => b.stake), [1, 1]);
+  const ok = runBacktest(games.slice(0, 20), kellyFull);
+  for (const b of ok.ledger) near(b.stake, 5);
   assert.equal(ok.notes.scaledDays, 0);
 });
 
-test('资金归零后不再下注（不允许杠杆）', () => {
-  const { ledger, notes } = runBacktest([
-    cand({ pHome: 0.45, ml: [150, -170], homeWin: false, date: '2024-01-10', gameId: 'A' }),
-    cand({ pHome: 0.45, ml: [150, -170], homeWin: true, date: '2024-01-11', gameId: 'B' }),
+test('固定金额策略不受资金约束（I1）：日初资金不足、资金耗尽后仍每注 1 单位', () => {
+  const day = (gameId, homeWin, date = '2024-01-10') => cand({ pHome: 0.45, ml: [150, -170], homeWin, date, gameId });
+  // 日初只有 2，同日 3 注：不缩减，各 1
+  const same = runBacktest([day('A', true), day('B', false), day('C', false)], flat3, { bankroll0: 2 });
+  assert.deepEqual(same.ledger.map((b) => b.stake), [1, 1, 1]);
+  assert.ok(same.ledger.every((b) => !b.flags.includes('exposureScaled')));
+  assert.equal(same.notes.scaledDays, 0);
+  // 资金 1：首日输光后次日照常下 1 单位，资金曲线可为负（只是累计盈亏记账）
+  const { ledger, summary, notes } = runBacktest([
+    day('A', false, '2024-01-10'), day('B', false, '2024-01-11'), day('C', true, '2024-01-12'),
   ], flat3, { bankroll0: 1 });
-  assert.deepEqual(ledger.map((b) => [b.gameId, b.bankrollAfter]), [['A', 0]]);
+  assert.deepEqual(ledger.map((b) => [b.gameId, b.stake, b.bankrollAfter]), [['A', 1, 0], ['B', 1, -1], ['C', 1, 0.5]]);
+  assert.equal(notes.skippedNoBankroll, 0);
+  assert.equal(summary.bets, 3);
+  near(summary.roi, -0.5 / 3);
+  // maxStake 仍然生效
+  const capped = runBacktest([day('A', true)], flat3, { costs: { ...DEFAULT_COSTS, maxStake: 0.5 } });
+  assert.equal(capped.ledger[0].stake, 0.5);
+});
+
+test('Kelly 资金耗尽后不再下注（不允许杠杆）', () => {
+  const { ledger, notes } = runBacktest([
+    cand({ pHome: 0.5, ml: [150, -170], homeWin: false, date: '2024-01-10', gameId: 'A' }),
+  ], kellyFull, { bankroll0: 0 });
+  assert.equal(ledger.length, 0);
   assert.equal(notes.skippedNoBankroll, 1);
 });
 
