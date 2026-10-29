@@ -8,7 +8,9 @@
 //     按盈亏平衡重算的 B-edge3 只作次要结果、单独标注（labels.forwardBasis）。
 //   - 正式结论只给两种组合（M5）：历史情景 + 测试期 + 预选策略 + 默认成本 + 不缩日期 / 博彩公司（period 'test'）；
 //     前向 + 账本原样主规则（早规则）+ 默认成本 + 不缩日期（period 'live'）。其余一律 verdict null、exploratory true。
-//   - closeBest 只是敏感性：沿用 close 的选定策略；close 没选出策略 → noStrategy 结论（M6）。
+//   - closeBest 只是敏感性：沿用 close 的选定策略，最优价不进主结论（spec 三.1）→ 不给正式结论（exploratory）；
+//     唯一例外是 close 没选出策略 → 仍给 noStrategy 结论（M6）。
+//   - 报告缺失或缺该情景的选择结果 → 抛 err.labDataMissing，不冒充「没有策略合格」。
 //   - 多重比较只列该情景选择期的可选策略（SELECTABLE），并附完整结果表与选定策略。
 import { DatabaseSync } from 'node:sqlite';
 import { buildCandidates, runBacktest, summarizeLedger, outcomeFor, DEFAULT_COSTS } from './betBacktest.mjs';
@@ -21,6 +23,7 @@ import { isValidAmerican, americanToDecimal, worsenAmerican, devigPair, edgeOf, 
 import { settleBet } from './betSettlement.mjs';
 import { US_BOOKS } from './books.mjs';
 import { PRIMARY_RULE, LATE_RULE } from './ledger.mjs';
+import { MODEL_VERSION_REPLAY } from './walkForward.mjs';
 import { msg, codedError } from './messages.mjs';
 
 export const SCENARIOS = ['close', 'open', 'closeBest', 'forward'];
@@ -146,8 +149,9 @@ export function forwardCandidates(rows, { run = 'early' } = {}) {
   }
   const candidates = [];
   let pending = 0;
+  let unmatched = 0;   // 有记录下的决定行（edge3）却没有价格行（edge0）的场次：不静默丢，计数上报
   for (const { base, logged } of byGame.values()) {
-    if (!base) continue;
+    if (!base) { if (logged) unmatched += 1; continue; }
     if (base.settled_at == null) { pending += 1; continue; }
     const scored = typeof base.home_score === 'number' && typeof base.away_score === 'number';
     candidates.push({
@@ -175,7 +179,7 @@ export function forwardCandidates(rows, { run = 'early' } = {}) {
   }
   const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
   candidates.sort((a, b) => cmp(a.date, b.date) || cmp(a.gameId, b.gameId));
-  return { candidates, pending, run };
+  return { candidates, pending, unmatched, run };
 }
 
 /**
@@ -263,6 +267,13 @@ function selectionComparisons(data, scenario, selected) {
  */
 export function moneylineView(data, filters, { forward } = {}) {
   const isForward = filters.scenario === 'forward';
+  if (!isForward) {
+    // 历史情景需要报告：games 与该情景的选择结果（键必须存在，值可为 null = 没有策略合格）
+    const selScen = selectionScenario(filters.scenario);
+    if (!data || !Array.isArray(data.games) || !data.selected || !Object.hasOwn(data.selected, selScen)) {
+      throw codedError('err.labDataMissing', `独赢盘回测数据缺失或缺少 ${selScen} 的选择结果`, { scenario: filters.scenario });
+    }
+  }
   const costs = { ...DEFAULT_COSTS, feeOnWin: filters.feeOnWin, slippagePts: filters.slippagePts };
   const inRange = (x) => (filters.season == null || x.season === filters.season)
     && (filters.from == null || x.date >= filters.from) && (filters.to == null || x.date <= filters.to);
@@ -272,7 +283,7 @@ export function moneylineView(data, filters, { forward } = {}) {
   if (isForward) {
     const fwd = forward ?? { candidates: [], pending: 0, run: 'early' };
     candidates = fwd.candidates.filter((c) => inRange(c) && (filters.split === 'all' || filters.split === c.split));
-    coverage = { total: candidates.length, priced: candidates.length, missingRate: candidates.length ? 0 : null, missing: {}, pending: fwd.pending };
+    coverage = { total: candidates.length, priced: candidates.length, missingRate: candidates.length ? 0 : null, missing: {}, pending: fwd.pending, unmatched: fwd.unmatched ?? 0 };
   } else {
     const scen = baseScenario(filters.scenario);
     const keep = (season) => {
@@ -281,6 +292,9 @@ export function moneylineView(data, filters, { forward } = {}) {
     };
     const built = buildCandidates((data?.games ?? []).filter(inRange), { scenario: scen, book: filters.book, splitOf: keep });
     candidates = built.candidates;
+    // 历史情景只能是重放模型：候选里混进别的模型版本即视为数据错误（两种模型绝不合并）
+    const other = candidates.find((c) => c.modelVersion !== MODEL_VERSION_REPLAY);
+    if (other) throw new Error(`历史情景混入非重放模型的候选: ${String(other.gameId)} ${String(other.modelVersion)}`);
     const nMissing = Object.values(built.missing).reduce((s, x) => s + x, 0);
     coverage = { total: built.total, priced: built.priced, missingRate: built.total ? nMissing / built.total : null, missing: built.missing };
   }
@@ -301,7 +315,7 @@ export function moneylineView(data, filters, { forward } = {}) {
   const buckets = Object.fromEntries(['odds', 'edge', 'prob', 'homeAway', 'b2b', 'phase'].map((d) => [d, bucketRoi(ledger, d)]));
 
   // 4. 选择与多重比较
-  const selected = isForward ? FORWARD_PRIMARY : (data?.selected?.[selectionScenario(filters.scenario)] ?? null);
+  const selected = isForward ? FORWARD_PRIMARY : data.selected[selectionScenario(filters.scenario)];
   const mc = isForward
     ? { ...multipleComparisons([], { selectSplit: null }), selectOn: null, seasons: [], results: {}, selected }
     : selectionComparisons(data, filters.scenario, selected);
@@ -310,7 +324,7 @@ export function moneylineView(data, filters, { forward } = {}) {
   const seasons = seasonsInView(filters);
   const previouslySeen = !isForward && seasons.some((s) => SPLITS[splitKey(filters.scenario)].previouslySeen.includes(s));
   const labels = {
-    modelVersion: isForward ? 'production-logged' : 'replay-elo-wf',
+    modelVersion: isForward ? 'production-logged' : MODEL_VERSION_REPLAY,
     historical: !isForward,
     previouslySeen,
     priceScenario: filters.scenario,
@@ -324,6 +338,7 @@ export function moneylineView(data, filters, { forward } = {}) {
   if (coverage.missingRate > 0) warnings.push(msg('srv.ml.warn.missingPrices', { rate: coverage.missingRate }));
   const nCurrent = candidates.filter((c) => (c.flags ?? []).includes('currentAsClose')).length;
   if (nCurrent > 0) warnings.push(msg('srv.ml.warn.currentAsClose', { n: nCurrent }));
+  if (coverage.unmatched > 0) warnings.push(msg('srv.ml.warn.forwardUnmatched', { n: coverage.unmatched }));
   if (summary.bets < MIN_BETS) warnings.push(msg('srv.ml.warn.smallSample', { bets: summary.bets, need: MIN_BETS }));
 
   // 6. 结论（只给预先写定的两种组合，M5）
@@ -338,7 +353,7 @@ export function moneylineView(data, filters, { forward } = {}) {
     const canonical = filters.split === 'test' && filters.book === defaultBook && untouched(filters) && filters.strategy === selected;
     if (canonical && selected == null) {
       verdict = msg('srv.ml.verdict.test.noStrategy', { reason: 'noStrategyQualified', bets: 0, min: MIN_BETS });
-    } else if (canonical) {
+    } else if (canonical && filters.scenario !== 'closeBest') {
       verdict = mlVerdict({ period: 'test', roi: summary.roi, bets: summary.bets, ci: ci.day?.roi ?? null });
     }
   }

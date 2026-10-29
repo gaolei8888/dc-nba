@@ -124,6 +124,7 @@ export default {
         smallSample: '只有 {bets} 注，少于结论门槛 {need} 注。',
         bestPrice: '最优价情景：事后从各家挑最好的价，结果偏乐观，只作敏感性参考，不进主结论。',
         inSample: '筛选包含训练期 2022-23：该季参数是样本内拟合的。',
+        forwardUnmatched: '前向账本有 {n} 场只有 edge3 记录、没有同次的 edge0 价格行，未计入。',
       },
       verdict: {
         test: {

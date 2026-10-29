@@ -10,6 +10,7 @@ import { openLedger } from '../server/db.mjs';
 import { captureRows, insertBets, settleBets } from '../server/ledger.mjs';
 import { qualityOk, STRATEGIES } from '../server/betStrategies.mjs';
 import { FORWARD_PRIMARY, FORWARD_SECONDARY, SELECTABLE } from '../server/betSplits.mjs';
+import { MODEL_VERSION_REPLAY } from '../server/walkForward.mjs';
 
 // ---------------------------------------------------------------------------
 // 夹具：验证期 2023-24 两场、测试期 2025-26 四场（其中 1 场无美国公司 → 缺失率 0.25）、训练期 2022-23 一场
@@ -99,8 +100,9 @@ test('缺价警告带缺失率；最优价情景带 bestPrice 警告、沿用收
   assert.ok(codes(b).includes('srv.ml.warn.closingPrice'));
   assert.equal(b.labels.priceScenario, 'closeBest');
   assert.ok(b.bets.every((x) => x.flags.includes('bestPrice')));
-  // 敏感性情景仍按预选策略给测试期结论
-  assert.equal(b.verdict.code, 'srv.ml.verdict.test.tooFew');
+  // 最优价不进主结论（spec 三.1）：沿用预选策略，但不给正式结论
+  assert.equal(b.verdict, null);
+  assert.equal(b.exploratory, true);
 });
 
 test('currentAsClose 警告带场数；含训练期 2022-23 时带 inSample 警告', () => {
@@ -266,7 +268,9 @@ test('前向账本：只取已结算的早规则行，未结算计 pending；概
   const v = moneylineView(tinyReport, validateFilters({ scenario: 'forward' }, tinyReport), { forward: fwd });
   assert.equal(v.strategy, FORWARD_PRIMARY);
   assert.deepEqual([v.labels.historical, v.labels.modelVersion, v.labels.previouslySeen, v.labels.forwardBasis], [false, 'production-logged', false, 'asLogged']);
-  assert.deepEqual(v.coverage, { total: 2, priced: 2, missingRate: 0, missing: {}, pending: 1 });
+  assert.deepEqual(v.coverage, { total: 2, priced: 2, missingRate: 0, missing: {}, pending: 1, unmatched: 0 });
+  assert.equal(fwd.unmatched, 0);
+  assert.ok(!codes(v).includes('srv.ml.warn.forwardUnmatched'));
   assert.deepEqual(v.bets.map((b) => [b.gameId, b.side, b.quoted, b.result, b.strategy]),
     [['F1', 'home', -110, 'win', FORWARD_PRIMARY], ['F2', 'away', 130, 'loss', FORWARD_PRIMARY]]);
   // 0 成本时盈亏与账本记下的 profit 完全一致
@@ -335,4 +339,40 @@ test('前向：日期筛选与切分筛选作用在账本上；无账本数据�
   assert.equal(empty.summary.bets, 0);
   assert.equal(empty.coverage.pending, 0);
   assert.equal(empty.verdict.code, 'srv.ml.verdict.live.tooFew');
+});
+
+test('报告缺失或缺该情景的选择结果：抛 err.labDataMissing，不冒充「没有策略合格」', () => {
+  const missing = (data, body = {}) => assert.throws(() => moneylineView(data, validateFilters(body, data)),
+    (e) => e.code === 'err.labDataMissing', JSON.stringify(body));
+  missing(null);
+  missing(null, { scenario: 'closeBest' });
+  missing({ games: tinyReport.games });                                   // 没有 selected
+  missing({ games: tinyReport.games, selected: { open: 'B-edge3' } });    // 缺 close 键
+  missing({ games: tinyReport.games, selected: { close: 'B-edge3' } }, { scenario: 'open' });
+  missing({ selected: { close: 'B-edge3' } });                            // 没有 games
+  // 键存在且为 null = 真的没有策略合格 → noStrategy
+  const v = moneylineView({ ...tinyReport, selected: { close: 'B-edge3', open: null } }, validateFilters({ scenario: 'open' }, tinyReport));
+  assert.equal(v.verdict.code, 'srv.ml.verdict.test.noStrategy');
+  // 前向不需要报告
+  assert.equal(moneylineView(null, validateFilters({ scenario: 'forward' }, null)).verdict.code, 'srv.ml.verdict.live.tooFew');
+});
+
+test('历史情景：标签取重放模型常量；候选混入别的模型版本即报错', () => {
+  const v = moneylineView(tinyReport, validateFilters({}, tinyReport));
+  assert.equal(v.labels.modelVersion, MODEL_VERSION_REPLAY);
+  const rep = { ...tinyReport, games: tinyReport.games.map((x) => (x.gameId === 'T2' ? { ...x, modelVersion: 'production-logged' } : x)) };
+  assert.throws(() => moneylineView(rep, validateFilters({}, rep)), /非重放模型.*T2/);
+});
+
+test('前向：有 edge3 行却无 edge0 行的场次计数并警告，不静默丢弃', () => {
+  const dbPath = tmpLedger();
+  const db = openLedger(dbPath);
+  const orphan = captureRows([{ ...slate[0], gameId: 'F9' }], { now: NOW }).filter((r) => r.rule === 'edge3');
+  assert.equal(insertBets(db, orphan), 1);
+  db.close();
+  const fwd = forwardCandidates(readLedgerRows(dbPath));
+  assert.deepEqual([fwd.candidates.length, fwd.pending, fwd.unmatched], [2, 1, 1]);
+  const v = moneylineView(null, validateFilters({ scenario: 'forward' }, null), { forward: fwd });
+  assert.equal(v.coverage.unmatched, 1);
+  assert.deepEqual(v.warnings.find((w) => w.code === 'srv.ml.warn.forwardUnmatched').params, { n: 1 });
 });

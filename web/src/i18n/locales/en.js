@@ -124,6 +124,7 @@ export default {
         smallSample: 'Only {bets} bets, below the {need}-bet threshold for a conclusion.',
         bestPrice: 'Best-price scenario: the best price across books is picked after the fact. Results are biased upward; sensitivity check only, not part of the main conclusion.',
         inSample: 'The filter includes the 2022-23 training period, whose parameters were fit in-sample.',
+        forwardUnmatched: '{n} live-ledger games have an edge3 record but no matching edge0 price row and are left out.',
       },
       verdict: {
         test: {
