@@ -33,7 +33,19 @@ export function newRows(side, mode, values, cfg = {}) {
   });
 }
 
-export function minutesLab({ dataset, teams, players, stints, injDir, allSeasons, P = { homeAdv: 1.6, restWeight: 1.8 } }) {
+/**
+ * 可选参数（默认值保持原行为，线上与旧回测不受影响）：
+ *   roster   'legacy'（默认）| 'strict'。legacy 的候选名单含赛后信息：本场实际上场的人、按未来出场推的转会窗口（提前 5 场入列 /
+ *            按最后一场出列）。strict 只用本场日期之前的出场：开季沿用（上季最后效力该队、本季首次出场也为该队）+
+ *            本季最近一次为该队出场的人（第一次出场的下一场起入列，为别队出场后出列）；再要求在该队近 10 场上过场、
+ *            或在本场赛前报告上、或该队本季已赛 < 10 场。不把本场实际上场的人加进候选。
+ *            见 docs/superpowers/specs/2026-10-29-roster-results-fix-prereg.md。
+ *   reportOk (name, { date, ofGame, report }) => boolean：报告链上每份候选报告的额外核对（如标注时间早于决策时点与开赛），
+ *            返回 false 的报告视同不可用、往链的下一份找；默认 null 不核对。
+ */
+export function minutesLab({ dataset, teams, players, stints, injDir, allSeasons, P = { homeAdv: 1.6, restWeight: 1.8 },
+  roster = 'legacy', reportOk = null }) {
+  if (!['legacy', 'strict'].includes(roster)) throw new Error(`未知 roster=${roster}`);
   const prevOf = (s) => allSeasons[allSeasons.indexOf(s) - 1];
   const fullOf = new Map(teams.map((t) => [t.teamId, t.full]));
   const abbrOf = new Map(teams.map((t) => [t.teamId, t.abbr]));
@@ -58,7 +70,8 @@ export function minutesLab({ dataset, teams, players, stints, injDir, allSeasons
     const chain = [picks[`${date}|22`], picks[`${prevDay(date)}|0630`]];
     matchStats.teamGames += 1;
     const name = chain.find((n) => n && ofGame(report(n)).length
-      && !report(n).notSubmitted.some((x) => x.gameDate === date && x.team === fullOf.get(teamId)));
+      && !report(n).notSubmitted.some((x) => x.gameDate === date && x.team === fullOf.get(teamId))
+      && (!reportOk || reportOk(n, { date, ofGame, report })));
     if (!name) return null;
     matchStats.withReport += 1;
     const st = new Map();
@@ -112,6 +125,19 @@ export function minutesLab({ dataset, teams, players, stints, injDir, allSeasons
       }
     }
     const curN = new Map(); const curMin = new Map(); const played = new Map(); const lastPlayed = new Map();
+    // strict：开季沿用（上季最后效力该队、本季首次出场也为该队）与「此前最近一次为谁出场」、各队近 10 场的出场名单
+    const carryTeam = new Map();
+    for (const [pid, a] of apps) if (prevTeam.get(pid) === a[0].t) carryTeam.set(pid, a[0].t);
+    const lastTeamNow = new Map(); const teamRecent = new Map();
+    const strictCand = (date, t, T, opp) => {
+      const broad = new Set();
+      for (const [pid, team] of lastTeamNow) if (team === t) broad.add(pid);
+      for (const [pid, team] of carryTeam) if (team === t && !lastTeamNow.has(pid)) broad.add(pid);
+      const status = statusesFor(date, t, opp, broad);
+      const recent = new Set((teamRecent.get(t) ?? []).slice(-10).flatMap((x) => [...x]));
+      const cand = new Set([...broad].filter((pid) => T < 10 || recent.has(pid) || status?.has(pid)));
+      return { cand, status };
+    };
     const out = [];
     for (const g of games) {
       const st = stints[s].games[g.gameId];
@@ -124,9 +150,14 @@ export function minutesLab({ dataset, teams, players, stints, injDir, allSeasons
           const k = gameTeamIdx.get(`${g.gameId}|${t}`);
           const actual = mins.get(t);
           const tot = [...actual.values()].reduce((a, v) => a + v, 0);
-          const cand = new Set((tenure.get(t) ?? []).filter((x) => x.start <= k && k <= x.end).map((x) => x.pid));
-          for (const pid of actual.keys()) cand.add(pid);
-          const status = statusesFor(g.date, t, opp, cand);
+          let cand; let status;
+          if (roster === 'strict') {
+            ({ cand, status } = strictCand(g.date, t, played.get(t) ?? 0, opp));
+          } else {
+            cand = new Set((tenure.get(t) ?? []).filter((x) => x.start <= k && k <= x.end).map((x) => x.pid));
+            for (const pid of actual.keys()) cand.add(pid);
+            status = statusesFor(g.date, t, opp, cand);
+          }
           const rows = [...cand].map((pid) => ({
             pid, priorMpg: priorMpg(pid), n: curN.get(pid) ?? 0,
             curMpg: curN.get(pid) ? curMin.get(pid) / curN.get(pid) : null,
@@ -141,6 +172,11 @@ export function minutesLab({ dataset, teams, players, stints, injDir, allSeasons
           home: side(g.home.teamId, g.away.teamId), away: side(g.away.teamId, g.home.teamId),
         });
         for (const [, m] of mins) for (const [pid, v] of m) { curN.set(pid, (curN.get(pid) ?? 0) + 1); curMin.set(pid, (curMin.get(pid) ?? 0) + v); }
+        for (const [t, m] of mins) {
+          for (const pid of m.keys()) lastTeamNow.set(pid, t);
+          if (!teamRecent.has(t)) teamRecent.set(t, []);
+          teamRecent.get(t).push(new Set(m.keys()));
+        }
       }
       for (const id of [g.home.teamId, g.away.teamId]) { played.set(id, (played.get(id) ?? 0) + 1); lastPlayed.set(id, today); }
     }
