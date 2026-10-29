@@ -84,4 +84,6 @@ export const api = {
   labMeasure: (body) => post('/lab/measure', body),
   labCounterfactual: (body) => post('/lab/counterfactual', body),
   labMarket: (body) => post('/lab/market', body),
+  labMoneylineMeta: () => get('/lab/moneyline/meta'),
+  labMoneyline: (body) => post('/lab/moneyline', body),
 };

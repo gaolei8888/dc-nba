@@ -41,7 +41,11 @@ function spawn() {
     if (!task) return;
     inflight.delete(msg.id);
     if (msg.ok) task.resolve(msg.result);
-    else task.reject(new Error(msg.error));
+    else {
+      const err = new Error(msg.error);
+      if (typeof msg.code === 'string') { err.code = msg.code; err.params = msg.params ?? {}; }
+      task.reject(err);
+    }
     idle.push(w);
     drain();
   });

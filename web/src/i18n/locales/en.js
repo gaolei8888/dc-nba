@@ -116,6 +116,9 @@ export default {
       insufficient: 'Not enough roster data to estimate this team',
     },
     ml: {
+      reason: {
+        noData: 'The moneyline backtest report has not been built yet. Run npm run ml:backtest.',
+      },
       warn: {
         closingPrice: 'Simulated at closing prices. It does not show what could have been bet earlier in the day.',
         previouslySeen: 'The 2025-26 test period was already examined in earlier analysis, so it is not a fully clean test.',

@@ -21,7 +21,7 @@ import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { DATA_DIR } from './nbaClient.mjs';
 
-const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, 'app.db');
+export const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, 'app.db');
 
 let db = null;
 /** 打不开时记下原因，接口用它给出可诊断的错误 */

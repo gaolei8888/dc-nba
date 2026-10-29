@@ -116,6 +116,9 @@ export default {
       insufficient: '该队阵容数据不足，无法估计',
     },
     ml: {
+      reason: {
+        noData: '未找到独赢盘回测报告：请先运行 npm run ml:backtest 生成。',
+      },
       warn: {
         closingPrice: '按收盘价模拟：不代表当天更早决策时能拿到这个价。',
         previouslySeen: '测试期 2025-26 已在此前分析中被看过，不是完全干净的测试。',

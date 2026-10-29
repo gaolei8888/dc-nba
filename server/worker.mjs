@@ -13,6 +13,8 @@ import { readJson } from './nbaClient.mjs';
 import { buildModel, simulateSeason, powerRankings, predictSchedule } from './predict.mjs';
 import * as lab from './lab.mjs';
 import { codedError } from './messages.mjs';
+import { moneylineView } from './moneylineView.mjs';
+import { reportLoader } from './moneylineStore.mjs';
 
 // 每个 worker 自己加载一份快照。数据约 1MB，几个 worker 的内存开销可以接受，
 // 换来的是完全不需要跨线程传数据。
@@ -25,6 +27,9 @@ const store = {
 
 // 实验室数据集：约 480KB，每个 worker 各持一份，换来完全不用跨线程传数据
 const labData = readJson('backtest.json');
+
+// 独赢盘报告：2.6MB，每个 worker 各持一份；文件变了（mtime）下次任务前自动重读
+const mlReport = reportLoader();
 
 const modelCache = new Map();
 const getModel = (overrides) => {
@@ -68,6 +73,11 @@ const HANDLERS = {
     return lab.counterfactual(labData, seasons, teamId, deltaPts, params);
   },
 
+  /** 独赢盘历史情景视图：filters 已在主线程校验并补全默认值；这里只算 */
+  labMoneyline({ filters }) {
+    return moneylineView(mlReport().data, filters);
+  },
+
   simulate({ params, out, sims, seed }) {
     const t0 = Date.now();
     const result = simulateSeason(getModel(params), { sims, out, seed });
@@ -87,7 +97,8 @@ parentPort.on('message', ({ id, type, payload }) => {
     if (!handler) throw new Error(`未知任务类型: ${type}`);
     parentPort.postMessage({ id, ok: true, result: handler(payload) });
   } catch (e) {
-    parentPort.postMessage({ id, ok: false, error: String(e?.message ?? e) });
+    // 带上 code / params：否则 err.* 码跨不过线程边界，客户端只能看到 err.internal
+    parentPort.postMessage({ id, ok: false, error: String(e?.message ?? e), code: e?.code, params: e?.params });
   }
 });
 

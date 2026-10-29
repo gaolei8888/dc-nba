@@ -30,7 +30,7 @@ export const SCENARIOS = ['close', 'open', 'closeBest', 'forward'];
 export const SLIPPAGE_OPTIONS = [0, 5, 10];
 
 const SPLIT_OPTIONS = ['train', 'validate', 'test', 'all'];
-const FILTER_KEYS = ['scenario', 'split', 'season', 'from', 'to', 'book', 'strategy', 'slippagePts', 'feeOnWin'];
+export const FILTER_KEYS = ['scenario', 'split', 'season', 'from', 'to', 'book', 'strategy', 'slippagePts', 'feeOnWin'];
 const STRATEGY_BY_ID = new Map(STRATEGIES.map((s) => [s.id, s]));
 const FORWARD_SEASON = '2026-27';
 const FORWARD_BOOK = 'draftkings';

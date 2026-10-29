@@ -10,6 +10,11 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readJson, DATA_DIR } from './nbaClient.mjs';
 import * as db from './db.mjs';
+import { moneylineView, validateFilters, forwardCandidates, readLedgerRows, FILTER_KEYS, SCENARIOS } from './moneylineView.mjs';
+import { reportLoader } from './moneylineStore.mjs';
+import { SPLITS } from './betSplits.mjs';
+import { STRATEGIES } from './betStrategies.mjs';
+import { US_BOOKS } from './books.mjs';
 import { sendError, publicCode, msg, codedError } from './messages.mjs';
 import * as lab from './lab.mjs';
 import { liveRosterRankings } from './liveRosterRankings.mjs';
@@ -681,10 +686,13 @@ const runLab = async (type, payload) => {
     try {
       return await runInPool(type, payload, { timeoutMs: 60_000 });
     } catch (e) {
+      // 带 err.* 码的是确定性的业务错误（如数据缺失），主线程再算一遍结果一样，直接抛给调用方
+      if (typeof e?.code === 'string' && e.code.startsWith('err.')) throw e;
       console.warn('实验室计算走线程池失败，退回主线程:', e.message);
     }
   }
   // 兜底：主线程直接算。会卡事件循环，但功能不能因优化失效
+  if (type === 'labMoneyline') return moneylineView(mlReport().data, payload.filters);
   const labData = readJson('backtest.json');
   if (!labData) throw codedError('err.labDataMissing', '缺少 data/backtest.json，请先运行 npm run ingest');
   const { seasons, params } = payload;
@@ -765,6 +773,79 @@ app.post('/api/lab/counterfactual', rateLimit({ max: 60 }), wrap(async (req, res
   const params = pickLabParams(req.body?.params);
   const key = JSON.stringify([seasons, teamId, deltaPts, params]);
   res.json(await cached('labCf', key, () => runLab('labCounterfactual', { seasons, teamId, deltaPts, params }), { max: 80 }));
+}));
+
+// ---------------------------------------------------------------- 独赢盘回测
+//
+// 报告 data/moneyline-backtest.json（npm run ml:backtest 生成）；主线程与每个 worker 各持一份，按 mtime 自动重读。
+// 缓存（响应与语言无关，键里没有 lang / 时区）：
+//  - 历史情景：键 = 报告 mtime + 归一化后的筛选（默认值已补全，所以 {} 与 {scenario:'close'} 共用一条）。
+//    报告重建 → mtime 变 → 旧条目自然不再命中（LRU 淘汰）；数据重载（/api/refresh）走 clearCaches 清空。
+//  - 前向情景：键 = 账本指纹（paper_bets 行数 + 已结算数 + 最近结算时间）+ 筛选。早规则捕获会让行数变、
+//    结算会让已结算数与最近结算时间变，所以账本一变下一次请求就重算；不设 TTL（避免「刚结算还显示旧数」）。
+const mlReport = reportLoader();
+
+/** 前向账本只读现算的输入：账本指纹 + 候选。账本不可用时给出 reasonCode（不抛） */
+let mlFwd = { key: null, fwd: null };
+function forwardInputs() {
+  if (!ledgerDb) return { available: false, reasonCode: LEDGER_OFF ? 'srv.reason.ledgerOff' : 'srv.reason.ledgerUnavailable' };
+  try {
+    const f = ledgerDb.prepare('SELECT COUNT(*) n, COUNT(settled_at) s, MAX(settled_at) m FROM paper_bets').get();
+    const key = JSON.stringify([f.n, f.s, f.m]);
+    if (mlFwd.key !== key) mlFwd = { key, fwd: forwardCandidates(readLedgerRows(db.DB_PATH)) };
+    return { available: true, key, fwd: mlFwd.fwd };
+  } catch (e) {
+    console.warn('前向账本读取失败:', e.message);
+    return { available: false, reasonCode: 'srv.reason.ledgerUnavailable' };
+  }
+}
+
+app.get('/api/lab/moneyline/meta', wrap((req, res) => {
+  const { data } = mlReport();
+  if (!data) return res.json({ available: false, reasonCode: 'srv.ml.reason.noData' });
+  const f = forwardInputs();
+  res.json({
+    available: true,
+    builtAt: data.builtAt ?? null,
+    scenarios: SCENARIOS,
+    splits: SPLITS,
+    strategies: STRATEGIES.map((s) => ({ id: s.id, family: s.family })),
+    books: US_BOOKS,
+    seasons: data.inputs?.seasons ?? [],
+    selected: data.selected,
+    fits: data.fits,
+    integrity: (data.integrity ?? []).map((x) => ({
+      season: x.season, matched: x.matched, missing: x.missing, anomalies: (x.anomalies ?? []).length,
+    })),
+    forward: f.available
+      ? { available: true, captured: f.fwd.candidates.length + f.fwd.pending, pending: f.fwd.pending }
+      : { available: false, captured: 0, pending: 0, reasonCode: f.reasonCode },
+  });
+}));
+
+app.post('/api/lab/moneyline', rateLimit({ max: 30 }), wrap(async (req, res) => {
+  // 只把 Filters 字段交给校验：lang、时间戳等前端可能顺带发来的字段在这里剥掉；
+  // 取值不合法（含数组、非对象）仍交给 validateFilters 报 err.badFilter
+  const raw = req.body;
+  const body = raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? Object.fromEntries(FILTER_KEYS.filter((k) => k in raw).map((k) => [k, raw[k]]))
+    : raw;
+  const { data, mtimeMs } = mlReport();
+  const filters = validateFilters(body, data);   // err.badFilter 由 wrap 转成 400 + params.field
+
+  if (filters.scenario === 'forward') {
+    const f = forwardInputs();
+    if (!f.available) return res.json({ available: false, reasonCode: f.reasonCode });
+    return res.json(await cached('labMoneylineFwd', `${f.key}|${JSON.stringify(filters)}`, () => moneylineView(data, filters, { forward: f.fwd }), { max: 40 }));
+  }
+  const missing = () => sendError(res, 503, 'err.labDataMissing', '缺少 data/moneyline-backtest.json，请先运行 npm run ml:backtest', { scenario: filters.scenario });
+  if (!data) return missing();
+  try {
+    res.json(await cached('labMoneyline', `${mtimeMs}|${JSON.stringify(filters)}`, () => runLab('labMoneyline', { filters }), { max: 60 }));
+  } catch (e) {
+    if (e?.code === 'err.labDataMissing') return sendError(res, 503, e.code, e.message, e.params ?? {});
+    throw e;
+  }
 }));
 
 /** 运行状态，方便压测和线上排查 */
