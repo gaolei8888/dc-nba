@@ -154,10 +154,10 @@ export function blend(spm, apm, w = BLEND_W) {
  * @param {object} model data/impact-model.json
  * @param {object} p 球员行
  * @param {number|null} rawApm 未校准的 APM，没有就传 null
- * @param {object} [opts] aged：SPM 那一半先按逐项年龄曲线平移一岁（见 apply）
+ * @param {object} [opts] aged：SPM 那一半先按逐项年龄曲线平移一岁（见 apply）；ageYears：平移几岁（默认 aged ? 1 : 0）
  */
-export function impactOf(model, p, rawApm, { aged = false } = {}) {
-  const spm = apply(model, p, { aged });
+export function impactOf(model, p, rawApm, { aged = false, ageYears = aged ? 1 : 0 } = {}) {
+  const spm = apply(model, p, { ageYears });
   if (spm === null) return null;
   const scale = model.scale ?? 1;
   const apm = rawApm === null || rawApm === undefined ? null : rawApm * scale;
@@ -293,12 +293,18 @@ export function fit(samples, lambda) {
  * @param {boolean} opts.aged 先把特征平移一岁（model.ageCurves，见 server/impactAging.mjs）：
  *   上季 IMP 用来预测本季时传 true；本季分段 SPM 测的是本季自己，不传。模型里没有曲线时忽略。
  */
-export function apply(model, p, { minGp = MIN_GP, aged = false } = {}) {
+/**
+ * @param {number} opts.ageYears 平移几岁（默认 aged ? 1 : 0）。第 y 次（y = 0..ageYears−1）用 age + y 岁的曲线值；
+ *   上季 IMP 缺失时的回退先验（server/impFallback.mjs）要从更早的合格季一路平移过来。ageYears=1 与 aged 逐位相同。
+ */
+export function apply(model, p, { minGp = MIN_GP, aged = false, ageYears = aged ? 1 : 0 } = {}) {
   if ((p.gp ?? 0) < minGp || (p.min ?? 0) < MIN_MPG) return null;
   const f = features(p);
   if (!f) return null;
-  if (aged && model.ageCurves && Number.isFinite(p.age)) {
-    for (const [k, d] of Object.entries(ageShiftOf(model.ageCurves, p.age))) if (k in f) f[k] += d;
+  if (ageYears > 0 && model.ageCurves && Number.isFinite(p.age)) {
+    for (let y = 0; y < ageYears; y += 1) {
+      for (const [k, d] of Object.entries(ageShiftOf(model.ageCurves, p.age + y))) if (k in f) f[k] += d;
+    }
   }
   let s = model.intercept;
   model.features.forEach((k, i) => {

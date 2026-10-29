@@ -38,7 +38,8 @@
     "injury:fetch": "node scripts/injury-history.mjs",
     "injury:lab": "node scripts/injury-lab.mjs",
     "shadow": "node scripts/shadow.mjs",
-    "values:push": "sh deploy/player-values.sh"
+    "values:push": "sh deploy/player-values.sh",
+    "lab:imp-fallback": "node scripts/imp-fallback-lab.mjs"
   },
   "dependencies": {
     "compression": "^1.8.1",
