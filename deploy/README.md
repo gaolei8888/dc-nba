@@ -212,7 +212,7 @@ cp data-prev/*.json data/ && docker compose build && docker compose up -d
 - **请求量**：官方报告每次 capture ≤ 15、每天 ≤ 40（正常每次 1 个；S3 对不存在的文件回 403 AccessDenied XML，按「没有」跳过，别的 403 熔断），
   熔断状态在 `data-db/injury-fetch-state.json`。PBP：leaguegamelog 1 + commonallplayers 1 + 每场 2 个，
   一周约 50 场 ≈ 100 个，按天跑每天 15–30 个；显式上限每次 180 / 每天 500（与全量 ingest 共享单日计数），单次最多 80 场，剩下的下次续。
-- **页面**：预测总表 → 统计 最下面「影子模式（不影响显示的预测）」卡片，`/api/shadow`。
+- **页面**：预测总表 → 统计 最下面「影子模式（不影响显示的预测）」卡片，`/api/shadow`（开启账号后匿名只回预告，查账本用 `docker exec dc-nba node scripts/shadow.mjs show`）。
 - **切换（预注册）**：06:30 方案与基线配对满 300 场、Δ 对数损失 < 0（且没比基线差 0.005 以上）再提出切换，由高磊决定。
 
 演练（本地副本，不碰线上）：`DB_PATH=/tmp/x.db SHADOW_NOW=2026-10-28T14:05:00Z node scripts/shadow.mjs capture`，`… show`。
@@ -252,3 +252,117 @@ Docker 镜像多了 `poppler-utils`：服务器连 `dl-cdn.alpinelinux.org` 会�
 
 演练（本地副本，不碰线上）：拷一份 `server/ scripts/ package.json data/*.json` 到临时目录，
 `DB_PATH=/tmp/x.db SHADOW_NO_FETCH=1 SHADOW_NOW=2026-10-29T14:05:00Z node scripts/shadow.mjs capture`，再 `--late`（`SHADOW_NOW=…T22:35:00Z`）与 `show`。
+
+## 用户系统（2026-10-29 起）
+
+手机号验证码登录（无密码）。**仓库的 `docker-compose.yml` 里 `ENABLE_ACCOUNTS: "0"`，默认关闭**；
+是否上线由高磊决定。服务器上的 `docker-compose.yml` 与 `data-db/` 是服务器自己的，部署命令从不覆盖它们
+（`git archive` 刻意不含 compose）——所以环境变量要**手工**加到服务器那份 compose，仓库版的改动不会自动过去。
+新表 `CREATE TABLE IF NOT EXISTS`，加法迁移，旧镜像不读它们。
+
+开启后，预测总表页用到的三个接口 `/api/predictions/summary`、`/api/paper`、`/api/shadow` 对未登录请求只回预告字段
+（服务端裁剪）。其余接口不变。
+
+### 1. 环境变量（代码实际读取的全部，只列名字与默认）
+
+| 变量 | 说明 |
+|---|---|
+| `ENABLE_ACCOUNTS` | `"1"` 才开启账号；其它值或未设置 = 关闭 |
+| `TENCENT_SMS_SECRET_ID`、`TENCENT_SMS_SECRET_KEY` | **机密**。缺任一个则国内短信通道关闭（`/api/health` 的 `sms.mainland` 为 `disabled…`） |
+| `TENCENT_SMS_SDK_APP_ID`、`TENCENT_SMS_SIGN_NAME`、`TENCENT_SMS_TEMPLATE_ID`、`TENCENT_SMS_REGION` | 非机密，代码有默认值（应用 ID `1400683809`、签名「上海磊宁科技有限公司」、模板 `1417875`、`ap-guangzhou`） |
+| `TENCENT_SMS_PARAM2` | 模板第二个变量，默认 `"5"`；设为空串 `""` 表示模板只有一个参数 |
+| `SMS_PROVIDER` | **一般不设**。production 下：未设置或 `tencent` = 真发腾讯云；`console`、`disabled`、或任何无法识别的值 = 短信关闭（`console` 与无法识别的值还会在日志里打 `!! [sms]` 警告）。`console` 只在非 production 用于本地演练 |
+| `SMS_DAILY_CAP`、`SMS_IP_HOURLY`、`SMS_IP_DAILY` | 限额：全站每日（默认 500）、单 IP 每小时（默认 5）、单 IP 每天（默认 20）；「每天」按北京时间自然日 |
+| `ENABLE_OVERSEAS_SMS` | `"1"` 且下面三个 Twilio 变量齐全才开海外号；默认关，区号只有 +86 |
+| `TWILIO_ACCOUNT_SID`、`TWILIO_AUTH_TOKEN`、`TWILIO_VERIFY_SERVICE_SID` | **机密**（AUTH_TOKEN）；开通 Twilio Verify 后再加 |
+| `TRUST_PROXY` | 见下「真实 IP」 |
+
+服务器那份 `docker-compose.yml` 的 `environment` 里手工加：
+
+```yaml
+      ENABLE_ACCOUNTS: "1"
+      TENCENT_SMS_SECRET_ID: ${TENCENT_SMS_SECRET_ID}
+      TENCENT_SMS_SECRET_KEY: ${TENCENT_SMS_SECRET_KEY}
+      # 以下非机密，代码里有同样的默认值，写出来是为了一眼看清
+      TENCENT_SMS_SDK_APP_ID: "1400683809"
+      TENCENT_SMS_SIGN_NAME: 上海磊宁科技有限公司
+      TENCENT_SMS_TEMPLATE_ID: "1417875"
+      TENCENT_SMS_REGION: ap-guangzhou
+      TENCENT_SMS_PARAM2: "5"          # 先到控制台核对模板 1417875 第二个变量的含义再定
+      SMS_DAILY_CAP: "500"
+      SMS_IP_HOURLY: "5"
+      SMS_IP_DAILY: "20"
+      ENABLE_OVERSEAS_SMS: "0"
+      TRUST_PROXY: <works-gateway 容器 IP 或所在子网>   # 见下
+      # 开通 Twilio 后再加：TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_VERIFY_SERVICE_SID: ${...}
+```
+
+**密钥只放服务器的 `/home/dev/work/works/dc-nba/.env`**（compose 自动读取），不进仓库、不进镜像（`.dockerignore` 已排除 `.env`）、
+不贴聊天或工单。**不要把值写在命令行里**（`echo KEY=... >> .env`、`export`、`docker compose run -e KEY=...` 都会进 shell 历史或 argv）：
+用编辑器打开（`vi .env`）手工粘贴，然后 `chmod 600 .env`；注意 `docker compose config` 会把 `.env` 的值展开打印出来，别运行后贴输出。
+
+### 2. 真实 IP（TRUST_PROXY）
+
+按 IP 限频依赖 `req.ip`，所以要让 Express 只信任真正的网关。默认值是 `loopback, linklocal, uniquelocal`，
+会信任 `works-net` 上所有同网容器，别的作品容器就能伪造 `X-Forwarded-For` 绕过限频。**生产里把 `TRUST_PROXY` 设为
+works-gateway 容器的 IP 或所在子网**（`docker inspect works-gateway` 里 `works-net` 的 IPAddress / 子网）。
+只接受 IP / 子网列表；`1`、`true` 这类值会让服务启动即崩溃。
+
+上线后核验（同时确认网关确实透传了 `X-Forwarded-For`）：
+
+```bash
+curl -s https://ai.tzspace.cn/works/dc-nba/api/health -H 'Cookie: probe=1' | grep -o '"proxy":{[^}]*}'
+curl -s ifconfig.me          # 在你自己的网络上跑：proxy.ip 必须等于你的公网 IP；否则按 IP 限频无效，回头查 TRUST_PROXY 与网关 nginx
+```
+
+`proxy.cookieSeen` 顺带核实「网关双向剥离 Cookie」：为 `false` 即属实（本方案用 Bearer，不影响实现，只影响文档措辞）。
+
+### 3. 上线前检查清单（用户自己确认）
+
+- [ ] 腾讯云短信密钥**已轮换**（旧密钥曾进过 Gitee，视为泄露；新密钥只进服务器 `.env`）。
+- [ ] 控制台里模板 `1417875` 的**第二个参数**含义已核对，并据此设好 `TENCENT_SMS_PARAM2`（`"5"` 即「5 分钟」；若模板只有一个参数则设为 `""`）。签名与模板仍为「已通过」；短信套餐有余量；在腾讯云控制台另设发送频率限制与余额告警，作为第二道防线。
+- [ ] **用真密钥做一次真实 SendSms 冒烟**，发到团队成员的手机：这是 TC3 签名唯一的外部验证（单测只能验到自己算的签名）。
+- [ ] 审阅并补全《用户协议》《隐私政策》草稿（`web/src/legal/zh.js`、`en.js`）里的占位：中文的 `【待用户填写】` / `【待用户确认】`，英文的 `[TO BE FILLED BY OWNER …]` / `[TO BE CONFIRMED BY OWNER …]` 标记（以文件内实际标记为准，grep `TO BE`）。并**决定数据保留期**：`sms_sends` 由触发器保证只追加，任何清理都需要另行设计、单独审批的变更（放开删除条件），上线时隐私政策里写的保留期必须与实际做法一致。
+- [ ] 决定预告的暴露面：未登录的 `summary[0]` 含总体准确率与置信区间，确认可以公开。
+- [ ] 知道现有缺口：没有任何东西主动推送 `/api/health` 的 `alarms`（如 `sms.dailyCapReached`）和日志里的 `!! [sms]`；需要通知的话另起任务（例如 `deploy/refresh.sh` 收尾时读 `/api/health` 写进 `refresh.log`，或接企业微信 / 邮件）。
+
+### 4. 上线步骤（需用户逐步确认后才执行）
+
+避开北京时间 06:30 / 14:30 / 22:00 三个 cron 前后各 30 分钟，以及本机 23:00 的全量推送。
+
+**先带着 `ENABLE_ACCOUNTS=0` 发新代码**，确认没有副作用，再开：
+
+```bash
+# 1) 回滚点 + 库备份（备份用 VACUUM INTO，不要 cp 正在写的 SQLite）
+ssh dev@gpu.tzspace.cn 'docker tag dc-nba-dc-nba:latest dc-nba-dc-nba:pre-accounts'
+ssh dev@gpu.tzspace.cn 'docker exec dc-nba node scripts/backup-db.mjs /app/data-db/keep'   # 指定目录 keep/，不会被默认 backups/ 的轮转（保留最近 7 份）清掉
+# 2) 发代码（HEAD，不含 docker-compose.yml 与 data-db/）
+git archive HEAD server scripts deploy web docs package.json package-lock.json Dockerfile .dockerignore README.md | ssh dev@gpu.tzspace.cn 'tar -x -m -C /home/dev/work/works/dc-nba'
+ssh dev@gpu.tzspace.cn 'cd /home/dev/work/works/dc-nba && docker compose build && docker compose up -d'
+```
+
+3) **关闭态验证**：`/api/predictions/summary`、`/api/paper`、`/api/shadow` 返回与上线前一致（仍是全量公开）；`/api/meta` 的
+`features.accounts.enabled` 为 `false`；`app.db` 里原有各表行数与备份时一致（新增表为空）。
+4) 到服务器上编辑 `.env`（写密钥，`chmod 600`）和 `docker-compose.yml`（加上面那段，`ENABLE_ACCOUNTS` 改 `"1"`，设好 `TRUST_PROXY`），`docker compose up -d`。
+5) **开启态验证**：
+
+```bash
+curl -s https://ai.tzspace.cn/works/dc-nba/api/meta   | grep -o '"accounts":{[^}]*}'   # enabled:true, overseas:false
+curl -s https://ai.tzspace.cn/works/dc-nba/api/health | grep -o '"sms":{[^}]*}'        # mainland:"tencent"
+curl -s https://ai.tzspace.cn/works/dc-nba/api/health | grep -o '"alarms":[^]]*]'      # 无 sms.dailyCapReached
+curl -s https://ai.tzspace.cn/works/dc-nba/api/paper | head -c 200                     # locked:true
+```
+
+再核对第 2 节的 `proxy.ip`，最后用**团队成员的手机**端到端登录一次（收到短信、有效期与 5 分钟一致、登录后三个接口返回全量、退出后恢复预告）。
+
+### 5. 运维变化
+
+开启账号后 `/api/paper`、`/api/shadow` 匿名只回预告，查账本与影子改用
+`docker exec dc-nba node scripts/ledger.mjs show` / `docker exec dc-nba node scripts/shadow.mjs show`。
+`/api/health` 的 `alarms` 出现 `sms.dailyCapReached` 表示当日已停发。
+
+### 6. 回滚
+
+- 只关登录、保留新代码：服务器 compose 改 `ENABLE_ACCOUNTS: "0"` 后 `docker compose up -d`（三个接口恢复全公开）。
+- 回退代码：`docker tag dc-nba-dc-nba:pre-accounts dc-nba-dc-nba:latest && docker compose up -d --no-build`。
+- 新表是加法迁移，旧镜像不读，**不用动库**，也不要删表；万一要还原库，用上线前 `keep/` 里的备份。

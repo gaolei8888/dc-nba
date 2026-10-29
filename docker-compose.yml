@@ -27,6 +27,19 @@ services:
       # 模拟投注模块，同样默认关闭
       ENABLE_LOTTERY: "0"
       DB_PATH: /app/data-db/app.db
+      # 手机号登录会在公网收集手机号；是否上线由高磊决定，默认关闭（预测总表三个接口保持公开）。
+      # 密钥放服务器上的 .env（chmod 600），不进仓库、不进镜像。
+      # 注意：服务器上的 docker-compose.yml 是单独维护的，部署从不覆盖它；
+      # 本文件里的改动不会自动到服务器，上线要手工往服务器那份加（见 deploy/README.md「用户系统」）。
+      ENABLE_ACCOUNTS: "0"
+      # 开启账号后才用到的变量（只列名字，不写值；值与默认见 deploy/README.md）：
+      #   TENCENT_SMS_SECRET_ID / TENCENT_SMS_SECRET_KEY        （机密，写成 ${VAR} 引用 .env）
+      #   TENCENT_SMS_SDK_APP_ID / TENCENT_SMS_SIGN_NAME / TENCENT_SMS_TEMPLATE_ID
+      #   TENCENT_SMS_REGION / TENCENT_SMS_PARAM2
+      #   SMS_PROVIDER                                          （一般不设；生产只认未设置或 tencent）
+      #   SMS_DAILY_CAP / SMS_IP_HOURLY / SMS_IP_DAILY
+      #   ENABLE_OVERSEAS_SMS / TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_VERIFY_SERVICE_SID
+      #   TRUST_PROXY                                           （生产设为网关容器 IP 或子网）
     # SQLite 排行榜的可写卷。数据快照（data/*.json）仍然烤在镜像里保持只读，
     # 这个卷只放 app.db。gpu 上 dev 自己就是 uid 1001，与容器内 app 同号，
     # mkdir 出来天然属主正确，不需要 chown。
