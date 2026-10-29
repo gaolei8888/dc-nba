@@ -242,9 +242,14 @@ export default function Profiles() {
                   >
                     {busy ? t('profiles.lb.syncing') : t('profiles.lb.sync')}
                   </button>
-                  <button className="btn" onClick={() => { disconnectCloud(); setBoard(null); }}>
-                    {t('profiles.lb.disconnect')}
-                  </button>
+                  {/* 账号档案：云端身份就是登录会话，在这里断开会与会话脱节——只能靠退出登录解除 */}
+                  {cloud.account === true ? (
+                    <span className="note" style={{ alignSelf: 'center' }}>{t('profiles.lb.accountLinked')}</span>
+                  ) : (
+                    <button className="btn" onClick={() => { disconnectCloud(); setBoard(null); }}>
+                      {t('profiles.lb.disconnect')}
+                    </button>
+                  )}
                 </>
               ) : (
                 <button

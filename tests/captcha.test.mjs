@@ -126,3 +126,16 @@ test('排版：300 张里相邻字符包围盒重叠 ≤10%，且都在 viewBox 
     }
   }
 });
+
+test('noteLimited / limitedAt 按 ipKey 分组：同一 IPv6 /64 共用，不同 /64 与 IPv4 各自独立', () => {
+  const s = createCaptchaStore();
+  const now = 10_000_000;
+  s.noteLimited('2001:db8:1:2::1', now);
+  assert.equal(s.limitedAt('2001:db8:1:2:ffff::9', now), now);
+  assert.equal(needsCaptcha({ ipSendsLastHour: 0, siteToday: 0, cap: 500, now, store: s, ip: '2001:db8:1:2::abcd' }), true);
+  assert.equal(s.limitedAt('2001:db8:1:3::1', now), null);
+  s.noteLimited('::ffff:1.1.1.1', now);
+  assert.equal(s.limitedAt('1.1.1.1', now), now);
+  assert.equal(s.limitedAt('1.1.1.2', now), null);
+  assert.equal(s.limitedSize(), 2);
+});

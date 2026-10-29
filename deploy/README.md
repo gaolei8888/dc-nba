@@ -272,10 +272,10 @@ Docker 镜像多了 `poppler-utils`：服务器连 `dl-cdn.alpinelinux.org` 会�
 | `TENCENT_SMS_SDK_APP_ID`、`TENCENT_SMS_SIGN_NAME`、`TENCENT_SMS_TEMPLATE_ID`、`TENCENT_SMS_REGION` | 非机密，代码有默认值（应用 ID `1400683809`、签名「上海磊宁科技有限公司」、模板 `1417875`、`ap-guangzhou`） |
 | `TENCENT_SMS_PARAM2` | 模板第二个变量，默认 `"5"`；设为空串 `""` 表示模板只有一个参数 |
 | `SMS_PROVIDER` | **一般不设**。production 下：未设置或 `tencent` = 真发腾讯云；`console`、`disabled`、或任何无法识别的值 = 短信关闭（`console` 与无法识别的值还会在日志里打 `!! [sms]` 警告）。`console` 只在非 production 用于本地演练 |
-| `SMS_DAILY_CAP`、`SMS_IP_HOURLY`、`SMS_IP_DAILY` | 限额：全站每日（默认 500）、单 IP 每小时（默认 5）、单 IP 每天（默认 20）；「每天」按北京时间自然日 |
+| `SMS_DAILY_CAP`、`SMS_IP_HOURLY`、`SMS_IP_DAILY` | 限额：全站每日（默认 500）、单 IP 每小时（默认 5）、单 IP 每天（默认 20）；「每天」按北京时间自然日。「单 IP」对 IPv6 按 /64 前缀算（同一 /64 的地址共用额度，图形验证的触发记录同理），IPv4 按完整地址；`sms_sends.ip` 仍存原始 IP |
 | `ENABLE_OVERSEAS_SMS` | `"1"` 且下面三个 Twilio 变量齐全才开海外号；默认关，区号只有 +86 |
 | `TWILIO_ACCOUNT_SID`、`TWILIO_AUTH_TOKEN`、`TWILIO_VERIFY_SERVICE_SID` | **机密**（AUTH_TOKEN）；开通 Twilio Verify 后再加 |
-| `TRUST_PROXY` | 默认不设；收窄的风险与写法见下「真实 IP」 |
+| `TRUST_PROXY` | 默认不设；收窄的风险与写法见下「真实 IP」。**只在 `ENABLE_ACCOUNTS=1` 或显式设了 `TRUST_PROXY` 时才启用 trust proxy**；两者都没有时与上线前一样不信任任何代理（`req.ip` 是网关地址） |
 | `ENABLE_LEADERBOARD` | 与账号的关系：为 `0` 时账号用自己独立的库结构，登录不绑定玩家档案；非 `0` 时与排行榜共用库，登录绑定 / 新建排行榜玩家档案 |
 
 服务器那份 `docker-compose.yml` 的 `environment` 里手工加：
@@ -304,7 +304,8 @@ Docker 镜像多了 `poppler-utils`：服务器连 `dl-cdn.alpinelinux.org` 会�
 
 ### 2. 真实 IP（TRUST_PROXY）
 
-按 IP 限频依赖 `req.ip`。默认值 `loopback, linklocal, uniquelocal` 会信任 `works-net` 上所有同网容器，
+按 IP 限频依赖 `req.ip`。账号开启（或显式设了 `TRUST_PROXY`）时才设 trust proxy；账号开启且不设 `TRUST_PROXY` 时用默认值
+`loopback, linklocal, uniquelocal`，它会信任 `works-net` 上所有同网容器，
 理论上别的作品容器能伪造 `X-Forwarded-For` 绕过限频；但**收窄有风险**：访问链路是 Traefik → works-gateway(nginx) → 本容器，
 如果只信任 works-gateway，而 nginx 又是把 Traefik 那一跳的地址追加进 XFF，`req.ip` 就会变成 Traefik 那一跳，
 **所有访客共用一个限频桶**。所以：
@@ -314,14 +315,30 @@ Docker 镜像多了 `poppler-utils`：服务器连 `dl-cdn.alpinelinux.org` 会�
   加上 works-gateway 所在的 `works-net` 子网。优先写**子网**而不是单个容器 IP（容器重建后 IP 会变）。
 - works-gateway 的 nginx 配置**不在本仓库**，是否透传 / 追加 `X-Forwarded-For` 要先到服务器上看过配置再定。
 - 只接受 IP / 子网列表；`1`、`true` 这类值会让服务启动即崩溃。
-- 验收就是下面的 `proxy.ip` 检查：它不是你的公网 IP，就调整列表（或回到默认值）。
+- 验收就是下面两项检查：`proxy.ip` 必须是你的公网 IP，且伪造的 `X-Forwarded-For` 不能生效。
 
-上线后核验（同时确认网关确实透传了 `X-Forwarded-For`）：
+核验（同时确认网关确实透传了 `X-Forwarded-For`）——第 4 节第 3 步（关闭态）与第 5 步（开启后）**各跑一遍**：
 
 ```bash
+# (a) 真实 IP：proxy.ip 应等于你自己网络的公网 IP
 curl -s https://ai.tzspace.cn/works/dc-nba/api/health -H 'Cookie: probe=1' | grep -o '"proxy":{[^}]*}'
-curl -s ifconfig.me          # 在你自己的网络上跑：proxy.ip 必须等于你的公网 IP；否则按 IP 限频无效或全站共用一个桶，调整 TRUST_PROXY（或回到默认）并检查网关 nginx 的 XFF 配置
+curl -s ifconfig.me          # 在你自己的网络上跑，与上面的 proxy.ip 对比
+# (b) 伪造探针：自己带一个假的 X-Forwarded-For，proxy.ip 绝不能是 1.2.3.4
+curl -s -H 'X-Forwarded-For: 1.2.3.4' https://ai.tzspace.cn/works/dc-nba/api/health | grep -o '"proxy":{[^}]*}'
 ```
+
+怎么判读：
+
+- **关闭态（第 3 步，`ENABLE_ACCOUNTS=0` 且没设 `TRUST_PROXY`）**：此时不启用 trust proxy，与上线前一样，
+  (a) 的 `proxy.ip` 是网关（works-gateway）的地址而**不是**你的公网 IP——这是预期，不算失败；(b) 的 `proxy.ip` 也必须不是 `1.2.3.4`
+  （同样是网关地址）。若关闭态下 (b) 出现 `1.2.3.4`，说明服务器 compose 里已经有 `TRUST_PROXY`，先查清再继续。
+- **开启后（第 5 步）**：(a) `proxy.ip` 必须等于你的公网 IP；(b) `proxy.ip` 必须仍是你的公网 IP、**不是 `1.2.3.4`**。
+  - (a) 不等于公网 IP（是网关 / Traefik 那一跳的地址）：受信列表少了某一跳，所有访客共用一个限频桶。
+    把缺的那一跳加进 `TRUST_PROXY`（或回到默认值），并检查网关 nginx 是否透传 / 追加了 `X-Forwarded-For`。
+  - (b) 出现 `1.2.3.4`：访客能自己伪造 IP，按 IP 限频与图形验证触发都能被绕过。原因通常是受信列表把访客那一侧也包含进去了，
+    或某一跳原样转发了客户端带来的 XFF 而没追加真实来源（例如 Traefik 对外入口开着 forwardedHeaders 的 insecure / trustedIPs 过宽）。
+    处理：把 `TRUST_PROXY` **收窄到真实的代理跳**（只写 Traefik / 宿主机那一跳与 works-gateway 所在子网），必要时修网关配置；
+    修好之前先把 `ENABLE_ACCOUNTS` 改回 `"0"`（见第 6 节），不要带着可伪造的 IP 开放登录。
 
 `proxy.cookieSeen` 只检验**请求方向**（网关是否把 Cookie 头传给应用），不检验响应里的 `Set-Cookie` 是否被剥掉；
 `false` 只说明请求方向的 Cookie 被去掉了，不能据此断言「双向剥离」（本方案用 Bearer，不影响实现，只影响文档措辞）。
@@ -357,30 +374,43 @@ ssh dev@gpu.tzspace.cn 'cd /home/dev/work/works/dc-nba && docker compose build &
 `features.accounts.enabled` 为 `false`；原有各表行数与上线前一致（容器内没有 sqlite3 命令行，用 node）：
 
 ```bash
-ssh dev@gpu.tzspace.cn "docker exec dc-nba node -e \"const {DatabaseSync}=require('node:sqlite');const d=new DatabaseSync(process.env.DB_PATH,{readOnly:true});for(const t of ['paper_bets','shadow_predictions','shadow_rr_predictions','shadow_inj_elo_predictions','players','live_picks'])console.log(t,d.prepare('SELECT COUNT(*) n FROM '+t).get().n)\""
+ssh dev@gpu.tzspace.cn "docker exec dc-nba node -e \"const {DatabaseSync}=require('node:sqlite');const d=new DatabaseSync(process.env.DB_PATH,{readOnly:true});for(const t of ['paper_bets','shadow_predictions','shadow_rr_predictions','shadow_inj_elo_predictions','players','live_picks']){try{console.log(t,d.prepare('SELECT COUNT(*) n FROM '+t).get().n)}catch{console.log(t,'missing')}}\""
 ```
 
-（上线前先跑一遍留底，上线后再跑对比；新增的账号表应为空。）
+表不存在时打印 `missing` 而不是报错退出（例如该部署从没开过某个功能），一条命令能把所有表都看完。
+（上线前先跑一遍留底，上线后再跑对比；新增的账号表应为空。）关闭态下再跑一遍第 2 节的 (a)(b) 两项核验，按「关闭态」判读。
 4) 到服务器上编辑 `.env`（写密钥，`chmod 600`）和 `docker-compose.yml`（加上面那段，`ENABLE_ACCOUNTS` 改 `"1"`，如需收窄再设 `TRUST_PROXY`），`docker compose up -d`。
 5) **开启态验证**：
 
 ```bash
 curl -s https://ai.tzspace.cn/works/dc-nba/api/meta   | grep -o '"accounts":{[^}]*}'   # enabled:true, overseas:false
 curl -s https://ai.tzspace.cn/works/dc-nba/api/health | grep -o '"sms":{[^}]*}'        # mainland:"tencent"
-curl -s https://ai.tzspace.cn/works/dc-nba/api/health | grep -o '"alarms":[^]]*]'      # 无 sms.dailyCapReached
+curl -s https://ai.tzspace.cn/works/dc-nba/api/health | grep -o '"alarms":[^]]*]'      # 应为 []：无 sms.dailyCapReached、无 accounts.dbUnavailable
 curl -s https://ai.tzspace.cn/works/dc-nba/api/paper | head -c 200                     # locked:true
 ```
 
-再核对第 2 节的 `proxy.ip`，最后用**团队成员的手机**端到端登录一次（收到短信、有效期与 5 分钟一致、登录后三个接口返回全量、退出后恢复预告）。
+再跑第 2 节的 (a)(b) 两项核验（按「开启后」判读，(b) 出现 `1.2.3.4` 就先关回去），最后用**团队成员的手机**端到端登录一次（收到短信、有效期与 5 分钟一致、登录后三个接口返回全量、退出后恢复预告）。
 
 ### 5. 运维变化
 
 开启账号后 `/api/paper`、`/api/shadow` 匿名只回预告，查账本与影子改用
 `docker exec dc-nba node scripts/ledger.mjs show` / `docker exec dc-nba node scripts/shadow.mjs show`。
-`/api/health` 的 `alarms` 出现 `sms.dailyCapReached` 表示当日已停发。
+`/api/health` 的 `alarms` 出现 `sms.dailyCapReached` 表示当日已停发；出现 `accounts.dbUnavailable` 表示开关开着但账号库打不开
+（登录全部 503、三个接口一律只回预告），查容器日志里的「用户系统不可用」。两者都不改 `ok` 与 HTTP 状态。
+
+**短信发送超时的取舍**：调腾讯云 / Twilio 超过 8 秒没回应按**发送失败**处理——如实告诉用户「短信发送失败」、**不存验证码**，
+这一次照样计入号码 / IP / 全站限额（`sms_sends` 记一行 `ok=0`、`error` 为 `tencent timeout` 或 `twilio timeout`）。
+代价：极少数情况下短信其实发出去了（超时发生在对方已受理之后），用户手里的这条码无法使用，需要等 60 秒冷却后再点一次「获取验证码」。
+这样选是为了不在不确定是否送达时留下一个可能被猜的码，也不让超时绕过限额；若 `refresh.log` / 日志里 `timeout` 频繁出现，先查服务器到短信服务的网络。
 
 ### 6. 回滚
 
 - 只关登录、保留新代码：服务器 compose 改 `ENABLE_ACCOUNTS: "0"` 后 `docker compose up -d`（三个接口恢复全公开）。
 - 回退代码：`docker tag dc-nba-dc-nba:pre-accounts dc-nba-dc-nba:latest && docker compose up -d --no-build`。
 - 新表是加法迁移，旧镜像不读，**不用动库**，也不要删表；万一要还原库，用上线前 `keep/` 里的备份。
+- **对已登录用户的影响**：登录过的用户，浏览器里账号档案的排行榜身份（`cloud.token`）就是会话令牌。关掉账号后服务端不再认会话令牌，
+  这些档案调排行榜接口（同步、`/api/me` 等）会得到 401。
+  - 只关登录、保留新代码时：前端启动时读 `/api/meta`，看到 `features.accounts.enabled` 为 `false` 就自动清掉本地会话并去掉账号档案的 cloud
+    （本地档案与存档保留），界面回到未登录、档案显示为未加入排行榜，不会反复 401；需要的话用户可用「用当前档案加入排行榜」另建匿名身份。
+  - 回退到旧镜像时：旧前端没有这段逻辑，这些档案会一直 401，用户需在「档案」页断开后重新加入排行榜。
+  - 重新开启账号后，服务端的账号与绑定关系都还在：用户重新登录即恢复原来的排行榜档案（会话令牌未过期且没被清掉的，开启后直接可用）。

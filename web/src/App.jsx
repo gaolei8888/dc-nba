@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { api } from './lib/api.js';
 import { Loading, ErrorBox, LockIcon } from './components/common.jsx';
 import { teamPalette } from './lib/color.js';
@@ -7,7 +7,7 @@ import {
   switchProfile as switchP, deleteProfile as deleteP, importProfile as importP,
   linkCloud as linkC, unlinkCloud as unlinkC, attachAccount, detachAccount,
 } from './lib/profiles.js';
-import { loadSession, saveSession, clearSession, SESSION_KEY } from './lib/session.js';
+import { loadSession, saveSession, clearSession, SESSION_KEY, accountsDisabled } from './lib/session.js';
 import { createCloudPlayer, renameCloud } from './lib/cloud.js';
 import Dashboard from './pages/Dashboard.jsx';
 import Teams from './pages/Teams.jsx';
@@ -18,12 +18,15 @@ import Predict from './pages/Predict.jsx';
 import Simulate from './pages/Simulate.jsx';
 import Play from './pages/Play.jsx';
 import Profiles from './pages/Profiles.jsx';
-import Lab from './pages/Lab.jsx';
 import Today from './pages/Today.jsx';
 import Board from './pages/Board.jsx';
-import Login from './pages/Login.jsx';
-import Legal from './pages/Legal.jsx';
 import { useI18n } from './i18n/react.jsx';
+
+// 登录页、协议 / 隐私政策（长文）与实验室（含独赢投注实验）按需加载：大多数访客用不到，不进主包，
+// 主包回到 Vite 的 500 kB 提示线以下
+const Login = lazy(() => import('./pages/Login.jsx'));
+const Lab = lazy(() => import('./pages/Lab.jsx'));
+const Legal = lazy(() => import('./pages/Legal.jsx'));
 
 // ------------------------------------------------------------ 全局数据
 
@@ -109,6 +112,15 @@ export default function App() {
       .then(([meta, teams, injuries]) => setState({ loading: false, meta, teams, injuries }))
       .catch((error) => setState({ loading: false, error }));
   }, []);
+
+  // 服务端说用户系统关着（含回滚关掉开关）：本地会话没用了，账号档案的 cloud.token 是会话令牌，
+  // 留着调排行榜只会 401——清掉会话并去掉账号档案的 cloud；重新开启后再登录即可
+  useEffect(() => {
+    if (accountsDisabled(state.meta) && (loadSession() || prof.profiles.some((p) => p.cloud?.account === true))) {
+      clearSession();
+      dropAccount();
+    }
+  }, [state.meta, prof, dropAccount]);
 
   // 球队表交给 i18n（服务端消息里的队名占位符要用）；setTeams 稳定、teams 只在加载完成时变一次
   const { setTeams, setLang, setTz } = i18n;
@@ -261,9 +273,9 @@ export default function App() {
   else if (head === 'simulate') page = <Simulate />;
   else if (head === 'play') page = <Play />;
   else if (head === 'profiles') page = <Profiles />;
-  else if (head === 'lab') page = <Lab />;
-  else if (head === 'login') page = <Login returnTo={rest.join('/')} />;
-  else if (head === 'terms' || head === 'privacy') page = <Legal doc={head} />;
+  else if (head === 'lab') page = <Suspense fallback={<Loading />}><Lab /></Suspense>;
+  else if (head === 'login') page = <Suspense fallback={<Loading />}><Login returnTo={rest.join('/')} /></Suspense>;
+  else if (head === 'terms' || head === 'privacy') page = <Suspense fallback={<Loading />}><Legal doc={head} /></Suspense>;
   else page = <Dashboard />;
 
   const activeKey = head === 'team' ? 'teams' : head;

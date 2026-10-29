@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { ACCOUNT_SCHEMA } from '../server/db.mjs';
 import {
   newCode, bjDayStart, requestCode, verifyCode, checkSendAllowed, smsStats, limitsFromEnv,
-  DEFAULT_LIMITS, CODE_TTL_MS, MAX_ATTEMPTS, RESEND_MS, PHONE_DAILY,
+  DEFAULT_LIMITS, CODE_TTL_MS, MAX_ATTEMPTS, RESEND_MS, PHONE_DAILY, pendingFor,
 } from '../server/loginCodes.mjs';
 
 const T0 = Date.parse('2026-10-29T02:00:00Z'); // 北京 10:00
@@ -282,4 +282,35 @@ test('失败日志里不出现完整手机号', async () => {
   const line = logs.join('\n');
   assert.ok(line.includes('[sms]'));
   assert.equal(line.includes('13800138000'), false);
+});
+
+test('IP 限频按 ipKey 分组：同一 IPv6 /64 共用上限，不同 /64 互不影响，IPv4 不受影响；流水存原始 IP', async () => {
+  const s = fake(); const h = fresh();
+  const phone = (i) => `+86137001${String(i).padStart(5, '0')}`;
+  const L = { ...BIG, ipHourly: 2 };
+  // 同一 /64 内换地址：第 3 次被 IP 限频挡住
+  assert.equal((await req(h, { e164: phone(0), ip: '2001:db8:1:2::1', limits: L, sender: s })).ok, true);
+  assert.equal((await req(h, { e164: phone(1), ip: '2001:db8:1:2:aaaa::7', limits: L, sender: s })).ok, true);
+  assert.deepEqual(await req(h, { e164: phone(2), ip: '2001:db8:1:2:ffff:ffff:ffff:ffff', limits: L, sender: s }),
+    { ok: false, status: 429, code: 'auth.ipLimit' });
+  // 另一个 /64 不受影响
+  assert.equal((await req(h, { e164: phone(3), ip: '2001:db8:1:3::1', limits: L, sender: s })).ok, true);
+  // IPv4：不同地址各自计数；IPv4 映射写法与点分写法算同一个
+  assert.equal((await req(h, { e164: phone(4), ip: '5.6.7.8', limits: L, sender: s })).ok, true);
+  assert.equal((await req(h, { e164: phone(5), ip: '::ffff:5.6.7.8', limits: L, sender: s })).ok, true);
+  assert.equal((await req(h, { e164: phone(6), ip: '5.6.7.8', limits: L, sender: s })).ok, false);
+  assert.equal((await req(h, { e164: phone(7), ip: '5.6.7.9', limits: L, sender: s })).ok, true);
+  // 流水里存的是请求的原始 IP（隐私政策据此表述）
+  const ips = h.prepare('SELECT ip FROM sms_sends ORDER BY id').all().map((r) => r.ip);
+  assert.deepEqual(ips.slice(0, 2), ['2001:db8:1:2::1', '2001:db8:1:2:aaaa::7']);
+  assert.equal(ips[4], '::ffff:5.6.7.8');
+});
+
+test('并发占位也按 ipKey 分组：同一 /64 不同地址并发，不超过 IP 上限', async () => {
+  const s = fake({ delayMs: 30 }); const h = fresh();
+  const L = { ...BIG, ipHourly: 3 };
+  const rs = await Promise.all([0, 1, 2, 3, 4].map((i) =>
+    req(h, { e164: `+86136001${String(i).padStart(5, '0')}`, ip: `2001:db8:9:9::${i + 1}`, limits: L, sender: s })));
+  assert.equal(rs.filter((r) => r.ok).length, 3);
+  assert.equal(pendingFor(h, '2001:db8:9:9::1').ip, 0);
 });

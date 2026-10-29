@@ -9,6 +9,7 @@
  *  - 不做持久化：本服务是单容器单进程，内存即可；重启后全部失效，用户重新取一张即可。
  */
 import crypto from 'node:crypto';
+import { ipKey } from './ipKey.mjs';
 
 export const CAPTCHA_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const LEN = 4;
@@ -109,7 +110,10 @@ function renderSvg(text) {
 export function createCaptchaStore({ ttlMs = 120_000, max = 5000 } = {}) {
   /** @type {Map<string, {hash: Buffer, exp: number}>} Map 保持插入顺序，首项即最旧 */
   const store = new Map();
-  /** ip → 最近一次触发限频的时间；同样按插入序有界（重新记录时先删后插，保持首项最旧） */
+  /**
+   * ipKey(ip) → 最近一次触发限频的时间（IPv6 按 /64 分组，与短信 IP 限频同一口径）；
+   * 同样按插入序有界（重新记录时先删后插，保持首项最旧）
+   */
   const limited = new Map();
 
   return {
@@ -138,17 +142,18 @@ export function createCaptchaStore({ ttlMs = 120_000, max = 5000 } = {}) {
      * noteLimited(ip, now)；之后一小时内该 IP 会被要求先过图形验证（经 limitedAt / needsCaptcha 读取）。
      */
     noteLimited(ip, now) {
-      if (!ip) return;
-      limited.delete(ip);
+      const key = ipKey(ip);
+      if (!key) return;
+      limited.delete(key);
       for (const [k, t] of limited) { // 先清一小时前的
         if (now - t >= HOUR_MS) limited.delete(k); else break;
       }
       while (limited.size >= max) limited.delete(limited.keys().next().value);
-      limited.set(ip, now);
+      limited.set(key, now);
     },
     /** 该 IP 最近一小时内最后一次触发限频的时间；没有或已过一小时返回 null */
     limitedAt(ip, now) {
-      const t = limited.get(ip);
+      const t = limited.get(ipKey(ip));
       return t !== undefined && now - t < HOUR_MS ? t : null;
     },
     limitedSize: () => limited.size,

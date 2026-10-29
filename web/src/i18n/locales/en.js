@@ -918,7 +918,7 @@ export default {
     },
     lb: {
       title: 'Leaderboard', counts: '{players} players · {picks} picks',
-      sync: 'Sync this profile now', syncing: 'Syncing…', disconnect: 'Disconnect', join: 'Join the leaderboard with this profile',
+      sync: 'Sync this profile now', syncing: 'Syncing…', disconnect: 'Disconnect', accountLinked: 'Linked to your account — sign out to unlink', join: 'Join the leaderboard with this profile',
       modeSeason: 'Live this season · {season}', modePractice: 'Last season replay · {season}',
       warn1: 'Leaderboard data is not backed up. If the server is rebuilt or the data volume is lost, every record disappears and cannot be recovered. ',
       warnBold: 'Your saves on this device are not affected', warn2: ': even if the board is wiped, your progress in this browser stays intact.',
@@ -940,7 +940,7 @@ export default {
       title: 'Why there are no accounts or passwords',
       p1a: 'This app is deployed under ',
       p1b: ', and the gateway middleware is observed to strip cookies (not yet verified). Traditional sessions may not work, so the token lives in localStorage, which is less secure than an httpOnly cookie.',
-      p2: 'The server is stateless: the data snapshot is read-only and the container has no volume. Adding accounts means adding a storage volume, and with it backups, migration and permissions. Storing passwords also carries real security responsibility.',
+      p2: 'Accounts are optional: when a deployment enables phone sign-in, account data (phone number, sign-in sessions, SMS send records) is stored on the server. You can still play without an account, with progress saved in this browser. Even with an account there is no password — sign-in uses SMS codes only, and no passwords are stored.',
       p3a: 'So identity is deliberately just "a local profile in this browser". ',
       p3Bold: 'Visitors on their own devices already play separately, so no login is needed.',
       p3b: ' If we need a cross-user leaderboard, the server comes later and this profile structure can be reused as is.',

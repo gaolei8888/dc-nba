@@ -4,12 +4,14 @@
  *  - 验证码 6 位（crypto.randomInt），5 分钟有效，只存哈希，验证成功或错 5 次即作废。
  *  - 限频全部按 sms_sends 计数（重启不丢）：每次调用发送器都记一行、都计入限额（成功失败都算）。
  *      号码：60 秒一次、每天 10 次；IP：每小时 / 每天（可配）；全站：每天（可配）。
+ *      「IP」一律按 ipKey 分组（IPv4 整个地址、IPv6 按 /64）；sms_sends.ip 存原始 IP，计数时再分组。
  *    「每天」一律按北京时间自然日。
  *  - 发送失败如实返回失败，不存验证码。
  *  - 日志里手机号一律脱敏，绝不打印验证码。
  */
 import crypto from 'node:crypto';
 import { maskPhone } from './phone.mjs';
+import { ipKey } from './ipKey.mjs';
 
 export const CODE_TTL_MS = 300_000;
 export const MAX_ATTEMPTS = 5;
@@ -66,7 +68,20 @@ const pendingOf = (h) => {
  */
 export function pendingFor(h, ip) {
   const p = pendingOf(h);
-  return { ip: ip ? (p.ip.get(ip) ?? 0) : 0, site: p.site };
+  const k = ipKey(ip);
+  return { ip: k ? (p.ip.get(k) ?? 0) : 0, site: p.site };
+}
+
+/**
+ * 某 IP 分组自 since 起的发送次数（含 since 之后的一切时刻）。sms_sends.ip 存的是原始地址，
+ * 同一 /64 的不同写法 / 不同地址在 SQL 里对不上，所以取窗口内带 IP 的行在 JS 里按 ipKey 比；
+ * 窗口最长一天，行数受全站每日上限约束，量很小。
+ */
+function ipSendsSince(h, key, sinceIso, strictAfter) {
+  const rows = h.prepare(`SELECT ip, at FROM sms_sends WHERE ip IS NOT NULL AND at ${strictAfter ? '>' : '>='} ?`).all(sinceIso);
+  let n = 0;
+  for (const r of rows) if (ipKey(r.ip) === key) n += 1;
+  return n;
 }
 /** 全站触顶的服务器日志每个北京日只打一次 */
 let capWarnedDay = null;
@@ -84,9 +99,10 @@ export function checkSendAllowed(h, { e164, ip, now, limits = DEFAULT_LIMITS, pe
     return { ok: false, status: 429, code: 'auth.phoneDailyLimit' };
   }
   let ipSendsLastHour = 0;
-  if (ip) {
-    ipSendsLastHour = pendingIp + count(h, 'SELECT COUNT(*) n FROM sms_sends WHERE ip = ? AND at > ?', ip, iso(now - HOUR_MS));
-    const ipToday = pendingIp + count(h, 'SELECT COUNT(*) n FROM sms_sends WHERE ip = ? AND at >= ?', ip, day);
+  const key = ipKey(ip);
+  if (key) {
+    ipSendsLastHour = pendingIp + ipSendsSince(h, key, iso(now - HOUR_MS), true);
+    const ipToday = pendingIp + ipSendsSince(h, key, day, false);
     if (ipSendsLastHour >= limits.ipHourly || ipToday >= limits.ipDaily) {
       return { ok: false, status: 429, code: 'auth.ipLimit' };
     }
@@ -110,17 +126,18 @@ export async function requestCode(h, { e164, ip, now, limits = DEFAULT_LIMITS, s
   inflight.add(e164); // 同步占位，之后才有 await
   try {
     const pend = pendingOf(h);
+    const key = ipKey(ip);
     const inFlight = pendingFor(h, ip);
     const gate = checkSendAllowed(h, { e164, ip, now, limits, pendingIp: inFlight.ip, pendingSite: inFlight.site });
     if (!gate.ok) return gate;
     // 同步占位（下面第一个 await 之前），防止不同号码的并发请求一起越过 IP / 全站上限
     pend.site += 1;
-    if (ip) pend.ip.set(ip, (pend.ip.get(ip) ?? 0) + 1);
+    if (key) pend.ip.set(key, (pend.ip.get(key) ?? 0) + 1);
     try {
       return await sendAndStore(h, { e164, ip, now, sender });
     } finally {
       pend.site -= 1;
-      if (ip) { const n = (pend.ip.get(ip) ?? 1) - 1; if (n > 0) pend.ip.set(ip, n); else pend.ip.delete(ip); }
+      if (key) { const n = (pend.ip.get(key) ?? 1) - 1; if (n > 0) pend.ip.set(key, n); else pend.ip.delete(key); }
     }
   } finally {
     inflight.delete(e164);

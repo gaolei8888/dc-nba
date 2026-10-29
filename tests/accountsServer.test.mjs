@@ -112,6 +112,34 @@ test('账号关闭（默认）：三个接口与现状一样全量公开；/api/
   assert.equal(typeof h.body.proxy.ip, 'string');
   assert.equal(h.body.proxy.cookieSeen, false);
   assert.match(s.log(), /用户系统：关闭/);
+
+  // 关闭且没设 TRUST_PROXY：不设 trust proxy（Express 默认），伪造的 X-Forwarded-For 被忽略，proxy.ip 是套接字地址
+  const fwd = await s.get('/api/health', { headers: { 'x-forwarded-for': '1.2.3.4' } });
+  assert.notEqual(fwd.body.proxy.ip, '1.2.3.4');
+  assert.match(fwd.body.proxy.ip, /127\.0\.0\.1$/);
+  // 关闭时预测总表不建对象缓存（与上线前一样只有预压缩那一层）
+  assert.equal(h.body.caches.predBoard, undefined);
+});
+
+test('账号关闭但显式设了 TRUST_PROXY：按设置信任代理', async (t) => {
+  const s = await startServer(t, { DB_PATH: path.join(tmp, 'off-tp.db'), ENABLE_LEADERBOARD: '0', TRUST_PROXY: 'loopback' });
+  const fwd = await s.get('/api/health', { headers: { 'x-forwarded-for': '1.2.3.4' } });
+  assert.equal(fwd.body.proxy.ip, '1.2.3.4');
+});
+
+test('账号开启但库打不开：health 报 accounts.dbUnavailable，ok 与 HTTP 状态不变', async (t) => {
+  // DB_PATH 的上级是个普通文件：mkdir 失败 → 库打不开
+  const blocker = path.join(tmp, 'not-a-dir');
+  fs.writeFileSync(blocker, 'x');
+  const s = await startServer(t, {
+    DB_PATH: path.join(blocker, 'x.db'), ENABLE_LEADERBOARD: '0', ENABLE_LEDGER: '0', ENABLE_ACCOUNTS: '1', SMS_PROVIDER: 'console',
+  });
+  assert.match(s.log(), /用户系统：开启（库不可用/);
+  const h = await s.get('/api/health');
+  assert.equal(h.status, 200);
+  assert.equal(h.body.ok, true);
+  assert.deepEqual(h.body.alarms, ['accounts.dbUnavailable']);
+  assert.equal(h.body.sms, null);
 });
 
 test('账号开启（排行榜关）：未登录只拿预告；登录后全量；全站上限按环境变量、报警不改健康状态', async (t) => {
@@ -178,6 +206,8 @@ test('账号开启（排行榜关）：未登录只拿预告；登录后全量�
   assert.equal(h.body.sms.cap, 1);
   assert.equal(h.body.sms.mainland, 'console');
   assert.equal(h.body.sms.overseas, 'off');
+  // 开启时预测总表走对象缓存（锁定预告与放行全量共用）
+  assert.ok(h.body.caches.predBoard >= 1);
 
   // 回环代理被信任：X-Forwarded-For 生效
   const fwd = await s.get('/api/health', { headers: { 'x-forwarded-for': '9.9.9.9' } });

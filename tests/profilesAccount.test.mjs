@@ -9,7 +9,7 @@ globalThis.localStorage = {
   removeItem: (k) => mem.delete(k),
 };
 const { attachAccount, detachAccount } = await import('../web/src/lib/profiles.js');
-const { SESSION_KEY, loadSession, saveSession, clearSession, authHeaders, shouldDropSession } = await import('../web/src/lib/session.js');
+const { SESSION_KEY, loadSession, saveSession, clearSession, authHeaders, shouldDropSession, accountsDisabled } = await import('../web/src/lib/session.js');
 const { ApiError } = await import('../web/src/lib/apiError.js');
 
 const S = (profiles, activeId) => ({ version: 1, activeId, profiles });
@@ -112,4 +112,12 @@ test('ApiError：保留 body（验证码 428 带 captcha）', async () => {
   const e = await toApiError(res);
   assert.equal(e.body.captcha.id, 'c');
   assert.equal(e.status, 428);
+});
+
+test('accountsDisabled：/api/meta 说账号关闭（或没有该字段）才算关闭；meta 还没到不算', () => {
+  assert.equal(accountsDisabled({ features: { accounts: { enabled: false } } }), true);
+  assert.equal(accountsDisabled({ features: {} }), true); // 旧服务端：没有账号字段
+  assert.equal(accountsDisabled({ features: { accounts: { enabled: true } } }), false);
+  assert.equal(accountsDisabled(null), false);
+  assert.equal(accountsDisabled(undefined), false);
 });

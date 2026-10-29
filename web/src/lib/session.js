@@ -42,3 +42,10 @@ export function shouldDropSession(x) {
   if (x instanceof ApiError) return x.status === 401 && x.code === 'auth.sessionInvalid';
   return x?.locked === true && x.reason === 'session';
 }
+
+/**
+ * /api/meta 说用户系统关着（含账号库打不开、或旧服务端没有该字段）：本地会话已无用，
+ * 账号档案的 cloud.token（会话令牌）调排行榜会一律 401，启动时应清掉会话并 detachAccount。
+ * meta 还没拿到（null / undefined）不算关闭。
+ */
+export const accountsDisabled = (meta) => !!meta && meta.features?.accounts?.enabled !== true;

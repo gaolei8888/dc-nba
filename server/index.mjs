@@ -157,7 +157,11 @@ const app = express();
 // 真实访客 IP：链路是 访客 → Traefik → works-gateway(nginx, 私网) → 容器，只信任回环 / 链路本地 / 私网这几跳，
 // req.ip 取 X-Forwarded-For 从右往左第一个不受信任（公网）的地址；伪造的 X-Forwarded-For 左端无效。
 // 副作用（也是目的）：现有 rateLimit 的按 IP 计数也因此从「所有访客共用一个桶（网关 IP）」变成真正按人。
-app.set('trust proxy', process.env.TRUST_PROXY || 'loopback, linklocal, uniquelocal');   // 空串按未设置
+// 只在用户系统开着（ENABLE_ACCOUNTS=1）或显式设了 TRUST_PROXY（非空）时才设；两者都没有时保持 Express 默认
+// （不信任任何代理，req.ip 是套接字地址），关着开关时与上线前完全一样。
+if (process.env.ENABLE_ACCOUNTS === '1' || process.env.TRUST_PROXY) {
+  app.set('trust proxy', process.env.TRUST_PROXY || 'loopback, linklocal, uniquelocal');   // 空串按未设置
+}
 
 // JSON 压缩率极高（赛程 528KB → 约 60KB）。1000 在线用户下带宽是比 CPU
 // 更早触顶的资源，这一行比任何计算优化都值钱。
@@ -433,27 +437,31 @@ app.get('/api/schedule', wrap(async (req, res) => {
  * 走和赛程页完全相同的 predictSchedule + marketOf，同一场比赛两页的胜率必然一致。
  */
 /**
- * 预测总表全量负载（对象缓存，同参数只算一次；loadStore 时随 clearCaches 清掉）。
- * 放行时仍走 sendCached 的预压缩路径；锁定时拿同一个对象裁剪预告。
+ * 预测总表全量负载。
+ * 用户系统开着时走对象缓存（同参数只算一次；loadStore 时随 clearCaches 清掉）：放行时走 sendCached 的预压缩路径，
+ * 锁定时拿同一个对象裁剪预告。关着时不建对象缓存，与上线前一样只有 sendCached 那一层。
  */
 function boardFull(params, out) {
-  return cached('predBoard', JSON.stringify([params, out]), () => {
-    const games = store.schedule.games.filter((g) => g.type === 'regular');
-    const cn = new Map(store.teams.map((t) => [t.teamId, t.cn]));
-    const board = buildBoard(predictSchedule(getModel(params), games, out).map((g) => {
-      const market = marketOf(g.gameId, g.prediction);
-      return market ? { ...g, market } : g;
-    }), { teamName: (id) => cn.get(id) ?? String(id) });
-    return {
-      seasonYear: store.schedule.seasonYear,
-      oddsFetchedAt: store.odds?.fetchedAt ?? null,
-      ...board,
-      // 总结里也要直说投注回测的结论，不能只藏在「模拟投注」那一栏。
-      // summary 是中文原句（脚本 / 日志），summaryMsg 是同内容的消息码，前端按语言渲染
-      // 两条同条件（要有消息码）才追加，保证中文句与消息码永远成对，不会一边有一边无
-      ...paperSummaryLines(store.paper, board),
-    };
-  }, { max: 8 });   // 整块对象常驻内存：只留少量参数组合（默认参数占绝大多数），预压缩那层另有自己的 LRU
+  if (!ACCOUNTS_ON) return computeBoard(params, out);
+  // 整块对象常驻内存：只留少量参数组合（默认参数占绝大多数），预压缩那层另有自己的 LRU
+  return cached('predBoard', JSON.stringify([params, out]), () => computeBoard(params, out), { max: 8 });
+}
+function computeBoard(params, out) {
+  const games = store.schedule.games.filter((g) => g.type === 'regular');
+  const cn = new Map(store.teams.map((t) => [t.teamId, t.cn]));
+  const board = buildBoard(predictSchedule(getModel(params), games, out).map((g) => {
+    const market = marketOf(g.gameId, g.prediction);
+    return market ? { ...g, market } : g;
+  }), { teamName: (id) => cn.get(id) ?? String(id) });
+  return {
+    seasonYear: store.schedule.seasonYear,
+    oddsFetchedAt: store.odds?.fetchedAt ?? null,
+    ...board,
+    // 总结里也要直说投注回测的结论，不能只藏在「模拟投注」那一栏。
+    // summary 是中文原句（脚本 / 日志），summaryMsg 是同内容的消息码，前端按语言渲染
+    // 两条同条件（要有消息码）才追加，保证中文句与消息码永远成对，不会一边有一边无
+    ...paperSummaryLines(store.paper, board),
+  };
 }
 
 app.get('/api/predictions/summary', wrap(async (req, res) => {
@@ -922,6 +930,8 @@ app.get('/api/health', wrap((req, res) => {
   // deploy/refresh.sh 的回滚看容器健康，不能被短信报警触发回滚
   const alarms = [];
   let sms = null;
+  // 开关开着但账号库打不开：登录整体不可用（/api/auth 全 503、被锁接口一律预告），要报出来
+  if (ACCOUNTS_ON && !accountsDb) alarms.push('accounts.dbUnavailable');
   if (accountsDb) {
     try {
       sms = { ...smsStats(accountsDb, { now: clock(), limits: SMS_LIMITS }), mainland: SMS_MAINLAND, overseas: OVERSEAS_ON ? 'twilio' : 'off' };
