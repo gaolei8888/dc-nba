@@ -98,7 +98,7 @@ paper_bets（本季前向账本，只读）→ forwardCandidates()（主线程�
 | C-ev | EV > 0 且数据质量合格（`qualityOk`） |
 | D-kelly-full / half / quarter | 同 B 的选边，Kelly 乘数 1 / 0.5 / 0.25，单注上限 5% |
 
-定注：A / B / C 固定 1 单位；D = 日初资金 × 截后 Kelly 分数。初始资金 100。
+定注：A / B / C 每注恒为 1 单位，不受资金约束（资金曲线只是累计盈亏的记账，可以为负）；D = 日初资金 × 截后 Kelly 分数。初始资金 100。
 `qualityOk`：open 情景要求 `priceAt = 'open'`，close 情景要求 `priceAt = 'close'`（current 冒充 close 不行）；不得带 `skippedAnomaly` / `bestPrice`；前向账本要求 `current` 价且记录时间早于开赛时间。
 
 ## 7. 成本假设（`DEFAULT_COSTS`、`SLIPPAGE_OPTIONS`）
@@ -106,7 +106,7 @@ paper_bets（本季前向账本，只读）→ forwardCandidates()（主线程�
 - 默认全 0：`feeOnWin = 0`（赢注净利的比例，允许 [0, 1)）、`slippagePts = 0`（美式点数）、`maxStake = null`（单注限额）。
 - 滑点敏感性取 0 / 5 / 10 点（`SLIPPAGE_OPTIONS = [0, 5, 10]`）。
 - 决策（选边、edge、EV、Kelly）用报价；结算用滑点后的价；收益一律按实际价。
-- 同日敞口（裁定 M10）：一个比赛日各注都用日初资金定注；当日下注总额超过日初资金则按比例缩减（标 `exposureScaled`）；资金耗尽后不再下注。
+- 同日敞口（裁定 M10，只对 Kelly）：D 在一个比赛日各注都用日初资金定注；当日下注总额超过日初资金则按比例缩减（标 `exposureScaled`）；资金耗尽后不再下注。固定金额策略（A / B / C）不受这两条约束，每注恒为 1 单位（`maxStake` 仍适用），否则资金耗尽会截断它们的 ROI 并影响策略选择（最终审阅 I1）。
 
 ## 8. 切分与策略选择（`betSplits.mjs`）
 
