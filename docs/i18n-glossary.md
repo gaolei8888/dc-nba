@@ -35,8 +35,8 @@
 | 轮换 | rotation | lineup rotation | 已定 |
 | 替补级 | replacement level | bench level | 已定 |
 | 收缩 | shrinkage | — | 已定 |
-| 逐项年龄曲线 | per-stat age curves | — | 待确认 |
-| 尺子（验证标准，如「第二把尺子」） | yardstick | — | 待确认 |
+| 逐项年龄曲线 | per-stat age curves | — | 已定 |
+| 尺子（验证标准，如「第二把尺子」） | yardstick | — | 已定 |
 | 缺阵 | Out | Injured Out | 已定 |
 | 出战成疑 | Questionable | — | 已定 |
 | 大概率出战 | Probable | — | 已定 |
