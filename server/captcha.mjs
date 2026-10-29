@@ -2,7 +2,7 @@
  * 自写 SVG 字符图形验证（零依赖）。
  *  - 4 个字符取自去掉易混淆字符（I/L/O/0/1）的字母表，用 crypto.randomInt 选。
  *  - SVG 不含任何 <text>/字符数据：每个字符用内置笔画字体（10×14 网格的折线）画成 <path>，
- *    随机旋转 ±25°、缩放、偏移并对每个点做轻微抖动；另加 4–6 条随机贝塞尔干扰线。
+ *    深色、≥2px，随机旋转 ±25°、缩放、偏移并对每个点做轻微抖动；另加 4–6 条浅色细（1px）贝塞尔干扰线，画在字符后面。
  *    字符 <path> 按随机顺序写入 DOM，按出现顺序读不出答案。
  *  - 答案只存 sha256(大写)；内存 Map，2 分钟有效、一次性（答错也作废）；
  *    issue 时先清过期，再按 max 丢最旧，保证有界。
@@ -12,7 +12,7 @@ import crypto from 'node:crypto';
 
 export const CAPTCHA_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const LEN = 4;
-const W = 120;
+const W = 150;
 const H = 44;
 const HOUR_MS = 3_600_000;
 
@@ -33,7 +33,9 @@ function shuffle(a) {
   return a;
 }
 
-const color = () => `rgb(${rnd(20, 140)},${rnd(20, 140)},${rnd(20, 140)})`;
+/** 字符笔画：深色；干扰线：浅色低饱和，二者拉开对比，干扰线不会被当成笔画 */
+const color = () => `rgb(${rnd(20, 110)},${rnd(20, 110)},${rnd(20, 110)})`;
+const lightColor = () => `rgb(${rnd(150, 210)},${rnd(150, 210)},${rnd(150, 210)})`;
 
 /** 笔画字体：10×14 网格（y 向下），每个字符是若干条折线 */
 export const FONT = {
@@ -74,7 +76,7 @@ const jit = () => (crypto.randomInt(-40, 41)) / 100; // ±0.4 格
 
 /** 一个字符 → <path>：以字形中心 (5,7) 为原点缩放、旋转，再平移到 (cx,cy)，逐点抖动 */
 function glyphPath(ch, cx, cy) {
-  const k = rnd(15, 21) / 10;
+  const k = rnd(13, 17) / 10; // 缩放上限 1.7：旋转后字宽 ≤ 槽宽，相邻字不粘连
   const a = (rnd(-25, 25) * Math.PI) / 180;
   const sin = Math.sin(a);
   const cos = Math.cos(a);
@@ -85,20 +87,19 @@ function glyphPath(ch, cx, cy) {
     const Y = cy + px * sin + py * cos;
     return `${i ? 'L' : 'M'}${X.toFixed(1)} ${Y.toFixed(1)}`;
   }).join('')).join('');
-  return `<path class="g" d="${d}" stroke="${color()}" stroke-width="${rnd(18, 26) / 10}" stroke-linecap="round" stroke-linejoin="round" fill="none"/>`;
+  return `<path class="g" d="${d}" stroke="${color()}" stroke-width="${rnd(22, 28) / 10}" stroke-linecap="round" stroke-linejoin="round" fill="none"/>`;
 }
 
 function renderSvg(text) {
   const slot = W / (text.length + 1);
-  const glyphs = [...text].map((ch, i) => glyphPath(ch, slot * (i + 1) + rnd(-3, 3), H / 2 + rnd(-3, 3)));
+  const glyphs = [...text].map((ch, i) => glyphPath(ch, slot * (i + 1) + rnd(-2, 2), H / 2 + rnd(-3, 3)));
   const noise = [];
   for (let i = 0, n = rnd(4, 6); i < n; i++) {
-    noise.push(`<path class="n" d="M${rnd(0, W)} ${rnd(0, H)} C${rnd(0, W)} ${rnd(0, H)} ${rnd(0, W)} ${rnd(0, H)} ${rnd(0, W)} ${rnd(0, H)}" stroke="${color()}" stroke-width="${rnd(1, 2)}" fill="none"/>`);
+    noise.push(`<path class="n" d="M${rnd(0, W)} ${rnd(0, H)} C${rnd(0, W)} ${rnd(0, H)} ${rnd(0, W)} ${rnd(0, H)} ${rnd(0, W)} ${rnd(0, H)}" stroke="${lightColor()}" stroke-width="1" fill="none"/>`);
   }
-  // 干扰线夹在字符前后，部分线盖在字上
+  // 干扰线全部画在字符后面（先画），不遮字
   const parts = shuffle(glyphs);
-  const mid = Math.ceil(noise.length / 2);
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="#f3f4f6"/>${noise.slice(0, mid).join('')}${parts.join('')}${noise.slice(mid).join('')}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="#f3f4f6"/>${noise.join('')}${parts.join('')}</svg>`;
 }
 
 /**

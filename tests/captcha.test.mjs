@@ -100,3 +100,29 @@ test('noteLimited：一小时内 needsCaptcha 为 true，之后为 false；有�
   s.noteLimited(null, now);
   assert.equal(s.limitedSize(), 2);
 });
+
+test('排版：300 张里相邻字符包围盒重叠 ≤10%，且都在 viewBox 内；干扰线浅色细线画在字前', () => {
+  const s = createCaptchaStore();
+  for (let n = 0; n < 300; n++) {
+    const svg = svgOf(s.issue(0));
+    const [vw, vh] = svg.match(/viewBox="0 0 (\d+) (\d+)"/).slice(1).map(Number);
+    const boxes = [...svg.matchAll(/<path [^>]*class="g" d="([^"]+)"/g)].map((m) => {
+      const pts = [...m[1].matchAll(/[ML]([-\d.]+) ([-\d.]+)/g)].map((p) => [Number(p[1]), Number(p[2])]);
+      const xs = pts.map((p) => p[0]); const ys = pts.map((p) => p[1]);
+      return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
+    }).sort((a, b) => a.x0 - b.x0);
+    assert.equal(boxes.length, 4);
+    for (const b of boxes) assert.ok(b.x0 >= 0 && b.x1 <= vw && b.y0 >= 0 && b.y1 <= vh, '出界');
+    for (let i = 0; i < 3; i++) {
+      const [a, b] = [boxes[i], boxes[i + 1]];
+      const ov = Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0));
+      const small = Math.min(a.x1 - a.x0, b.x1 - b.x0);
+      assert.ok(ov <= 0.1 * small, `重叠 ${ov} / ${small}`);
+    }
+    // 干扰线都在第一个字符 path 之前
+    assert.ok(svg.lastIndexOf('class="n"') < svg.indexOf('class="g"'));
+    for (const m of svg.matchAll(/class="n" [^>]*stroke="rgb\((\d+),(\d+),(\d+)\)" stroke-width="(\d+)"/g)) {
+      assert.ok([m[1], m[2], m[3]].every((v) => v >= 150) && m[4] === '1');
+    }
+  }
+});
