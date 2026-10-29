@@ -4,7 +4,7 @@
  *  - 凭证一律 `Authorization: Bearer <会话令牌>`，不用 cookie。
  *  - 错误一律走 sendError：{ error: 中文（只给日志 / curl）, code, params } + 对应 HTTP 状态，前端按 code 翻译。
  *  - 发码顺序：同意 → 号码规范化 → 选发送器（disabled 直接 503，不调用、不记流水）
- *    → 限频检查（IP / 号码级拒绝时记进 captcha.noteLimited）→ 是否需要图形验证 → 发送。
+ *    → 限频检查（触发小时 / 每日上限时记进 captcha.noteLimited；60 秒重发冷却不算）→ 是否需要图形验证 → 发送。
  *  - 绑定玩家档案时，匿名档案 id 只能由服务端从匿名令牌解析（players.authenticate），绝不取自请求体。
  *  - 日志里手机号一律脱敏，绝不打印验证码与令牌。
  */
@@ -41,8 +41,11 @@ const ZH = {
   'err.internal': '服务器内部错误',
 };
 
-/** 这些拒绝属于「IP / 号码级限频」：之后一小时该 IP 要先过图形验证 */
-const LIMIT_CODES = new Set(['auth.cooldown', 'auth.phoneDailyLimit', 'auth.ipLimit']);
+/**
+ * 这些拒绝属于「小时 / 每日上限」：之后一小时该 IP 要先过图形验证。
+ * 60 秒重发冷却（auth.cooldown）故意不在内——正常用户多点一次不该被要求图形验证。
+ */
+const LIMIT_CODES = new Set(['auth.ipLimit', 'auth.phoneDailyLimit', 'auth.smsDailyCap']);
 
 /** 验证失败的 HTTP 状态：错满次数按 429，其余 400 */
 const VERIFY_STATUS = { 'auth.codeLocked': 429 };

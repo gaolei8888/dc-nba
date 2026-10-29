@@ -4,7 +4,7 @@ import express from 'express';
 import { DatabaseSync } from 'node:sqlite';
 import { ACCOUNT_SCHEMA } from '../server/db.mjs';
 import { CONSENT_VERSION } from '../server/accounts.mjs';
-import { createCaptchaStore } from '../server/captcha.mjs';
+import { createCaptchaStore, needsCaptcha } from '../server/captcha.mjs';
 import { disabledSender } from '../server/sms.mjs';
 import { gate, teaserPaper } from '../server/entitlements.mjs';
 import { createAuthRouter, userFromRequest } from '../server/authRoutes.mjs';
@@ -237,7 +237,7 @@ test('POST /captcha 取一张图；答对可直接带上发码', async (t) => {
   assert.equal(r.status, 200, JSON.stringify(r.body));
 });
 
-test('触发号码冷却后，该 IP 一小时内要先过图形验证', async (t) => {
+test('60 秒重发冷却只回 auth.cooldown，不把该 IP 记为限频', async (t) => {
   const s = await setup(t);
   const send = (phone, extra = {}) => s.post('/api/auth/code', { cc: '86', phone, consent: true, ...extra });
   assert.equal((await send('13800138001')).status, 200);
@@ -245,13 +245,10 @@ test('触发号码冷却后，该 IP 一小时内要先过图形验证', async (
   assert.equal(again.status, 429);
   assert.equal(again.body.code, 'auth.cooldown');
   assert.equal(typeof again.body.params.sec, 'number');
-  // 换号码也要图形验证（IP 已被记为触发过限频）
+  assert.equal(s.deps.captcha.limitedAt('203.0.113.1', T0), null);
+  assert.equal(needsCaptcha({ ipSendsLastHour: 1, siteToday: 1, cap: 500, now: T0, store: s.deps.captcha, ip: '203.0.113.1' }), false);
+  // 换号码不需要图形验证
   s.tick(61_000);
-  const next = await send('13800138002');
-  assert.equal(next.status, 428);
-  assert.equal(next.body.code, 'auth.captchaRequired');
-  // 一小时后恢复
-  s.tick(3_600_000);
   assert.equal((await send('13800138002')).status, 200);
 });
 
@@ -263,6 +260,7 @@ test('IP 每小时上限：429 auth.ipLimit 透传', async (t) => {
   assert.equal(r.status, 429);
   assert.equal(r.body.code, 'auth.ipLimit');
   assert.equal(s.deps.captcha.limitedAt('203.0.113.1', T0 + 61_000), T0 + 61_000);
+  assert.equal(needsCaptcha({ ipSendsLastHour: 0, siteToday: 0, cap: 500, now: T0 + 61_000, store: s.deps.captcha, ip: '203.0.113.1' }), true);
 });
 
 test('发送失败：502 auth.smsFailed，之后用任何码验证都是 auth.codeExpired', async (t) => {
