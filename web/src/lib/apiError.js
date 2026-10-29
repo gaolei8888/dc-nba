@@ -3,12 +3,14 @@
 // 单独成文件（不依赖 import.meta.env），便于 node 直接测试。
 
 export class ApiError extends Error {
-  constructor({ status, code = null, params = {}, message = '' }) {
+  constructor({ status, code = null, params = {}, message = '', body = null }) {
     super(message || `HTTP ${status}`);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
     this.params = params ?? {};
+    // 完整响应体：登录流程要从 428/400 里取图形验证（body.captcha）
+    this.body = body;
   }
 }
 
@@ -20,6 +22,7 @@ export async function toApiError(res) {
     code: typeof body?.code === 'string' ? body.code : null,
     params: body?.params && typeof body.params === 'object' ? body.params : {},
     message: typeof body?.error === 'string' ? body.error : '',
+    body: body && typeof body === 'object' && Object.keys(body).length ? body : null,
   });
 }
 

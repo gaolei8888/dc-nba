@@ -1,4 +1,5 @@
 import { ApiError, toApiError } from './apiError.js';
+import { authHeaders, clearSession, shouldDropSession } from './session.js';
 
 // fetch 自身失败（断网、DNS、CORS）统一成 status 0 的网络错误；其它 TypeError 不在此列
 const request = (url, init) => fetch(url, init).catch(() => {
@@ -27,11 +28,19 @@ const API = `${import.meta.env.BASE_URL}api`.replace(/\/{2,}/g, '/');
 
 const get = (path, params, headers) =>
   request(`${API}${path}${qs(params)}`, headers ? { headers } : undefined).then(json);
-const post = (path, body) => request(`${API}${path}`, {
+const post = (path, body, headers) => request(`${API}${path}`, {
   method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
+  headers: { 'Content-Type': 'application/json', ...headers },
   body: JSON.stringify(body),
 }).then(json);
+
+// 被锁接口：只带账号会话令牌（绝不带排行榜玩家令牌——服务端会把玩家令牌当匿名）。
+// 会话失效（401 auth.sessionInvalid，或预告里 reason 为 session）→ 清掉本地会话，
+// 让界面回到未登录；本函数不改界面，调用方通过再次读 loadSession 得知。
+const locked = (path, params, token) => get(path, params, authHeaders({ token }))
+  .then((d) => { if (shouldDropSession(d)) clearSession(); return d; })
+  .catch((e) => { if (shouldDropSession(e)) clearSession(); throw e; });
+const sessionHeaders = (token) => authHeaders({ token });
 
 /** 把全局缺阵名单编码进 GET 查询串 */
 export const withOut = (params, out) => ({
@@ -48,13 +57,21 @@ export const api = {
   team: (id, params) => get(`/teams/${id}`, params),
   players: (params) => get('/players', params),
   schedule: (params) => get('/schedule', params),
-  predictionBoard: (params) => get('/predictions/summary', params),
-  paper: () => get('/paper'),
-  shadow: () => get('/shadow'),
+  predictionBoard: (params, token) => locked('/predictions/summary', params, token),
+  paper: (token) => locked('/paper', null, token),
+  shadow: (token) => locked('/shadow', null, token),
   rankings: (params) => get('/rankings', params),
   predict: (body) => post('/predict', body),
   simulate: (body) => post('/simulate', body),
   refresh: () => post('/refresh', {}),
+
+  // ---- 账号（手机号 + 短信验证码）。authCode 需要图形验证时抛 ApiError(428/400)，body.captcha = { id, image }
+  authCaptcha: () => post('/auth/captcha', {}),
+  authCode: (body) => post('/auth/code', body),
+  authVerify: (body) => post('/auth/verify', body),
+  authMe: (token) => get('/auth/me', null, sessionHeaders(token)),
+  authLogout: (token) => post('/auth/logout', {}, sessionHeaders(token)),
+  authPrefs: (token, prefs) => post('/auth/prefs', prefs, sessionHeaders(token)),
 
   // ---- 排行榜（服务端可能未启用，调用方需容错）
   createPlayer: (name) => post('/players', { name }),

@@ -1,16 +1,15 @@
 /**
  * 玩家档案管理。
  *
- * 为什么不做服务端账号：
- *  1. 作品部署在 /works/ 路径下，Traefik 中间件双向剥离 Cookie，
- *     传统会话用不了，只能把 token 放 localStorage，安全性反而更差。
- *  2. 服务端目前无状态、数据快照只读、容器不挂卷。加账号就要加卷，
- *     随之而来的是备份、迁移、权限一整套负担。
- *  3. 存密码是要负安全责任的，一个展示作品不值得。
- *
- * 所以身份只是"这台浏览器上的一个本地档案"。多人各玩各的靠多档案切换，
- * 跨设备靠导出/导入存档码。真需要跨用户排行榜再上服务端，
- * 届时这里的 id + name 结构可以直接复用。
+ * 身份模型：账号是可选的，不登录也能完整地玩。
+ *  - 不登录：身份只是"这台浏览器上的一个本地档案"，多人各玩各的靠多档案切换，
+ *    跨设备靠导出/导入存档码。
+ *  - 登录（手机号 + 短信验证码，无密码）：服务端账号对应一个排行榜玩家档案，
+ *    登录时由 attachAccount 把它对应到本地档案（规则见该函数）；
+ *    账号档案的 cloud.account === true，cloud.token 是账号会话令牌，
+ *    退出登录时 detachAccount 去掉这些 cloud，本地档案与游戏存档保留。
+ *  会话令牌本身的存取见 session.js；这里只在账号档案的 cloud 里留一份，
+ *  让排行榜接口沿用原有的 cloud.token 取身份（服务端认会话令牌兼作玩家身份）。
  */
 
 // 与主站及其它 /works/* 作品同源，键名必须带作品前缀
@@ -100,6 +99,37 @@ export function linkCloud(state, id, cloud) {
   return saveProfiles({
     ...state,
     profiles: state.profiles.map((p) => (p.id === id ? { ...p, cloud } : p)),
+  });
+}
+
+/**
+ * 登录成功后把服务端账号的玩家档案对应到本地档案：
+ *  1. 本机已有 cloud.playerId 相同的档案 → 换上会话令牌、标 account，并切过去；
+ *  2. 否则当前档案没有 cloud（或绑的就是该玩家）→ 绑到当前档案；
+ *  3. 否则（当前档案绑着别的玩家）→ 新建本地档案（名取账号档案名）绑上并切过去，
+ *     本机原有的匿名档案原样保留，不并入。
+ * player 为 null（账号还没有玩家档案）→ 原样返回。
+ */
+export function attachAccount(state, { player, token }) {
+  if (!player) return state;
+  const cloud = { playerId: player.id, token, name: player.name, account: true };
+  const same = state.profiles.find((p) => p.cloud?.playerId === player.id);
+  if (same) return switchProfile(linkCloud(state, same.id, cloud), same.id);
+  const cur = state.profiles.find((p) => p.id === state.activeId);
+  if (cur && !cur.cloud) return linkCloud(state, cur.id, cloud);
+  const made = createProfile(state, player.name, player.name);
+  return linkCloud(made, made.activeId, cloud);
+}
+
+/** 退出登录：去掉所有账号档案的 cloud（本地档案与存档保留，下次登录可重新对应） */
+export function detachAccount(state) {
+  return saveProfiles({
+    ...state,
+    profiles: state.profiles.map((p) => {
+      if (p.cloud?.account !== true) return p;
+      const { cloud, ...rest } = p;
+      return rest;
+    }),
   });
 }
 
