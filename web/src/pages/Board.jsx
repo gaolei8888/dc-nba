@@ -3,12 +3,24 @@ import { useApp, go } from '../App.jsx';
 import { useI18n } from '../i18n/react.jsx';
 import { renderMsg } from '../i18n/msg.js';
 import { api, withOut } from '../lib/api.js';
+import { loadSession } from '../lib/session.js';
 import {
-  TeamCell, Loading, ErrorBox, ProbBar, StatTile, Segmented, DataTable,
+  TeamCell, Loading, ErrorBox, ProbBar, StatTile, Segmented, DataTable, LockIcon,
 } from '../components/common.jsx';
+import LockedTeaser from '../components/LockedTeaser.jsx';
 import { probColor, pct, num, signed } from '../lib/format.js';
 
-const tabs = (t) => ['stats', 'done', 'next', 'bet'].map((value) => ({ value, label: t(`board.tab.${value}`) }));
+// betLocked：未登录时「模拟投注」标签带锁标（条件与侧栏一致）
+const tabs = (t, betLocked) => ['stats', 'done', 'next', 'bet'].map((value) => ({
+  value,
+  label: value === 'bet' && betLocked ? <>{t(`board.tab.${value}`)} <LockIcon /></> : t(`board.tab.${value}`),
+}));
+
+/**
+ * 被锁接口只带账号会话令牌（loadSession 现读，绝不带排行榜玩家令牌）；
+ * 每次返回后让 App 重新对齐会话：失效时界面回到未登录。
+ */
+const sessionToken = () => loadSession()?.token;
 
 const ci = (c) => (c?.lo == null ? '—' : `${pct(c.lo, 0)} – ${pct(c.hi, 0)}`);
 const roi = (v) => (v == null ? '—' : `${signed(v * 100)}%`);
@@ -215,9 +227,19 @@ const d4 = (c) => (c ? `${c.mean >= 0 ? '+' : ''}${c.mean.toFixed(4)} [${c.lo.to
 /** 影子运行：伤病报告三套 + 阵容+战绩榜两套，只记录、不影响页面显示的预测（scripts/shadow.mjs） */
 function ShadowCard() {
   const { t } = useI18n();
+  const { session, syncSession } = useApp();
+  const token = session?.token;
   const [s, setS] = useState(null);
-  useEffect(() => { api.shadow().then(setS).catch(() => setS({ available: false })); }, []);
-  if (!s?.available) return null;
+  useEffect(() => {
+    let alive = true;
+    api.shadow(sessionToken())
+      .then((d) => alive && setS(d))
+      .catch(() => alive && setS({ available: false }))
+      .finally(() => alive && syncSession());
+    return () => { alive = false; };
+  }, [token, syncSession]);
+  // 锁定时不渲染
+  if (!s?.available || s.locked) return null;
   return (
     <div className="card">
       <h2>{t('board.shadow.title')}
@@ -287,12 +309,31 @@ const MIN_LEDGER = 100;
 
 function PaperBetting({ teamById }) {
   const { t, fmt } = useI18n();
+  const { session, syncSession } = useApp();
+  const token = session?.token;
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
   const [season, setSeason] = useState('all');
-  useEffect(() => { api.paper().then(setD).catch(setErr); }, []);
+  useEffect(() => {
+    let alive = true;
+    setErr(null);
+    api.paper(sessionToken())
+      .then((x) => alive && setD(x))
+      .catch((e) => alive && setErr(e))
+      .finally(() => alive && syncSession());
+    return () => { alive = false; };
+  }, [token, syncSession]);
   if (err) return <ErrorBox error={err} />;
   if (!d) return <Loading />;
+  if (d.locked) {
+    const tz = d.teaser ?? {};
+    const stats = [];
+    if (tz.backtestBets != null) {
+      stats.push({ label: t('lock.backtestBets'), value: tz.backtestBets, unit: t('lock.betsUnit') });
+    }
+    if (tz.ledgerCaptured != null) stats.push({ label: t('lock.ledgerCaptured'), value: tz.ledgerCaptured, unit: t('common.unit.games', { count: tz.ledgerCaptured }) });
+    return <LockedTeaser stats={stats} onLogin={() => go('login/board')} />;
+  }
   const { backtest: bt, ledger: lg } = d;
   // 博彩商名按 id 取 board.book.<id>（不用数据文件里的中文名）；未知 id 原样显示
   const name = (k) => { const v = t(`board.book.${k}`); return v === `board.book.${k}` ? k : v; };
@@ -484,24 +525,62 @@ function PaperBetting({ teamById }) {
 }
 
 export default function Board() {
-  const { meta, teamById, out, params } = useApp();
+  const { meta, teamById, out, params, accounts, session, syncSession } = useApp();
   const { t } = useI18n();
   const [data, setData] = useState({ loading: true });
   const [tab, setTab] = useState('stats');
   const [more, setMore] = useState(false);
+  const token = session?.token;
+  const betLocked = !!accounts?.enabled && !session;
 
   useEffect(() => {
     let alive = true;
     setData((d) => ({ ...d, loading: true }));
-    api.predictionBoard(withOut(params, out))
+    api.predictionBoard(withOut(params, out), sessionToken())
+      // 整体替换：从锁定切到全量（或反过来）时不留上一份的字段
       .then((d) => alive && setData({ loading: false, ...d }))
-      .catch((error) => alive && setData({ loading: false, error }));
+      .catch((error) => alive && setData({ loading: false, error }))
+      .finally(() => alive && syncSession());
     return () => { alive = false; };
-  }, [params, out]);
+  }, [params, out, token, syncSession]);
 
   if (data.error) return <ErrorBox error={data.error} />;
   if (!data.summaryMsg) return <Loading />;
   const d = data;
+
+  if (d.locked) {
+    const first = d.summaryMsg[0] ? renderMsg(d.summaryMsg[0], t) : renderMsg(d.summary?.[0] ?? null, t);
+    const tz = d.teaser ?? {};
+    const toLogin = () => go('login/board');
+    return (
+      <>
+        <div className="page-head">
+          <h1>{t('board.title', { season: meta.targetSeason })}</h1>
+          <p>{t('board.intro')}</p>
+        </div>
+
+        {first && (
+          <div className="card">
+            <h2>{t('board.summary')}<span className="sub">{t('board.summarySub')}</span></h2>
+            <p style={{ margin: '0 0 6px', lineHeight: 1.75 }}>{first}</p>
+          </div>
+        )}
+
+        <div className="grid cols-2" style={{ margin: '14px 0' }}>
+          <StatTile label={t('lock.completed')} value={tz.completed ?? '—'} unit={tz.completed != null ? t('common.unit.games', { count: tz.completed }) : undefined} />
+          <StatTile label={t('lock.remaining')} value={tz.remaining ?? '—'} unit={tz.remaining != null ? t('common.unit.games', { count: tz.remaining }) : undefined} />
+        </div>
+
+        <div style={{ marginBottom: 14, maxWidth: '100%', overflowX: 'auto' }}>
+          <Segmented value={tab} onChange={setTab} options={tabs(t, betLocked)} />
+        </div>
+        {data.loading && <Loading text={t('board.updating')} />}
+
+        {tab === 'bet' ? <PaperBetting teamById={teamById} /> : <LockedTeaser onLogin={toLogin} />}
+      </>
+    );
+  }
+
   const { overall: o } = d;
 
   return (
@@ -532,7 +611,7 @@ export default function Board() {
       </div>
 
       <div style={{ marginBottom: 14 }}>
-        <Segmented value={tab} onChange={setTab} options={tabs(t)} />
+        <Segmented value={tab} onChange={setTab} options={tabs(t, betLocked)} />
       </div>
       {data.loading && <Loading text={t('board.updating')} />}
 

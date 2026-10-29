@@ -394,7 +394,7 @@ table.data .dim { color: var(--text-faint); }
   color: var(--text-faint); font-weight: 640;
 }
 
-select, input[type='text'], input[type='search'], input[type='number'], input[type='date'] {
+select, input[type='text'], input[type='tel'], input[type='search'], input[type='number'], input[type='date'] {
   background: var(--glass);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
@@ -648,3 +648,59 @@ table.data th.left .th-label { align-items: flex-start; }
   font-size: 10.5px; line-height: 1.5;
   background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn);
 }
+
+/* ------------------------------------------------------------ 用户系统：锁标、预告、登录 */
+
+.lock-icon { display: inline-block; vertical-align: -1px; flex: none; }
+.nav-lock { margin-left: auto; display: inline-flex; color: var(--text-faint); }
+.nav-item.active .nav-lock { color: var(--text-dim); }
+
+/* 预告：下层静态假骨架模糊，上层居中按钮 */
+.locked-wrap { position: relative; overflow: hidden; min-height: 280px; }
+.locked-blur {
+  filter: blur(6px); pointer-events: none; user-select: none;
+  opacity: .55; color: var(--text-faint);
+}
+.locked-bar {
+  height: 12px; margin: 10px 0; border-radius: 6px;
+  background: var(--line);
+}
+.locked-curve { width: 100%; height: 110px; display: block; margin: 8px 0; color: var(--team-line); }
+.locked-cta {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; padding: 16px; text-align: center;
+}
+.locked-cta .btn { white-space: normal; max-width: 100%; }
+.locked-cta .note { margin: 0; max-width: 440px; }
+.locked-line { margin: 0; color: var(--text-dim); }
+.locked-stats {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px; width: 100%; max-width: 420px;
+}
+
+/* 侧栏账号区 */
+.side-account {
+  display: flex; align-items: center; gap: 6px; margin-top: 6px;
+  font-size: 11.5px; color: var(--text-dim);
+}
+.side-account > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-account .nav-item { width: auto; padding: 2px 6px; margin-left: auto; font-size: 11.5px; }
+
+/* 登录页 */
+.login-page { max-width: 460px; }
+.login-form { display: flex; flex-direction: column; gap: 14px; }
+.login-field { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; }
+.login-field > span:first-child { color: var(--text-dim); }
+.login-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.login-row > input { flex: 1 1 140px; min-width: 0; }
+.login-field > input { width: 100%; min-width: 0; }
+.login-hint { margin: 0; }
+.login-captcha {
+  display: block; border-radius: 6px; border: 1px solid var(--line);
+  background: #fff; max-width: 100%; height: auto;
+}
+.login-consent { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; line-height: 1.6; cursor: pointer; }
+.login-consent input { margin-top: 3px; }
+.login-consent a { color: var(--team); }
+.login-submit { width: 100%; padding: 9px 14px; }

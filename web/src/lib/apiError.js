@@ -1,6 +1,7 @@
 // 接口错误：保留状态码与机器可读的 code，界面按 code 翻译。
 // 服务端 body.error 的中文原文只放在 message 里供日志排查，永远不显示给用户。
 // 单独成文件（不依赖 import.meta.env），便于 node 直接测试。
+// `body` 可能含图形验证载荷（captcha.id / image）——绝不整体打印到日志或原样显示，只按需取字段。
 
 export class ApiError extends Error {
   constructor({ status, code = null, params = {}, message = '', body = null }) {

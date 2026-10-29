@@ -368,3 +368,15 @@ export function MarketCompare({ market, prediction, home, away }) {
     </div>
   );
 }
+
+/** 锁标：被锁内容（预测总表、模拟投注）在未登录时的提示，内联 SVG，颜色随文字 */
+export function LockIcon({ size = 12 }) {
+  const { t } = useI18n();
+  return (
+    <svg className="lock-icon" width={size} height={size} viewBox="0 0 16 16" role="img" aria-label={t('lock.badge')}>
+      <title>{t('lock.badge')}</title>
+      <rect x="2.5" y="7" width="11" height="8" rx="1.8" fill="currentColor" />
+      <path d="M5 7V5a3 3 0 0 1 6 0v2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
