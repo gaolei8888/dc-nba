@@ -30,6 +30,7 @@ export default {
     http: 'Request failed ({status})',
     network: 'Network error. Check your connection and try again.',
     unknown: 'Something went wrong. Please try again.',
+    badJson: 'Malformed request body.',
     rateLimited: 'Too many requests. Please try again shortly.',
     storageUnavailable: 'Server storage is unavailable. Your local progress is not affected.',
     tokenInvalid: 'Invalid token. Please create a new player.',

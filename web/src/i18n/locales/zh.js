@@ -30,6 +30,7 @@ export default {
     http: '请求失败（{status}）',
     network: '网络异常，请检查连接后重试',
     unknown: '出错了，请稍后重试',
+    badJson: '请求格式不正确',
     rateLimited: '请求过于频繁，请稍后再试',
     storageUnavailable: '服务端存储暂不可用，本地进度不受影响',
     tokenInvalid: '令牌无效，请重新创建玩家',

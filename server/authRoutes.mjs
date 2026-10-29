@@ -10,7 +10,7 @@
  */
 import express from 'express';
 import { normalizePhone, maskPhone } from './phone.mjs';
-import { checkSendAllowed, requestCode, verifyCode, DEFAULT_LIMITS } from './loginCodes.mjs';
+import { checkSendAllowed, requestCode, verifyCode, pendingFor, DEFAULT_LIMITS } from './loginCodes.mjs';
 import {
   CONSENT_VERSION, findOrCreateUser, createSession, sessionUser, revokeSession,
   bindPlayer, setPrefs, publicUser,
@@ -124,7 +124,9 @@ export function createAuthRouter({
       if (LIMIT_CODES.has(r.code)) captcha.noteLimited(ip, now);
       return fail(res, r.status ?? 429, r.code, r.params ?? {});
     };
-    const gate = checkSendAllowed(h, { e164: p.e164, ip, now, limits });
+    // 带上在途数：并发请求还没写进 sms_sends，不算进去的话同一 IP 并发的第 3 个也能跳过图形验证
+    const inFlight = pendingFor(h, ip);
+    const gate = checkSendAllowed(h, { e164: p.e164, ip, now, limits, pendingIp: inFlight.ip, pendingSite: inFlight.site });
     if (!gate.ok) return limited(gate);
 
     const need = needsCaptcha({

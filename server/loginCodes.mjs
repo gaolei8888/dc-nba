@@ -59,6 +59,15 @@ const pendingOf = (h) => {
   if (!p) { p = { ip: new Map(), site: 0 }; pendingByDb.set(h, p); }
   return p;
 };
+/**
+ * 某库句柄上此刻的在途发送数：{ ip: 该 IP 在途数, site: 全站在途数 }。
+ * 路由层在 requestCode 之前自己做一次 checkSendAllowed（决定要不要图形验证）时也要带上它，
+ * 否则同一 IP 并发打进来的请求都看到「库里 0 条」，第 3 个起也能跳过图形验证。
+ */
+export function pendingFor(h, ip) {
+  const p = pendingOf(h);
+  return { ip: ip ? (p.ip.get(ip) ?? 0) : 0, site: p.site };
+}
 /** 全站触顶的服务器日志每个北京日只打一次 */
 let capWarnedDay = null;
 
@@ -101,7 +110,8 @@ export async function requestCode(h, { e164, ip, now, limits = DEFAULT_LIMITS, s
   inflight.add(e164); // 同步占位，之后才有 await
   try {
     const pend = pendingOf(h);
-    const gate = checkSendAllowed(h, { e164, ip, now, limits, pendingIp: ip ? (pend.ip.get(ip) ?? 0) : 0, pendingSite: pend.site });
+    const inFlight = pendingFor(h, ip);
+    const gate = checkSendAllowed(h, { e164, ip, now, limits, pendingIp: inFlight.ip, pendingSite: inFlight.site });
     if (!gate.ok) return gate;
     // 同步占位（下面第一个 await 之前），防止不同号码的并发请求一起越过 IP / 全站上限
     pend.site += 1;

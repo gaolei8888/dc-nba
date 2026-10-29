@@ -224,6 +224,29 @@ test('第 3 次发码要求图形验证（428 带图），答对才发', async (
   assert.equal(other.status, 200);
 });
 
+test('同一新 IP 并发 3 个发码（不同号码）：在途的也算数，第 3 个要求图形验证、不发送', async (t) => {
+  // 发送器先挂住：前两个请求停在「已通过检查、发送器未返回」，sms_sends 里还是 0 行
+  let release;
+  const held = new Promise((r) => { release = r; });
+  const sender = {
+    id: 'fake', calls: [],
+    async send(e164, code) { sender.calls.push({ e164, code }); await held; return { ok: true, providerId: 'p' }; },
+  };
+  const s = await setup(t, { sender });
+  const ip = '192.0.2.77';
+  const reqs = ['13800138011', '13800138012', '13800138013']
+    .map((phone) => s.post('/api/auth/code', { cc: '86', phone, consent: true }, undefined, ip));
+  // 不依赖时序猜测：等任何一个先回来（只有被拦下的那个不经过发送器）；2 秒兜底放行，失败时断言能报出来
+  const timer = setTimeout(() => release(), 2000);
+  await Promise.race(reqs);
+  release();
+  clearTimeout(timer);
+  const results = await Promise.all(reqs);
+  assert.deepEqual(results.map((r) => r.status).sort(), [200, 200, 428], JSON.stringify(results.map((r) => r.body)));
+  assert.equal(results.find((r) => r.status === 428).body.code, 'auth.captchaRequired');
+  assert.equal(sender.calls.length, 2);
+});
+
 test('POST /captcha 取一张图；答对可直接带上发码', async (t) => {
   const s = await setup(t);
   const send = (phone, extra = {}) => s.post('/api/auth/code', { cc: '86', phone, consent: true, ...extra });
