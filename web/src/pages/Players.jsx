@@ -8,7 +8,8 @@ import PlayerTable, { modeOptions } from '../components/PlayerTable.jsx';
 import { num, rate } from '../lib/format.js';
 import { useI18n } from '../i18n/react.jsx';
 
-const POS_FILTERS = ['all', 'G', 'F', 'C'];
+// 五档位置来自 ESPN（pos5）；没对上的球员在按位置筛选时不出现
+const POS_FILTERS = ['all', 'PG', 'SG', 'SF', 'PF', 'C'];
 
 export default function Players() {
   const { teams, teamById, meta, setAccent } = useApp();
@@ -41,7 +42,7 @@ export default function Players() {
     return all.filter((p) => {
       if (rosterOnly && !p.onRoster) return false;
       if (teamFilter !== 'all' && p.teamId !== Number(teamFilter)) return false;
-      if (posFilter !== 'all' && !(p.pos ?? '').includes(posFilter)) return false;
+      if (posFilter !== 'all' && p.pos5 !== posFilter) return false;
       if ((p.gp ?? 0) < minGp) return false;
       if (kw && !p.name.toLowerCase().includes(kw)) return false;
       return true;
@@ -163,7 +164,7 @@ export default function Players() {
               key: 'teamAbbr', label: t('players.team'), align: 'left', width: 142,
               render: (p) => <TeamCell team={teamById.get(p.teamId)} size={20} showAbbr={false} />,
             },
-            { key: 'pos', label: t('players.pos'), align: 'left', width: 72, render: (p) => <span className="dim">{p.pos ? fmt.pos(p.pos) : '—'}</span> },
+            { key: 'pos', label: t('players.pos'), align: 'left', width: 72, render: (p) => <span className="dim">{p.pos5 || p.pos ? fmt.pos(p.pos5 ?? p.pos) : '—'}</span> },
             { key: 'age', label: t('players.age'), width: 44, render: (p) => num(p.age, 0) },
           ]}
         />

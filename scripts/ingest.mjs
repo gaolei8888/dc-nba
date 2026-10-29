@@ -16,6 +16,7 @@ import { impactOf, apply as spmOf, MIN_GP } from '../server/impact.mjs';
 import { shrinkByMinutes, populationMean, MINUTES_SHRINK } from '../server/impactShrink.mjs';
 import { decayedApm } from '../server/rapm.mjs';
 import { replaySeasonPicks } from '../server/replay.mjs';
+import { fetchPositions } from '../server/espnPositions.mjs';
 import {
   buildGames, computeElo, carryOver, rotationImpact, fitRosterImpact, totalMinutes, pickBasis,
 } from '../server/ratings.mjs';
@@ -825,6 +826,14 @@ async function main() {
   buildBacktestDataset();
 
   if (injuries) writeJson('injuries.json', injuries);
+  // 五档位置（ESPN fantasy，一个请求）：失败就保留旧的
+  try {
+    const positions = await fetchPositions(players, TARGET_SEASON);
+    writeJson('positions.json', positions);
+    log(`五档位置：匹配 ${positions.matched} 人`);
+  } catch (e) {
+    console.warn(`  五档位置抓取失败，保留旧数据：${String(e.message).slice(0, 90)}`);
+  }
   writeJson('teams.json', teams);
   writeJson('players.json', players);
   writeJson('schedule.json', schedule);

@@ -57,6 +57,8 @@ function loadStore() {
   const schedule = readJson('schedule.json');
   const meta = readJson('meta.json');
   const injuries = readJson('injuries.json') ?? { players: [], counts: {}, fetchedAt: null };
+  // 五档位置（ESPN fantasy）：没有就只显示三类位置
+  const positions = readJson('positions.json') ?? { byPlayerId: {}, fetchedAt: null };
   const gameday = readJson('gameday.json') ?? { season: null, games: [] };
   // 盘口是增强项：抓不到就退回纯模型，页面不能因此挂掉
   const odds = readJson('odds.json') ?? { source: 'ESPN', fetchedAt: null, games: {}, matched: 0 };
@@ -69,7 +71,7 @@ function loadStore() {
   if (!teams || !players || !schedule || !meta) {
     throw new Error('数据缺失，请先运行  npm run ingest');
   }
-  store = { teams, players, schedule, meta, injuries, gameday, odds, impactModel, paper };
+  store = { teams, players, schedule, meta, injuries, gameday, odds, impactModel, paper, positions };
   clearCaches();
   modelCache = new Map();
   console.log(`数据已加载: ${teams.length} 队 / ${players.length} 人 / ${schedule.games.length} 场 (${meta.priorSeason} → ${meta.targetSeason})`);
@@ -304,9 +306,12 @@ const EMPTY_PLAYER_STATS = {
 };
 const showTeam = (t) => (store.meta.displayCurrent && t.cur ? { ...t, ...t.cur, cur: undefined } : t);
 // 本赛季还没出场的人显示为空，而不是退回他上赛季的数字——那样会混着两个赛季
-const showPlayer = (p) => (store.meta.displayCurrent
-  ? { ...p, ...EMPTY_PLAYER_STATS, ...(p.cur ?? {}), cur: undefined }
-  : p);
+const showPlayer = (p) => {
+  const pos5 = store.positions.byPlayerId?.[p.playerId] ?? null;
+  return store.meta.displayCurrent
+    ? { ...p, ...EMPTY_PLAYER_STATS, ...(p.cur ?? {}), cur: undefined, pos5 }
+    : { ...p, pos5 };
+};
 const showRanking = (r) => {
   const t = store.teams.find((x) => x.teamId === r.teamId);
   if (!store.meta.displayCurrent || !t?.cur) return r;

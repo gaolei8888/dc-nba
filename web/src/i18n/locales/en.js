@@ -1425,6 +1425,6 @@ export default {
   team: {
     conf: { East: 'East', West: 'West' },
     div: { Atlantic: 'Atlantic', Central: 'Central', Southeast: 'Southeast', Northwest: 'Northwest', Pacific: 'Pacific', Southwest: 'Southwest' },
-    pos: { G: 'Guard', F: 'Forward', C: 'Center', 'G-F': 'G-F', 'F-G': 'F-G', 'F-C': 'F-C', 'C-F': 'C-F' },
+    pos: { PG: 'Point guard', SG: 'Shooting guard', SF: 'Small forward', PF: 'Power forward', G: 'Guard', F: 'Forward', C: 'Center', 'G-F': 'G-F', 'F-G': 'F-G', 'F-C': 'F-C', 'C-F': 'C-F' },
   },
 };

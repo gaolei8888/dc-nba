@@ -21,6 +21,7 @@
 import { readJson, writeJson } from '../server/nbaClient.mjs';
 import { fetchScoreboard, fetchUpcomingOdds } from '../server/oddsClient.mjs';
 import { fetchInjuries } from '../server/espnClient.mjs';
+import { fetchPositions } from '../server/espnPositions.mjs';
 import { computeElo, scheduleEloGames } from '../server/ratings.mjs';
 
 const log = (...a) => console.log('·', ...a);
@@ -96,6 +97,14 @@ async function main() {
     writeJson('injuries.json', await fetchInjuries(players));
   } catch (e) {
     console.warn(`  伤病抓取失败，保留旧数据：${String(e.message).slice(0, 90)}`);
+  }
+  try {
+    log('五档位置 (ESPN fantasy)');
+    const positions = await fetchPositions(players, meta.targetSeason);
+    writeJson('positions.json', positions);
+    log(`  匹配 ${positions.matched} 人`);
+  } catch (e) {
+    console.warn(`  五档位置抓取失败，保留旧数据：${String(e.message).slice(0, 90)}`);
   }
   try {
     log('博彩盘口 (ESPN)');

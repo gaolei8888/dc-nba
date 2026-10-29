@@ -72,6 +72,7 @@
 | 注 / 单位 | units (stakes); bets (counts) | — | 已定 |
 | 个百分点（概率 / CLV 之差的单位，同 paper.clv.pp） | pp | — | 已定 |
 | 锋卫摇摆等位置 | G-F / F-C (code shown as-is) | swingman | 已定 |
+| 控球后卫 / 得分后卫 / 小前锋 / 大前锋（五档位置，来自 ESPN） | Point guard / Shooting guard / Small forward / Power forward | PG/SG/SF/PF spelled out only in filters | 待确认 |
 | 期望值 EV | expected value (EV) | — | 已定 |
 | 优势 Edge | edge | advantage score | 已定 |
 | 凯利 | Kelly | — | 已定 |
