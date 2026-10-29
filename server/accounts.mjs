@@ -26,10 +26,18 @@ export function findOrCreateUser(h, { e164, consentVersion, now }) {
     return { user, created: false };
   }
   const id = crypto.randomBytes(9).toString('base64url');
-  h.prepare(
+  // ON CONFLICT DO NOTHING：SELECT 与 INSERT 之间被别的进程抢先插入同一号码时不抛错
+  const ins = h.prepare(
     `INSERT INTO users (id, phone_e164, tier, consent_version, consent_at, created_at, last_login_at)
-     VALUES (?, ?, 'free', ?, ?, ?, ?)`,
+     VALUES (?, ?, 'free', ?, ?, ?, ?) ON CONFLICT(phone_e164) DO NOTHING`,
   ).run(id, e164, consentVersion, at, at, at);
+  if (ins.changes === 0) {
+    // 输掉竞争：对方已建好账号，按「已存在」处理
+    const row = h.prepare('SELECT id FROM users WHERE phone_e164 = ?').get(e164);
+    h.prepare('UPDATE users SET last_login_at = ?, consent_version = ?, consent_at = ? WHERE id = ?')
+      .run(at, consentVersion, at, row.id);
+    return { user: h.prepare(`SELECT ${USER_COLS} FROM users WHERE id = ?`).get(row.id), created: false };
+  }
   const user = h.prepare(`SELECT ${USER_COLS} FROM users WHERE id = ?`).get(id);
   return { user, created: true };
 }
@@ -69,7 +77,9 @@ export function revokeSession(h, token, now) {
 /**
  * 登录时绑定玩家档案。顺序：账号已有档案 → kept（以账号为准，不并入匿名记录）；
  * 匿名档案没被别的账号占用 → bound；players 可用 → 新建并绑定 created；否则 none。
- * 占用靠 users.player_id UNIQUE 兜底（并发下插入失败视为被占用）。
+ * 占用靠 users.player_id UNIQUE 兜底（并发下 UNIQUE 冲突视为被占用，其它错误向上抛）。
+ * 安全：anonPlayerId 必须由服务端从匿名令牌解析得出，绝不能直接取自请求体，
+ * 否则任何人都能把别人的匿名档案绑到自己账号上。
  */
 export function bindPlayer(h, { userId, anonPlayerId, profileName, players }) {
   const me = h.prepare('SELECT player_id FROM users WHERE id = ?').get(userId);
@@ -79,7 +89,11 @@ export function bindPlayer(h, { userId, anonPlayerId, profileName, players }) {
   const tryBind = (pid) => {
     try {
       return h.prepare('UPDATE users SET player_id = ? WHERE id = ? AND player_id IS NULL').run(pid, userId).changes > 0;
-    } catch { return false; } // UNIQUE 冲突：已被别的账号占用
+    } catch (e) {
+      // 只吞 UNIQUE 冲突（档案已被别的账号占用）；其余错误照常抛出
+      if (/UNIQUE constraint failed/i.test(String(e?.message))) return false;
+      throw e;
+    }
   };
 
   if (anonPlayerId && tryBind(String(anonPlayerId))) return { playerId: String(anonPlayerId), outcome: 'bound' };
