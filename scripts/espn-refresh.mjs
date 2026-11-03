@@ -9,7 +9,7 @@
  *   · 已结束比赛的比分（赛程里的 homeScore/awayScore）
  *   · 本赛季 Elo：从开赛日评级起，用全部已结束比赛重算——与 ingest 同一套 computeElo
  *   · 每场的赛前 Elo（预测 vs 实际要用）
- *   · 本赛季战绩（t.cur.wins/losses）
+ *   · 本赛季战绩（t.cur.wins/losses）与联盟排名（t.cur.confRank，ESPN standings，校验不过保留旧的）
  *   · 伤病名单、未开赛比赛的盘口
  *
  * **不更新**球员/球队的统计数据（场均、高阶、IMP）——那些只有 stats.nba.com 有，
@@ -22,6 +22,7 @@ import { readJson, writeJson } from '../server/nbaClient.mjs';
 import { fetchScoreboard, fetchUpcomingOdds } from '../server/oddsClient.mjs';
 import { fetchInjuries } from '../server/espnClient.mjs';
 import { fetchPositions } from '../server/espnPositions.mjs';
+import { conferenceRanks, fetchStandings } from '../server/espnStandings.mjs';
 import { computeElo, scheduleEloGames } from '../server/ratings.mjs';
 
 const log = (...a) => console.log('·', ...a);
@@ -115,6 +116,13 @@ async function main() {
     });
   } catch (e) {
     console.warn(`  盘口抓取失败，保留旧数据：${String(e.message).slice(0, 90)}`);
+  }
+  try {
+    log('联盟排名 (ESPN standings)');
+    const ranks = conferenceRanks(teams, await fetchStandings());
+    for (const t of teams) t.cur.confRank = ranks.get(t.teamId);
+  } catch (e) {
+    console.warn(`  联盟排名未更新，保留旧名次：${String(e.message).slice(0, 120)}`);
   }
 
   // ---- 5. meta：fetchedAt 是「结果更新到什么时候」，统计数据的时间单独记
