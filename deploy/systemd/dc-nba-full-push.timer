@@ -1,0 +1,12 @@
+# 每天北京 15:30（直接按 Asia/Shanghai 写，GB10 本机时区与夏令时都不影响）：服务器 14:30 的 ESPN 刷新之后，
+# player-values 定时器（19:15 / 20:15）之前。
+# 不开 Persistent：关机错过就等明天。补跑可能撞上服务器 22:00 / 06:30——refresh.sh 拿不到锁的 cron 那次会跳过，账本就少记一次。
+[Unit]
+Description=dc-nba full push daily (Beijing 15:30)
+
+[Timer]
+OnCalendar=*-*-* 15:30:00 Asia/Shanghai
+Persistent=false
+
+[Install]
+WantedBy=timers.target

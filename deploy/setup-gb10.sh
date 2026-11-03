@@ -2,6 +2,10 @@
 # 在 GB10（办公室宽带）上安装「只刷新数据」：每天全量抓 stats.nba.com，推到线上服务器。
 # GB10 不跑网站，只跑 deploy/push-refresh.sh。
 #
+# **2026-11-03 起已不用这个脚本装定时任务**：现在用 systemd 用户定时器 + ~/dc-nba
+# （deploy/systemd/dc-nba-full-push.*，见 deploy/README.md）。不要再装这里的 cron，否则同一个 IP 每天全量抓两次；
+# ~/dc-nba-refresh 是 2026-10-27 的旧代码，不要在那里跑。
+#
 #   sh deploy/setup-gb10.sh           检查 + 安装 cron
 #   sh deploy/setup-gb10.sh --check   只检查，不装
 #
