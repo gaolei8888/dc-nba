@@ -22,7 +22,7 @@ ESPN 两台服务器都能访问。所以分成两条线：
 
 | 谁 | 何时 | 做什么 | 依赖 |
 | --- | --- | --- | --- |
-| 服务器 cron | 每天 06:30、14:30、22:00（北京） | `refresh.sh --espn`：比分、Elo、赛前 Elo、战绩、伤病、盘口 | 只要 ESPN |
+| 服务器 cron | 每天 06:30、14:30、22:00（北京） | `refresh.sh --espn`：比分、Elo、赛前 Elo、战绩、联盟排名、伤病、盘口 | 只要 ESPN |
 | 本机计划任务「dc-nba 全量刷新」 | 每天 08:00 太平洋（北京 23:00），错过则开机补跑 | `push-refresh.sh`：本机全量 ingest → 推到服务器 `incoming/` → 远程 `refresh.sh --incoming` | 这台电脑开机 |
 
 本机计划任务默认用 Node 直接抓（`NBA_TRANSPORT=node`）。若 stats.nba.com 开始拦 Node 请求，
@@ -105,8 +105,8 @@ scp data/paper-backtest.json dev@gpu.tzspace.cn:/home/dev/work/works/dc-nba/data
 30 6 * * *  /home/dev/work/works/dc-nba/deploy/refresh.sh --espn --late >> /home/dev/work/works/dc-nba/refresh.log 2>&1
 ```
 
-**ESPN 请求量与熔断（2026-10-28 核过）**：每次 `--espn` 约 15 个请求（14 个比赛日的 scoreboard
-+ 1 伤病 + 每个待补比分的日期 1 个），账本结算每场最多 1 个（3 天内没取到收盘价的会重试），
+**ESPN 请求量与熔断（2026-10-28 核过）**：每次 `--espn` 约 16 个请求（14 个比赛日的 scoreboard
++ 1 伤病 + 1 联盟排名 + 每个待补比分的日期 1 个），账本结算每场最多 1 个（3 天内没取到收盘价的会重试），
 一天三次合计 < 200，默认上限每次 3000 / 每天 12000（`ESPN_MAX_REQUESTS` / `ESPN_MAX_PER_DAY`）。
 熔断状态文件 `data/raw/fetch-state.json` 在取数的临时目录里，**不跨运行保存**：
 被拦（403/429/超时/非 JSON）时本次运行停手、`refresh.log` 里有 `!! [espn] 熔断：…`，
