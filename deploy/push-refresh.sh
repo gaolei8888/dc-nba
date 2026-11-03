@@ -71,7 +71,7 @@ $NODE scripts/ingest.mjs > "${TMPDIR:-/tmp}/dc-nba-ingest.log" 2>&1 || {
   log "抓取失败，线上未改动"
   exit 1
 }
-grep -E "已吸收|用时" "${TMPDIR:-/tmp}/dc-nba-ingest.log" || true
+grep -E "已吸收|用时|赛季快照" "${TMPDIR:-/tmp}/dc-nba-ingest.log" || true
 
 log "本地体检"
 $NODE scripts/check-data.mjs > /dev/null || { $NODE scripts/check-data.mjs; log "体检不过，不推送"; exit 1; }

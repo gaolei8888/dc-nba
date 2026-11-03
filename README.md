@@ -240,13 +240,13 @@ ESPN 用自己的球员 id，靠归一化姓名匹配到 NBA 的 PLAYER_ID（去
 
 | 数据源 | 这台机器能否访问 | 授权 |
 | --- | --- | --- |
-| dunksandthrees.com（EPM） | ✗ `http=000` | 部分收费 |
+| dunksandthrees.com（EPM） | ✓ 站点可达 | 部分收费；[条款](https://dunksandthrees.com/terms)禁止脚本批量复制，转存或分发需书面许可，所以不作管道输入 |
 | bball-index.com（LEBRON） | ✓ 站点可达 | 免费数据在 Google 表格里 |
 | docs.google.com | ✗ `http=000` | ← LEBRON 与 DARKO 的公开表格都在这儿 |
 | github.com | ✗ `http=000` | RAPTOR 的开源数据（且 538 已停更，只到 2022-23） |
 | stats.nba.com / ESPN | ✓ | 公开接口 |
 
-即使能访问，EPM 与 LEBRON 也是收费产品，整份搬过来并不合适。
+EPM 与 LEBRON 都是收费产品（EPM 还有上面的条款限制），整份搬过来并不合适。
 
 **但它们的输入我们全都有。** EPM 是拿 box score + 球场追踪 + on/off 回归出来的，
 这三样 stats.nba.com 全部公开。所以这里的做法是自己训一个，
@@ -376,6 +376,9 @@ Robert Williams 这些角色球员。改用 APM 的依据是年度稳定性
 （第 N 季预测第 N+1 季同一指标）：APM **0.398** / on/off **0.286**，四对赛季全胜。
 
 #### 与 EPM 的实际对照
+
+> **EPM 列赛季/来源未核实，仅作历史参照。** 这些数是手填的，最早见于 2026-09-06 的提交 `f8428fa`，
+> 提交说明只写了「EPM 公开榜」，没有赛季、日期和出处，仓库里也没有原始数据。IMP 与旧版两列是当时的模型算的，不是线上现值。
 
 | 球员 | EPM | **IMP** | 旧版（纯 SPM） |
 | --- | --- | --- | --- |
