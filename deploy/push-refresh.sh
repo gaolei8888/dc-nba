@@ -35,6 +35,8 @@ if [ "${DC_NBA_AUTO_PULL:-0}" = 1 ] && [ "${DC_NBA_PULLED:-0}" != 1 ]; then
   OLD=$(git rev-parse HEAD)
   git merge -q --ff-only "origin/$BR" || { log "本地 ${BR} 与 origin/${BR} 分叉，不能快进，不跑"; exit 1; }
   NEW=$(git rev-parse HEAD)
+  # 本地领先 origin 时 --ff-only 也算成功，但那不是 origin/master 的代码
+  if [ "$NEW" != "$(git rev-parse "origin/$BR")" ]; then log "本地 ${BR} 领先 origin/${BR}，不跑"; exit 1; fi
   if [ "$OLD" != "$NEW" ]; then
     log "已快进 $(git rev-parse --short "$OLD") → $(git rev-parse --short "$NEW")，用新版本脚本重跑"
     DC_NBA_PULLED=1 exec sh "$0" "$@"
