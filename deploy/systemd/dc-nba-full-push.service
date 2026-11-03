@@ -1,0 +1,22 @@
+# GB10 用户级 systemd 服务：跑 deploy/push-refresh.sh（全量抓 stats.nba.com → 推到服务器 incoming/ → 远程 refresh.sh --incoming）。
+# 安装（在 GB10 上，lei 已开 linger）：
+#   cp deploy/systemd/dc-nba-full-push.* ~/.config/systemd/user/ && systemctl --user daemon-reload \
+#     && systemctl --user enable --now dc-nba-full-push.timer
+# 手动跑一次（会真的抓 NBA、更新线上）：systemctl --user start dc-nba-full-push.service；日志 ~/dc-nba-logs/full-push.log
+[Unit]
+Description=dc-nba full push (stats.nba.com ingest -> gpu.tzspace.cn)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/dc-nba
+# node 是用户级安装的 ~/.local/opt/node（官方 v22 tarball），不动系统软件
+Environment=PATH=%h/.local/opt/node/bin:/usr/local/bin:/usr/bin:/bin
+# 开跑前只快进到 origin/master，快进不了就不跑
+Environment=DC_NBA_AUTO_PULL=1
+Environment=DC_NBA_SSH_KEY=%h/.ssh/dc_nba
+ExecStart=/bin/sh %h/dc-nba/deploy/push-refresh.sh
+StandardOutput=append:%h/dc-nba-logs/full-push.log
+StandardError=append:%h/dc-nba-logs/full-push.log
+Nice=10
+TimeoutStartSec=1h

@@ -23,6 +23,24 @@ NODE=${DC_NBA_NODE:-node}
 
 log() { echo "[$(date '+%F %T')] [push] $*"; }
 
+# DC_NBA_AUTO_PULL=1（GB10 定时器里设了）：开跑前把本 checkout 快进到 origin/master；
+# 有本地改动、不在 master、fetch 失败或分叉就整次不跑，免得拿不明来路的代码推生产数据（同 player-values.sh）
+if [ "${DC_NBA_AUTO_PULL:-0}" = 1 ] && [ "${DC_NBA_PULLED:-0}" != 1 ]; then
+  BR=${DC_NBA_BRANCH:-master}
+  if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+    log "checkout 有本地改动，不更新也不跑："; git status --short --untracked-files=no; exit 1
+  fi
+  if [ "$(git rev-parse --abbrev-ref HEAD)" != "$BR" ]; then log "当前不在 ${BR} 分支，不跑"; exit 1; fi
+  git fetch -q origin "$BR" || { log "git fetch 失败，不跑"; exit 1; }
+  OLD=$(git rev-parse HEAD)
+  git merge -q --ff-only "origin/$BR" || { log "本地 ${BR} 与 origin/${BR} 分叉，不能快进，不跑"; exit 1; }
+  NEW=$(git rev-parse HEAD)
+  if [ "$OLD" != "$NEW" ]; then
+    log "已快进 $(git rev-parse --short "$OLD") → $(git rev-parse --short "$NEW")，用新版本脚本重跑"
+    DC_NBA_PULLED=1 exec sh "$0" "$@"
+  fi
+fi
+
 log "开始（推送到 ${REMOTE}）"
 if [ ! -d data/history ]; then
   log "缺少 data/history/，ingest 算不出完整的 IMP，停止"
@@ -57,7 +75,9 @@ log "本地体检"
 $NODE scripts/check-data.mjs > /dev/null || { $NODE scripts/check-data.mjs; log "体检不过，不推送"; exit 1; }
 
 log "上传"
-tar -c data/*.json | gzip -1 | $SSH "$REMOTE" \
+# player-values.json 由 GB10 的 deploy/player-values.sh 单独推到服务器，这里永远不带：
+# 否则本地那份旧文件会把线上新的盖掉（服务器 refresh.sh 把 incoming/*.json 拷过线上 data/）
+tar -c --exclude=data/player-values.json data/*.json | gzip -1 | $SSH "$REMOTE" \
   "mkdir -p '$RDIR/incoming' && rm -f '$RDIR'/incoming/*.json && gunzip | tar -x -m -C '$RDIR/incoming' --strip-components=1"
 
 log "远程部署"
