@@ -50,6 +50,14 @@ GB10 关机几天也没关系：比分、Elo、命中率、伤病、盘口照常
 - `push-refresh.sh` **永远不带 `data/player-values.json`**：那个文件只由 `deploy/player-values.sh` 推（GB10 的在 `data/history/shadow/`）。其他 GB10 没有的 `data/*.json`（如 `backtest.json`、`moneyline-backtest.json`）不推，线上的留着。
 - 时间错开：服务器 14:30 刷新之后、player-values 19:15 之前。不开 `Persistent`，因为补跑可能撞上 22:00 / 06:30：cron 那次拿不到锁就跳过，账本少记一次。
 
+**赛季快照**（研究 K=20 与小样本噪声用，线上不读）：全量 ingest 写完所有输出后，把本季每名有出场球员的 IMP 输入存一份到 `data/history/season-snapshots/<赛季>/<北京日期>.json.gz`（`server/seasonSnapshot.mjs`）。不多发请求，失败只在 `full-push.log` 留一行「赛季快照写入失败」，抓取和推送照常。
+
+- 只从上线那天开始有：`players.json` 每次被覆盖，更早的历史补不回来。**只有 GB10 这一份**，不进 git、不进镜像、不推线上；`git status`/快进都不动它（`data/history/*` 被 gitignore），但也没有备份，要留就自己拷走。`refresh.sh` 不带参数的模式在临时目录里跑 ingest，快照随临时目录丢弃（这个模式现在不用）。
+- 同一北京日期一个文件：数据没变不改文件，变了换成最新的。一份约 60KB，一季约 20MB，未设清理。7 月到开赛没有本季比赛，不写。
+- 顶层：`schema`、`season`、`date`、`capturedAt`、`codeCommit`、`gamesPlayedCurrent`、`lastResultDate`、`model`（`id` 是 impact-model.json 的 hash，并带打分用的 `features/mu/sd/beta/intercept` 等，模型文件重新拟合后也能重算）、`imp`（`priorGames` 即 K、各门槛）、`players`。
+- 每人：`playerId`、`name`、`teamId`、`teamAbbr`、`gp`、`min`（场均）、`base/adv/hustle/defend/track`（`features()` 读的场均原始值）、`features`（含 `dSup`，保留 4 位小数）、`featuresMissing`、`seasonSpm`、`priorImp`、`blendedImp`。
+- 重算：`apply(doc.model, row, { minGp })`（`server/impact.mjs`，`minGp` 有先验取 `imp.minGpWithPrior`，否则 `imp.minGpNoPrior`）得 `seasonSpm`；换 K 就算 `round2((K × priorImp + gp × seasonSpm) / (K + gp))`。`priorImp` 为 null 时 `blendedImp = seasonSpm`，`seasonSpm` 为 null 时 `blendedImp = priorImp`。
+
 另一个坑：服务器的 Docker 镜像源拉 `node:22-alpine` 会挂住。已经从本机
 `docker save | ssh docker load` 传上去一份，只要不 `docker image prune -a` 就一直在。
 

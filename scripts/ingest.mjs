@@ -15,6 +15,7 @@ import { buildBacktestDataset } from '../server/dataset.mjs';
 import { impactOf, apply as spmOf, MIN_GP } from '../server/impact.mjs';
 import { shrinkByMinutes, populationMean, MINUTES_SHRINK } from '../server/impactShrink.mjs';
 import { decayedApm } from '../server/rapm.mjs';
+import { saveSeasonSnapshot } from '../server/seasonSnapshot.mjs';
 import { replaySeasonPicks } from '../server/replay.mjs';
 import { fetchPositions } from '../server/espnPositions.mjs';
 import {
@@ -550,9 +551,10 @@ const pick = (o, keys) => Object.fromEntries(keys.map((k) => [k, o[k]]));
  * 本季分段统计栏没有历史缓存，验证不了（docs/impact-shrink-continuity-verdict.md）。
  */
 const IMP_PRIOR_GAMES = 20;
+const seasonSpm = (model, c, prior) => spmOf(model, c, { minGp: prior === null ? MIN_GP : 1 });
 function currentImpact(model, c, prior) {
   const gp = c.gp ?? 0;
-  const cur = spmOf(model, c, { minGp: prior === null ? MIN_GP : 1 });
+  const cur = seasonSpm(model, c, prior);
   if (prior === null) return cur;
   if (cur === null) return prior;
   return Math.round(((IMP_PRIOR_GAMES * prior + gp * cur) / (IMP_PRIOR_GAMES + gp)) * 100) / 100;
@@ -567,13 +569,16 @@ async function fetchCurrentSeason(teams, rosters, tricodeById, impactModel, prio
 
   const playerStats = await fetchPlayerStats(TARGET_SEASON, { optional: true });
   const curPlayers = new Map();
+  const snapshotEntries = [];
   for (const p of buildPlayers(playerStats, rosters, teams)) {
     if (!(p.gp > 0)) continue;
     const c = pick(p, CUR_PLAYER_KEYS);
-    c.impact = impactModel ? currentImpact(impactModel, c, priorImp.get(p.playerId) ?? null) : null;
+    const prior = priorImp.get(p.playerId) ?? null;
+    c.impact = impactModel ? currentImpact(impactModel, c, prior) : null;
     curPlayers.set(p.playerId, c);
+    snapshotEntries.push({ player: p, cur: c, prior, seasonSpm: impactModel ? seasonSpm(impactModel, c, prior) : null });
   }
-  return { teams: curTeams, players: curPlayers };
+  return { teams: curTeams, players: curPlayers, snapshotEntries };
 }
 
 // ---------------------------------------------------------------- 主流程
@@ -839,6 +844,11 @@ async function main() {
   writeJson('schedule.json', schedule);
   writeJson('results.json', games);
   writeJson('meta.json', meta);
+
+  // 所有输出都写完才存，失败只警告（见 server/seasonSnapshot.mjs）
+  saveSeasonSnapshot({
+    dataDir: DATA_DIR, season: TARGET_SEASON, model: impactModel, priorGames: IMP_PRIOR_GAMES, entries: cur?.snapshotEntries, meta,
+  });
 
   console.log(`\n完成，用时 ${((Date.now() - t0) / 1000).toFixed(1)}s`);
   console.log(`  球队 ${teams.length} · 球员 ${players.length} · ${TARGET_SEASON} 赛程 ${schedule.games.length} 场`);

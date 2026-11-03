@@ -2,8 +2,9 @@
  * 综合影响力指标（IMP）：球员相对联盟平均水平，每百回合给球队带来多少分。
  *
  * 这是 EPM / LEBRON / DARKO 那一类"all-in-one"指标的自制版本。
- * 那三个都拿不到——EPM 的站点这台机器连不上、LEBRON 与 DARKO 的公开表格在
- * docs.google.com 上同样连不上，而且 EPM 与 LEBRON 本身是收费产品。
+ * 那三个都接不进来——EPM 的站点可达，但条款（dunksandthrees.com/terms）禁止脚本批量复制、
+ * 转存或分发要书面许可，所以不作管道输入；LEBRON 与 DARKO 的公开表格在 docs.google.com 上
+ * 连不上；而且 EPM 与 LEBRON 本身是收费产品。
  * 但它们的**输入**我们全都有：box score、球场追踪、拼抢、防守对位、on/off。
  *
  * 做法与 BPM/EPM 的先验部分一致：
