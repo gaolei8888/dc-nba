@@ -23,13 +23,16 @@ ESPN 两台服务器都能访问。所以分成两条线：
 | 谁 | 何时 | 做什么 | 依赖 |
 | --- | --- | --- | --- |
 | 服务器 cron | 每天 06:30、14:30、22:00（北京） | `refresh.sh --espn`：比分、Elo、赛前 Elo、战绩、联盟排名、伤病、盘口 | 只要 ESPN |
-| 本机计划任务「dc-nba 全量刷新」 | 每天 08:00 太平洋（北京 23:00），错过则开机补跑 | `push-refresh.sh`：本机全量 ingest → 推到服务器 `incoming/` → 远程 `refresh.sh --incoming` | 这台电脑开机 |
+| GB10 systemd 用户定时器 `dc-nba-full-push.timer`（2026-11-03 起） | 每天北京 15:30（单元里按 `Asia/Shanghai` 写，不受 GB10 的太平洋时区与夏令时影响）；错过不补跑 | `push-refresh.sh`：开跑前只快进到 origin/master，全量 ingest → 推到服务器 `incoming/` → 远程 `refresh.sh --incoming` | GB10 开机、办公室宽带 |
 
-本机计划任务默认用 Node 直接抓（`NBA_TRANSPORT=node`）。若 stats.nba.com 开始拦 Node 请求，
-在计划任务的环境里加 `NBA_TRANSPORT=chrome`，并先 `sh scripts/nba-chrome.sh` 让专用 Chrome 常开
-（push-refresh.sh 本身不用改，环境变量会传给 ingest）。原因与用法见 docs/HANDOFF-2026-10-27.md。
+**手动全量推送不再是常规做法**，只用于补救（`sh deploy/push-refresh.sh`；避开北京 06:30 / 14:30 / 22:00 前后 30 分钟和 15:30，
+同一个公网 IP 一天别抓两次）。原来 Windows 电脑上的计划任务「dc-nba 全量刷新」退役，由高磊手动删除（它的 08:00 PT 在冬令时是北京 00:00）。
+删之前它如果还在跑，就是同一个 IP 每天多抓一次，而且它那份旧代码推送时不排除 `player-values.json`。
 
-本机关机几天也没关系：比分、Elo、命中率、伤病、盘口照常每天更新，
+GB10 用 Node 直接抓（`NBA_TRANSPORT=node`）。若 stats.nba.com 开始拦 Node 请求，**先停下来**，查 `~/dc-nba/data/raw/fetch-state.json` 的熔断原因。
+`NBA_TRANSPORT=chrome` 要一个开着窗口的专用 Chrome（`sh scripts/nba-chrome.sh`），目前只在 Mac 上用过、GB10 上没试过。原因与用法见 docs/HANDOFF-2026-10-27.md。
+
+GB10 关机几天也没关系：比分、Elo、命中率、伤病、盘口照常每天更新，
 只有球员/球队的场均与高阶统计停在最后一次全量刷新。`meta.statsFetchedAt` 记着那是哪天。
 
 **ESPN 那条线的正确性锚点**：对一份 ingest 刚写出的数据，删掉 16 场比分再跑
@@ -38,9 +41,14 @@ ESPN 两台服务器都能访问。所以分成两条线：
 
 **全量推送只推数据，不推代码。** 代码上线仍然手动，见下文「手动上线代码」。
 
-**GB10（办公室宽带）有希望接替本机**，不依赖个人电脑开机。待验证：从办公室网络
-`ssh lei@gb10.local` 测 stats.nba.com 返回的是不是 JSON；通了就在 GB10 上 clone 仓库、
-放好 `data/history/`、给它一把能登录服务器的密钥，cron 跑 `sh deploy/push-refresh.sh`。
+**GB10 全量推送的搭法**（`ssh lei@192.168.1.49`，`~/dc-nba`，单元文件 `deploy/systemd/dc-nba-full-push.*`，node 是 `~/.local/opt/node`，密钥 `~/.ssh/dc_nba`）：
+
+- 不用 `deploy/setup-gb10.sh` 和 `~/dc-nba-refresh`（2026-10-27 的旧代码）。
+- 查看：`systemctl --user list-timers dc-nba-full-push.timer`；日志 `~/dc-nba-logs/full-push.log`；手动跑（会真的抓 NBA、更新线上）`systemctl --user start dc-nba-full-push.service`。
+- `DC_NBA_AUTO_PULL=1`：开跑前快进到 origin/master；有本地改动、不在 master、fetch 失败、分叉或领先都整次不跑，线上不变。
+- 需要 Mac 拷过去的、不在 git 里的文件：`data/impact-model.json`、`data/history/lineups_*.json`、`data/raw/nba/`（往季响应缓存，没有的话要多抓约 30 个请求）。`impact-model.json` 重新拟合后**要再拷一次**。
+- `push-refresh.sh` **永远不带 `data/player-values.json`**：那个文件只由 `deploy/player-values.sh` 推（GB10 的在 `data/history/shadow/`）。其他 GB10 没有的 `data/*.json`（如 `backtest.json`、`moneyline-backtest.json`）不推，线上的留着。
+- 时间错开：服务器 14:30 刷新之后、player-values 19:15 之前。不开 `Persistent`，因为补跑可能撞上 22:00 / 06:30：cron 那次拿不到锁就跳过，账本少记一次。
 
 另一个坑：服务器的 Docker 镜像源拉 `node:22-alpine` 会挂住。已经从本机
 `docker save | ssh docker load` 传上去一份，只要不 `docker image prune -a` 就一直在。
@@ -52,7 +60,7 @@ ESPN 两台服务器都能访问。所以分成两条线：
 ```bash
 ssh dev@gpu.tzspace.cn 'docker tag dc-nba-dc-nba:latest dc-nba-dc-nba:pre-$(date +%m%d)'   # 回滚点
 git archive HEAD server scripts deploy web docs package.json package-lock.json     Dockerfile .dockerignore README.md   | ssh dev@gpu.tzspace.cn 'tar -x -m -C /home/dev/work/works/dc-nba'
-sh deploy/push-refresh.sh      # 顺带推一份新数据，并在服务器上重建、健康检查
+ssh dev@gpu.tzspace.cn 'cd /home/dev/work/works/dc-nba && docker compose build -q && docker compose up -d'   # 重建；新数据等下一次定时刷新
 ```
 
 ## 模拟投注（2026-10-28 起，见 `docs/superpowers/specs/2026-10-28-paper-betting-design.md`）
@@ -68,7 +76,7 @@ scp data/paper-backtest.json dev@gpu.tzspace.cn:/home/dev/work/works/dc-nba/data
 ```
 
 之后每次刷新都会带着它：`refresh.sh` 把线上 `data/*.json` 整个拷进临时目录再拷回来，
-`push-refresh.sh` 推的是本机 `data/*.json`（本机有这个文件就一起推）。没有这个文件，页面只显示前向账本。
+`push-refresh.sh` 推的是所在机器的 `data/*.json`（GB10 上没有这个文件，就不动线上那份）。没有这个文件，页面只显示前向账本。
 
 **前向账本**是 SQLite 表 `paper_bets`，和排行榜同一个库（`DB_PATH`，线上是 `data-db/app.db` 卷），
 `CREATE TABLE IF NOT EXISTS`，不动已有的表。只追加由触发器保证：重复插入忽略（连 `INSERT OR REPLACE` 也是）、
@@ -105,8 +113,12 @@ scp data/paper-backtest.json dev@gpu.tzspace.cn:/home/dev/work/works/dc-nba/data
 30 6 * * *  /home/dev/work/works/dc-nba/deploy/refresh.sh --espn --late >> /home/dev/work/works/dc-nba/refresh.log 2>&1
 ```
 
-**ESPN 请求量与熔断（2026-10-28 核过）**：每次 `--espn` 约 16 个请求（14 个比赛日的 scoreboard
-+ 1 伤病 + 1 联盟排名 + 每个待补比分的日期 1 个），账本结算每场最多 1 个（3 天内没取到收盘价的会重试），
+**联盟排名**（`server/espnStandings.mjs`，2026-11-03 起）：`cur.confRank` 取 ESPN 的 `playoffSeed`。校验不过（残缺、分区不符、
+战绩与本次刷新算出的不同、种子与胜率矛盾）或请求失败，**整份不用，保留旧名次**，只在 `refresh.log` 写一行 `联盟排名未更新，保留旧名次`。
+比赛刚打完、ESPN 还没更新时会这样，下一次刷新自己恢复；页面上不会有任何提示。
+
+**ESPN 请求量与熔断（2026-10-28 核过；2026-11-03 按代码更新请求数，未实测）**：每次 `--espn` 约 16 个 ESPN 请求（14 个比赛日的 scoreboard
++ 1 伤病 + 1 联盟排名 + 每个待补比分的日期 1 个）外加 1 个 ESPN fantasy（五档位置，单独的客户端），账本结算每场最多 1 个（3 天内没取到收盘价的会重试），
 一天三次合计 < 200，默认上限每次 3000 / 每天 12000（`ESPN_MAX_REQUESTS` / `ESPN_MAX_PER_DAY`）。
 熔断状态文件 `data/raw/fetch-state.json` 在取数的临时目录里，**不跨运行保存**：
 被拦（403/429/超时/非 JSON）时本次运行停手、`refresh.log` 里有 `!! [espn] 熔断：…`，
@@ -128,7 +140,7 @@ scp data/moneyline-backtest.json dev@gpu.tzspace.cn:/home/dev/work/works/dc-nba/
 
 数据是烤进镜像的（见 `Dockerfile`），所以放进 `data/` 后要等下一次重建镜像才生效：最近一次定时刷新，
 或者部署时紧接着跑的那次 `refresh.sh`（避开北京 22:00 / 06:30 / 14:30 前后 30 分钟）。此后每次 `refresh.sh`
-都先把 `data/*.json` 拷进临时目录，会一直带着它（`push-refresh.sh` 也会推本机这份）。
+都先把 `data/*.json` 拷进临时目录，会一直带着它（GB10 的 `push-refresh.sh` 没有这个文件，不会动它）。
 漏了这一步页面不会崩，只显示「回测报告尚未生成」；本季前向账本直接读 `paper_bets`，不依赖这个文件。
 
 核对（重建之后；两边 sha 应一致；`builtAt` 是本机生成时间；`selected` 当前应为 close B-edge7 / open B-edge10）：
@@ -169,7 +181,8 @@ cp data-prev/*.json data/ && docker compose build && docker compose up -d
 ## 停掉自动刷新
 
 - 服务器：`crontab -e`，删掉 `dc-nba/deploy/refresh.sh --espn` 那三行
-- 本机：`Unregister-ScheduledTask -TaskName 'dc-nba 全量刷新'`（PowerShell），或在「任务计划程序」里删
+- GB10：`systemctl --user disable --now dc-nba-full-push.timer`（`dc-nba-player-values.timer` 是另一条线）
+- Windows 电脑（退役，还没删的话）：`Unregister-ScheduledTask -TaskName 'dc-nba 全量刷新'`（PowerShell），或在「任务计划程序」里删
 
 镜像和数据保持最后一次成功刷新时的样子。
 
@@ -357,7 +370,7 @@ curl -s -H 'X-Forwarded-For: 1.2.3.4' https://ai.tzspace.cn/works/dc-nba/api/hea
 
 ### 4. 上线步骤（需用户逐步确认后才执行）
 
-避开北京时间 06:30 / 14:30 / 22:00 三个 cron 前后各 30 分钟，以及本机 23:00 的全量推送。
+避开北京时间 06:30 / 14:30 / 22:00 三个 cron 前后各 30 分钟，以及 GB10 15:30 的全量推送。
 
 **先带着 `ENABLE_ACCOUNTS=0` 发新代码**，确认没有副作用，再开：
 

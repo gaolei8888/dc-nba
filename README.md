@@ -956,7 +956,7 @@ npm run dataset       # 并进 data/backtest.json
 > 体检不过或新容器不健康都不会换掉线上快照。安装与回滚见 [deploy/README.md](deploy/README.md)。
 >
 > **更新（同日）：第一条风险成真了。** 服务器和海外机房的 IP 都被 NBA 封了，只有宽带能抓。
-> 现在的做法是服务器每天用 ESPN 补比分/Elo/伤病/盘口，全量统计由本机推送，
+> 现在的做法是服务器每天用 ESPN 补比分/Elo/伤病/盘口，全量统计由 GB10 每天推送，
 > 架构与验证见 [deploy/README.md](deploy/README.md)「自动刷新是怎么搭起来的」。
 >
 > **这个决定最可能错在哪：** 一是服务器 IP 可能根本连不上 stats.nba.com（很多云主机被拒），
