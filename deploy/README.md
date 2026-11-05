@@ -47,7 +47,10 @@ GB10 关机几天也没关系：比分、Elo、命中率、伤病、盘口照常
 - 查看：`systemctl --user list-timers dc-nba-full-push.timer`；日志 `~/dc-nba-logs/full-push.log`；手动跑（会真的抓 NBA、更新线上）`systemctl --user start dc-nba-full-push.service`。
 - `DC_NBA_AUTO_PULL=1`：开跑前快进到 origin/master；有本地改动、不在 master、fetch 失败、分叉或领先都整次不跑，线上不变。
 - 需要 Mac 拷过去的、不在 git 里的文件：`data/impact-model.json`、`data/history/lineups_*.json`、`data/raw/nba/`（往季响应缓存，没有的话要多抓约 30 个请求）。`impact-model.json` 重新拟合后**要再拷一次**。
-- `push-refresh.sh` **永远不带 `data/player-values.json`**：那个文件只由 `deploy/player-values.sh` 推（GB10 的在 `data/history/shadow/`）。其他 GB10 没有的 `data/*.json`（如 `backtest.json`、`moneyline-backtest.json`）不推，线上的留着。
+- `push-refresh.sh` **永远不带 `data/player-values.json`**：那个文件只由 `deploy/player-values.sh` 推（GB10 的在 `data/history/shadow/`）。
+- **也永远不带 `data/backtest.json`**（实验室数据集）。ingest 每次都会从 `data/history/` 的 `gamelog_*`/`teamadv_*`/`odds_*` 重建它，GB10 没有这些缓存，于是**会**写出一份 101 字节的空壳；推送的是 GB10 上**实际存在**的所有顶层 `data/*.json`，所以它曾经被推上去：2026-11-04 起线上 `backtest.json` 被清空，`/api/lab/meta` 返回 `games: 0`。它只在本机更新：`npm run odds:history` / `npm run dataset` 之后
+  `scp data/backtest.json dev@gpu.tzspace.cn:/home/dev/work/works/dc-nba/data/`，等下一次刷新重建镜像生效（同 `moneyline-backtest.json`）。
+- 其他 GB10 上**根本没有**的 `data/*.json`（`moneyline-backtest.json`、`paper-backtest.json`）不在推送包里，线上的留着。GB10 上新出现任何顶层 `data/*.json` 都会被推。
 - 时间错开：服务器 14:30 刷新之后、player-values 19:15 之前。不开 `Persistent`，因为补跑可能撞上 22:00 / 06:30：cron 那次拿不到锁就跳过，账本少记一次。
 
 **赛季快照**（研究 K=20 与小样本噪声用，线上不读）：全量 ingest 写完所有输出后，把本季每名有出场球员的 IMP 输入存一份到 `data/history/season-snapshots/<赛季>/<北京日期>.json.gz`（`server/seasonSnapshot.mjs`）。不多发请求，失败只在 `full-push.log` 留一行「赛季快照写入失败」，抓取和推送照常。
