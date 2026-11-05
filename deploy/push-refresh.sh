@@ -78,8 +78,11 @@ $NODE scripts/check-data.mjs > /dev/null || { $NODE scripts/check-data.mjs; log 
 
 log "上传"
 # player-values.json 由 GB10 的 deploy/player-values.sh 单独推到服务器，这里永远不带：
-# 否则本地那份旧文件会把线上新的盖掉（服务器 refresh.sh 把 incoming/*.json 拷过线上 data/）
-tar -c --exclude=data/player-values.json data/*.json | gzip -1 | $SSH "$REMOTE" \
+# 否则本地那份旧文件会把线上新的盖掉（服务器 refresh.sh 把 incoming/*.json 拷过线上 data/）。
+# backtest.json 同理：ingest 每次都从 data/history/ 的 gamelog_/teamadv_/odds_ 缓存重建它，
+# GB10 没有这些缓存，写出的是 101 字节的空壳；2026-11-04 起两次推送把线上实验室清空了。
+# 它只在本机重建（npm run dataset）后 scp 到服务器 data/，见 deploy/README.md。
+tar -c --exclude=data/player-values.json --exclude=data/backtest.json data/*.json | gzip -1 | $SSH "$REMOTE" \
   "mkdir -p '$RDIR/incoming' && rm -f '$RDIR'/incoming/*.json && gunzip | tar -x -m -C '$RDIR/incoming' --strip-components=1"
 
 log "远程部署"

@@ -331,7 +331,7 @@ test('位置：被 gitignore、不进镜像、不被 data/*.json 推送；GB10 �
   assert.equal(SNAPSHOT_DIR.startsWith('history/'), true);
 
   // push-refresh.sh 与 refresh.sh --incoming 只认 data/ 顶层的 *.json
-  assert.match(fs.readFileSync(path.join(ROOT, 'deploy/push-refresh.sh'), 'utf8'), /tar -c --exclude=data\/player-values\.json data\/\*\.json/);
+  assert.match(fs.readFileSync(path.join(ROOT, 'deploy/push-refresh.sh'), 'utf8'), /tar -c (--exclude=\S+ )*data\/\*\.json/);
   assert.match(fs.readFileSync(path.join(ROOT, 'deploy/refresh.sh'), 'utf8'), /cp "\$DIR"\/incoming\/\*\.json "\$STAGE\/data\/"/);
 
   // 照 push-refresh.sh 的步骤走一遍快进
